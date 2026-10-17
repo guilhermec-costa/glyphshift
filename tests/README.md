@@ -1,25 +1,25 @@
-# Testes do GlyphShift
+# Testing GlyphShift
 
-Guia para testar as fixtures, os ajustes visuais e o SuperTux pelo Proton.
-O [README principal](../README.md) continua sendo a referência de escopo,
-dependências e resultados de validação.
+This guide covers the fixtures, visual adjustments, and SuperTux through Proton.
+The [main README](../README.md) remains the reference for scope, dependencies,
+and validation results.
 
-Execute os comandos abaixo **na raiz do repositório**, em uma sessão X11,
-como usuário normal e **sem sudo**.
+Run the following commands **from the repository root**, in an X11 session,
+as a regular user and **without sudo**.
 
-## Preparar o build
+## Build
 
 ```bash
 cmake --preset dev
 cmake --build --preset dev
 ```
 
-Os exemplos usam o preset editável `presets/readable.conf`. Seu conteúdo pode
-ter sido alterado durante testes anteriores; os valores atuais desse arquivo
-serão usados. Para experimentar sem modificar um arquivo versionado, copie-o
-para `/tmp/glyphshift-manual.conf` e use esse caminho em `GLYPHSHIFT_CONFIG`.
+These examples use the editable `presets/readable.conf` preset. It may have
+been modified during earlier tests; its current values will be used. To
+experiment without modifying a tracked file, copy it to
+`/tmp/glyphshift-manual.conf` and use that path in `GLYPHSHIFT_CONFIG`.
 
-## Fixture OpenGL/GLX: editor e comparação visual
+## OpenGL/GLX fixture: editor and visual comparison
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -27,25 +27,25 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
 ```
 
-A janela mostra um gradiente animado transformado em glifos.
+The window displays an animated gradient transformed into glyphs.
 
-| Controle | Resultado esperado |
+| Control | Expected result |
 | --- | --- |
-| Insert | Abre ou fecha o editor. |
-| Glyph strength | Ajusta a intensidade entre 0 e 1, ao vivo. Ctrl-clique permite digitar um valor. |
-| Cell width / Cell height | Ajustam o tamanho das células independentemente. |
-| Monochrome | Alterna entre cor da cena e monocromático. |
-| F10 | Desativa/ativa o efeito para comparar com o original. |
-| Escape com editor aberto | Fecha apenas o editor e devolve o input à fixture. |
-| Escape com editor fechado | Encerra a fixture. |
+| Insert | Open or close the editor. |
+| Glyph strength | Adjust intensity from 0 to 1 live. Ctrl-click to enter a value. |
+| Cell width / Cell height | Adjust cell dimensions independently. |
+| Monochrome | Switch between source color and monochrome. |
+| F10 | Toggle the effect to compare with the original image. |
+| Escape with the editor open | Close only the editor and return input to the fixture. |
+| Escape with the editor closed | Exit the fixture. |
 
-Teste intensidades `0`, `0.25`, `0.45`, `0.75` e `1`. Redimensione a janela e
-confirme que o efeito e o editor continuam funcionando. No i3, coloque a janela
-em modo flutuante antes de testar tamanhos específicos.
+Try strengths of `0`, `0.25`, `0.45`, `0.75`, and `1`. Resize the window and
+confirm that the effect and editor still work. On i3, make the window floating
+before testing specific dimensions.
 
-Para testar persistência, ajuste os controles, dê um nome ao preset e clique
-em **Save preset**. Feche a fixture e reabra **sem o arquivo externo**, para
-conferir os valores persistidos:
+To test persistence, adjust the controls, name the preset, and click
+**Save preset**. Close the fixture and reopen it **without the external config
+file** to check the saved values:
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -53,13 +53,13 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
 ```
 
-O preset selecionado e os valores salvos devem voltar. Um arquivo indicado em
-`GLYPHSHIFT_CONFIG` tem precedência na inicialização e quando seu conteúdo muda;
-por isso ele deve ser removido do ambiente nessa conferência de persistência.
+The selected preset and saved values should be restored. A file specified by
+`GLYPHSHIFT_CONFIG` takes precedence at startup and whenever its contents change;
+unset that variable when checking preset persistence.
 
-## Fixture Vulkan
+## Vulkan fixture
 
-O mesmo procedimento de controles e comparação vale para Vulkan:
+Use the same controls and visual comparison procedure for Vulkan:
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -67,7 +67,8 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   ./build/dev/glyphshift -- ./build/dev/glyphshift-vulkan-fixture
 ```
 
-Com a camada Khronos instalada e disponível ao loader, habilite validação:
+With the Khronos validation layer installed and available to the loader,
+enable validation:
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -76,27 +77,27 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   ./build/dev/glyphshift -- ./build/dev/glyphshift-vulkan-fixture --validation
 ```
 
-Se a camada estiver em um diretório externo, acrescente `VK_LAYER_PATH` ao
-`env`. Nesta sessão, foi extraída em
+If the layer is in an external directory, add `VK_LAYER_PATH` to `env`.
+In this session, it was extracted to
 `/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d`.
-`--validation` falha explicitamente se a camada não estiver disponível.
+`--validation` fails explicitly if the layer is unavailable.
 
-## SuperTux Windows pelo GE-Proton, sem Steam
+## Windows SuperTux through GE-Proton, without Steam
 
-Este comando usa os arquivos portáteis **já preparados nesta máquina**:
+This command uses portable files **already prepared on this machine**:
 
-- GE-Proton11-9 em `/tmp/glyphshift-m5-apps/GE-Proton11-9-x86_64`;
-- SuperTux 0.7.0 Windows em `/tmp/glyphshift-m5-apps/supertux/SuperTux-portable`;
-- prefixo Proton em `/tmp/glyphshift-m5-proton-prefix`;
-- diretório Steam vazio em `/tmp/glyphshift-m5-steam-empty`;
-- dados de teste do jogo em `/tmp/glyphshift-m5-supertux-user`;
-- wrapper de bloqueio de rede em `/tmp/glyphshift-offline`.
+- GE-Proton11-9 at `/tmp/glyphshift-m5-apps/GE-Proton11-9-x86_64`;
+- SuperTux 0.7.0 for Windows at `/tmp/glyphshift-m5-apps/supertux/SuperTux-portable`;
+- Proton prefix at `/tmp/glyphshift-m5-proton-prefix`;
+- empty Steam directory at `/tmp/glyphshift-m5-steam-empty`;
+- game test data at `/tmp/glyphshift-m5-supertux-user`;
+- network-blocking wrapper at `/tmp/glyphshift-offline`.
 
-Eles não fazem parte do checkout e podem desaparecer após reiniciar ou limpar
-`/tmp`. O comando não baixa nem instala Steam, Proton ou o jogo. A configuração
-de teste do SuperTux foi preparada com rede, checagem de atualizações e
-integração com Discord desabilitadas. Use somente essa execução offline, sem
-anti-cheat ou serviços online ativos.
+These files are not part of the checkout and may disappear after a reboot or
+cleanup of `/tmp`. The command does not download or install Steam, Proton, or
+the game. The SuperTux test configuration was prepared with networking,
+update checks, and Discord integration disabled. Use only this offline run,
+with no active anti-cheat or online services.
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -115,16 +116,17 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   --window --geometry 800x600 --disable-sound --disable-music
 ```
 
-O wrapper bloqueia a criação de sockets IPv4/IPv6 no processo e seus filhos,
-mantendo Unix/X11 disponíveis. Ele não isola o filesystem. Não remova o wrapper
-para contornar sua ausência: restaure primeiro os arquivos do ambiente de teste.
+The wrapper blocks IPv4/IPv6 socket creation in the process and its children,
+while allowing Unix/X11 sockets. It does not isolate the filesystem. If the
+wrapper is missing, restore the test environment files before running the game;
+do not remove it from the command as a workaround.
 
-**Insert e os atalhos do GlyphShift não foram validados no Wine; Insert não
-abriu o editor no SuperTux testado.** Faça os ajustes pelo arquivo indicado em
-`GLYPHSHIFT_CONFIG`. Com o jogo aberto, edite e salve esse arquivo; a mudança
-aparece ao vivo, sem reabrir o jogo.
+**Insert and the GlyphShift hotkeys have not been validated under Wine; Insert
+did not open the editor in the tested SuperTux setup.** Adjust the file specified
+by `GLYPHSHIFT_CONFIG` instead. Edit and save it while the game is running;
+changes apply live without restarting the game.
 
-Por exemplo:
+For example:
 
 ```ini
 enabled=true
@@ -134,64 +136,65 @@ color_mode=source
 glyph_strength=0.45
 ```
 
-| Valor | O que observar |
+| Value | What to observe |
 | --- | --- |
-| `glyph_strength=0` | Cena original em modo source; tons de cinza em modo mono. |
-| `glyph_strength=0.25` ou `0.45` | Mais detalhe da cena preservado junto dos glifos. |
-| `glyph_strength=0.75` | Maior presença dos glifos. |
-| `glyph_strength=1` | Glifos puros; com mono, saída binária preta/branca. |
-| `color_mode=source` / `mono` | Alterna cor da cena e monocromático. |
-| `enabled=false` | Imagem original, independentemente do modo de cor. |
+| `glyph_strength=0` | Original scene in source mode; grayscale in mono mode. |
+| `glyph_strength=0.25` or `0.45` | More scene detail preserved alongside glyphs. |
+| `glyph_strength=0.75` | Stronger glyph presence. |
+| `glyph_strength=1` | Pure glyphs; binary black/white output in mono mode. |
+| `color_mode=source` / `mono` | Switch between source color and monochrome. |
+| `enabled=false` | Original image, regardless of color mode. |
 
-Os presets fornecidos são [readable](../presets/readable.conf),
-[mono-readable](../presets/mono-readable.conf) e
-[classic](../presets/classic.conf). Para iniciar com outro, altere o caminho de
-`GLYPHSHIFT_CONFIG` antes de executar o comando.
+The supplied presets are [readable](../presets/readable.conf),
+[mono-readable](../presets/mono-readable.conf), and
+[classic](../presets/classic.conf). To start with a different preset, change the
+`GLYPHSHIFT_CONFIG` path before running the command.
 
-O menu e a introdução de uma fase foram usados nos testes anteriores;
-movimentação durante a partida não foi validada. Uma rodada posterior confirmou
-a troca de estilos, mas o jogo recusou o redimensionamento solicitado. Essa
-rodada não conta como aprovação completa de resize/encerramento. Não assuma
-compatibilidade geral com jogos Proton a partir desse teste.
+Earlier tests covered the menu and a level introduction; character movement
+during gameplay was not validated. A later run confirmed live style switching,
+but the game refused the requested resize. That run does not count as a complete
+resize/clean-exit pass. This test does not establish general Proton game
+compatibility.
 
-## Erros comuns
+## Troubleshooting
 
 ### `refusing to launch from a process with capabilities`
 
-Use o prefixo `setpriv --inh-caps=-all --ambient-caps=-all --` presente nos
-comandos deste guia. Ele remove capabilities herdáveis e ambientes apenas da
-execução filha, sem alterar o terminal ou configurações do sistema. O launcher
-continua recusando root e processos privilegiados; não use sudo para resolver.
+Use the `setpriv --inh-caps=-all --ambient-caps=-all --` prefix shown in this
+guide. It removes inheritable and ambient capabilities only for the child
+execution, without changing the terminal or system settings. The launcher still
+refuses root and privileged processes; do not use sudo to address this error.
 
-### Display inacessível
+### Display unavailable
 
-Rode no terminal da sessão X11 com `DISPLAY` e a autorização X11 disponíveis.
-Wayland nativo não é um backend de input suportado. Os smoke tests retornam
-skip (77) quando não conseguem acessar o display; isso não significa que a
-renderização passou.
+Run from a terminal in the X11 session with `DISPLAY` and X11 authorization
+available. Native Wayland input is not supported. Smoke tests return skip code
+77 when they cannot access the display; a skip does not establish rendering
+coverage.
 
-### Jogo ou wrapper não encontrado
+### Game or wrapper not found
 
-Confira os caminhos em `/tmp` da seção SuperTux. Eles são específicos do
-ambiente preparado durante o desenvolvimento e não são instalados pelo CMake.
-As fixtures podem ser testadas independentemente desses arquivos.
+Check the `/tmp` paths listed in the SuperTux section. They belong to the test
+environment prepared during development and are not installed by CMake.
+The fixtures can be tested independently of these files.
 
-## Verificações automatizadas
+## Automated checks
 
-Testes de CPU, configuração, presets, launcher e interposição:
+CPU, configuration, preset, launcher, and interposition tests:
 
 ```bash
 ctest --preset dev
 ```
 
-Smoke tests gráficos sequenciais, com X11/GPU e camada Khronos disponíveis:
+Sequential graphics smoke tests, with X11/GPU access and the Khronos layer
+available:
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
   cmake --build --preset dev --target smoke
 ```
 
-Com a camada temporária desta máquina, o comando equivalente é:
+With this machine's temporary validation layer, use:
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -199,12 +202,13 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   cmake --build --preset dev --target smoke
 ```
 
-As capturas PPM e os logs ficam em `build/dev/smoke-evidence/`. Os testes cobrem
-input/editor, intensidade 0/1/fracionária, preset após reinício, seis tamanhos,
-múltiplos contextos/swapchains e apresentação original em falhas suportadas.
-Mantenha as janelas de teste visíveis e desobstruídas durante as capturas.
+PPM captures and logs are saved under `build/dev/smoke-evidence/`. The tests cover
+input/editor behavior, zero/full/fractional strength, preset persistence across
+restart, six window sizes, multiple contexts/swapchains, and unchanged
+presentation in supported failure cases. Keep test windows visible and
+unobscured during captures.
 
-Para incluir os smoke tests no CTest Release:
+To include graphics smoke tests in Release CTest:
 
 ```bash
 cmake --preset release -DGLYPHSHIFT_GPU_SMOKE_TESTS=ON
@@ -212,10 +216,10 @@ cmake --build --preset release
 setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset release
 ```
 
-Se a camada Khronos não estiver instalada no sistema, use o mesmo
-`env VK_LAYER_PATH=...` mostrado acima antes de `ctest`.
+If the Khronos layer is not installed system-wide, insert the same
+`env VK_LAYER_PATH=...` shown above before `ctest`.
 
-Os resultados efetivamente observados (10 testes Debug, 12 Release, Mesa GLX e
-limitações do Vulkan Mesa/Proton) estão no [README principal](../README.md).
-Este guia registra como reproduzir os testes; sua criação não representa uma
-nova execução dos testes gráficos ou do jogo.
+Observed results (10 Debug tests, 12 Release tests, Mesa GLX, and Mesa
+Vulkan/Proton limitations) are recorded in the [main README](../README.md).
+This guide documents how to reproduce the tests; creating it does not constitute
+a new run of the graphics tests or the game.
