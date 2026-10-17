@@ -9,6 +9,8 @@
 #include <new>
 #include <thread>
 
+#include "../../src/render/vulkan/present_chain.hpp"
+
 // Fail actual C++ allocations inside the loaded layer, without touching Vulkan
 // allocator callbacks. Zero means normal allocation, N fails allocation N.
 std::atomic<int> fail_allocation{0};
@@ -418,6 +420,42 @@ void device_checks(VkInstance instance, VkDevice device, int index) {
 
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
+  using glyphshift::vulkan::supported_present_chain;
+  using glyphshift::vulkan::supported_swapchain_flags;
+  check(supported_swapchain_flags(0) &&
+            supported_swapchain_flags(
+                VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) &&
+            !supported_swapchain_flags(VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR) &&
+            !supported_swapchain_flags(
+                VK_SWAPCHAIN_CREATE_SPLIT_INSTANCE_BIND_REGIONS_BIT_KHR),
+        "metadata flags accepted, protected and device-group flags rejected");
+  VkBaseInStructure fence{VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT,
+                          nullptr};
+  VkBaseInStructure id{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, &fence};
+  VkBaseInStructure mode{VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT,
+                         &id};
+#ifdef VK_KHR_present_id2
+  VkBaseInStructure id2{VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR, &mode};
+  check(supported_present_chain(&id2) &&
+            supported_swapchain_flags(VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR),
+        "present ID2 metadata accepted");
+#endif
+#ifdef VK_EXT_present_timing
+  VkBaseInStructure timing{VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT, &mode};
+  check(
+      supported_present_chain(&timing) &&
+          supported_swapchain_flags(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT),
+      "presentation timing metadata accepted");
+#endif
+  VkBaseInStructure regions{VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR, nullptr};
+  check(supported_present_chain(nullptr) && supported_present_chain(&mode),
+        "presentation metadata chains supported");
+  fence.pNext = &regions;
+  check(!supported_present_chain(&mode),
+        "unsupported tail cannot hide behind known presentation metadata");
+  fence.pNext = &mode;
+  check(!supported_present_chain(&mode), "bounded cyclic chain handling");
+  fence.pNext = nullptr;
   unsetenv("GLYPHSHIFT_LOG");
   unsetenv("GLYPHSHIFT_CONFIG");
   void* library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);

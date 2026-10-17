@@ -8,6 +8,7 @@
 #include <new>
 
 #include "dispatch.hpp"
+#include "present_chain.hpp"
 
 namespace glyphshift::vulkan {
 namespace {
@@ -155,10 +156,6 @@ CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* info,
                   VK_API_VERSION_MINOR(properties.apiVersion),
                   VK_API_VERSION_PATCH(properties.apiVersion));
   }
-  if (info->queueCreateInfoCount == 1 && info->pQueueCreateInfos) {
-    state->single_family = true;
-    state->only_family = info->pQueueCreateInfos[0].queueFamilyIndex;
-  }
   for (auto* next = static_cast<const VkBaseInStructure*>(info->pNext); next;
        next = next->pNext) {
     if (next->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO) {
@@ -277,7 +274,7 @@ void record_swapchain(const std::shared_ptr<DeviceDispatch>& state,
     metadata->capture =
         allow_capture && (info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) &&
         (info.imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
-        info.imageArrayLayers == 1 && info.flags == 0 &&
+        info.imageArrayLayers == 1 && supported_swapchain_flags(info.flags) &&
         info.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     metadata->sharing = info.imageSharingMode;
     if (info.imageSharingMode == VK_SHARING_MODE_CONCURRENT) {
@@ -295,6 +292,13 @@ void record_swapchain(const std::shared_ptr<DeviceDispatch>& state,
     metadata_failure(state->metadata_warning);
   }
   diagnostic("glyphshift: Vulkan swapchain created\n");
+  char details[160];
+  std::snprintf(details, sizeof(details),
+                "glyphshift: Vulkan swapchain flags=0x%x format=%d usage=0x%x "
+                "layers=%u colorspace=%d\n",
+                info.flags, static_cast<int>(info.imageFormat), info.imageUsage,
+                info.imageArrayLayers, static_cast<int>(info.imageColorSpace));
+  diagnostic(details);
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
     VkDevice device, const VkSwapchainCreateInfoKHR* info,

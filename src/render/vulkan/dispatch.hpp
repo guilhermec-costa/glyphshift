@@ -66,8 +66,6 @@ struct DeviceDispatch {
   std::array<char, 48> version{};
   PFN_vkSetDeviceLoaderData set_loader_data = nullptr;
   RenderApi render_api;
-  bool single_family = false;
-  uint32_t only_family = 0;
   std::shared_ptr<InstanceDispatch> instance;
   PFN_vkGetDeviceProcAddr get_proc = nullptr;
   PFN_vkDestroyDevice destroy = nullptr;

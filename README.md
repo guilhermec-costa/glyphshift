@@ -13,13 +13,14 @@ described here unless a change is explicitly documented.
 
 ## Current implementation
 
-M0 through M4 are complete. Both backends apply the same built-in glyph atlas
+M0 through M5 are complete. Both backends apply the same built-in glyph atlas
 and ramp, with live cell dimensions, source/monochrome color, and effect toggle.
 M4 adds the shared Dear ImGui editor and Insert/Escape/F10 controls.
 M5 adds per-game named presets, automated graphics smoke tests and robustness
-coverage. M5 remains **in progress**: native application results are recorded
-below, but the required offline Proton game has not run pending execution
-authorization. Historical validation results are retained below.
+coverage. The recorded M5 matrix includes native applications and an offline
+SuperTux Windows run through portable GE-Proton/DXVK. Input limitations remain
+explicit below; this does not claim general game compatibility or every future
+product control. Historical validation results are retained below.
 
 ## Product experience
 
@@ -555,9 +556,21 @@ explained in the [Khronos semaphore-reuse guide](https://docs.vulkan.org/guide/l
 The M3 Vulkan capture path supports SDR RGBA/BGRA 8-bit UNORM/SRGB, one image
 layer, and an unprotected graphics presentation queue. SRGB capture uses an
 UNORM view of the copied bytes and compensates for output attachment encoding.
-Exclusive sharing requires one logical-device queue family; concurrent sharing
-requires the presentation family in the declared list. Multi-swapchain present
-batches, presentation `pNext` chains, shared/protected swapchains, queue changes,
+The renderer submits on the application's graphics presentation queue. For
+exclusive sharing, Vulkan requires that queue family to own the image at
+presentation; additional transfer/compute families on the device are allowed.
+Concurrent sharing requires the presentation family in the declared list.
+M5 preserves known presentation pNext metadata (fences, present mode, present
+IDs/ID2 and EXT timing) and accepts mutable-format/ID2/wait2/timing swapchain
+flags, without changing the caller's chain or enabling extra device features.
+Newer metadata is recognized only when available in the build's Vulkan headers.
+The copied capture image uses its existing UNORM format; mutable-format does
+not request extra reinterpretation of the application's swapchain images.
+See the Khronos [presentation ownership contract](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueuePresentKHR.html),
+[presentation fences](https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainPresentFenceInfoKHR.html)
+and [timing metadata](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentTimingsInfoEXT.html).
+Multi-swapchain present batches, unknown or overlong presentation `pNext`
+chains, shared/protected swapchains, unsupported create flags, queue changes,
 and unsupported formats/usage conservatively forward unchanged, with an opt-in
 once-per-device diagnostic. Initialization failures disable that swapchain's
 effect and report the exact failure. These are fixture-scoped M3 capabilities;
@@ -1177,7 +1190,7 @@ units; Release configuration preserved it.
 | Mesa 26.2.2, lavapipe, Vulkan | Attempted; direct fixture without GlyphShift fails with X11 BadDrawable on this NVIDIA X server. Also fails with software WSI requested. Layer coverage on Mesa Vulkan is not established. |
 | Native glxgears, mesa-utils 9.0.0-7, NVIDIA OpenGL 4.6 | Glyph image, editor open/close, repeated F10, three resizes and clean Escape exit passed. This exposed and fixed missing KeyRelease selection. |
 | Native vkcube, vulkan-tools 1.4.363.0-1, NVIDIA Vulkan | Glyph image, live config disable/re-enable, three resizes and clean WM_DELETE_WINDOW exit passed with validation enabled, without validation errors. Editor hotkeys did not work: this binary privately resolves Xlib symbols and bypasses the input hooks. Full vkcube/editor compatibility is not claimed. |
-| Offline Windows game through Proton | **Not run.** User has no Proton/Steam installation. Portable SuperTux 0.7.0 Windows64 and GE-Proton11-9 were prepared in /tmp; automatic approval review rejected their execution pending explicit authorization. |
+| Offline SuperTux 0.7.0 Windows64, GE-Proton11-9, DXVK, NVIDIA | Debug menu and Release level-introduction tests passed: monochrome glyphs, live config disable/re-enable, three resizes and clean window-close exit. Release loaded Khronos validation with synchronization checks and reported no errors. Insert sent to the game did not open the editor; Proton hotkeys/editor interaction is not established. |
 
 Mesa checks executed with:
 
@@ -1218,14 +1231,82 @@ are recorded as a limitation, not a successful editor check. Downloaded older
 vkcube packages were inspected but were not counted as application validations.
 Temporary logs/captures are not durable and may disappear after reboot.
 
-The proposed Proton run uses a prefix under /tmp and blocks IPv4/IPv6 sockets,
-but still needs access to the user's filesystem and X11 session. Automatic
-approval review rejected running that downloaded Windows executable through
-Proton for precisely that reason; no game executable has run. **M5 and the MVP
-are not marked complete** until an authorized confirmed-offline Proton game is
-actually tested and its results documented. Other games, DXVK/VKD3D paths,
-other hardware, Wayland, XCB/XI2/raw input and general compatibility remain
-unverified.
+The user explicitly authorized the portable SuperTux/GE-Proton execution after
+its initial automatic approval rejection. All runs used
+`/tmp/glyphshift-offline`, a temporary libseccomp wrapper denying creation of
+AF_INET/AF_INET6 sockets with ENETUNREACH, inherited by Proton and its children.
+X11/Unix sockets remained available. The prefix was isolated under
+`/tmp/glyphshift-m5-proton-prefix`, with an empty Steam client directory; Steam
+was neither installed nor running. SuperTux config disabled networking,
+release checks, Discord integration and audio. No anti-cheat or online game
+service was involved. The wrapper is a network restriction, not filesystem
+isolation. This execution was specifically authorized for the offline test.
+
+The first game launches preserved the original image because DXVK uses present
+fences/mode/timing/ID2 pNext metadata, nonzero metadata/mutable-format creation
+flags, and a device with more than one queue family. Those attempts were not
+counted as successful transformation tests. The layer now preserves supported
+metadata unchanged and submits on the graphics presentation queue, which must
+already own an exclusive image under the Vulkan contract. Protected flags,
+unknown metadata, incremental-present regions and device-group cases still
+fail safely. Unit coverage checks the accepted chain, unknown tails, bounded
+cycle handling, metadata flags and rejection of protected/device-group flags.
+The unsupported-present diagnostic now includes the chain's structure types
+once per device; swapchain logging includes format/usage/flags when enabled.
+
+The final temporary game driver was executed with:
+
+```bash
+setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
+  /tmp/glyphshift-m5-proton-test.py
+setpriv --inh-caps=-all -- env GS_BUILD=release GS_LEVEL=1 GS_VALIDATE=1 \
+  GS_EVIDENCE=/tmp/glyphshift-m5-proton-level /tmp/glyphshift-offline \
+  /usr/bin/python3 /tmp/glyphshift-m5-proton-test.py
+```
+
+It calls `build/PRESET/glyphshift --profile proton-supertux -- /usr/bin/python3
+/tmp/glyphshift-m5-apps/GE-Proton11-9-x86_64/proton run
+/tmp/glyphshift-m5-apps/supertux/SuperTux-portable/bin/supertux2.exe`, supplying
+`STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`, `SteamGameId=0`,
+`PROTONFIXES_DISABLE=1`, and a test-only XDG config/live settings file. The game
+uses `--window --geometry 800x600 --disable-sound --disable-music` and a temporary
+`--userdir`. Release additionally supplies
+`VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d`,
+`VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` and `VK_LAYER_VALIDATE_SYNC=1`.
+A read of the test process's library mappings confirmed both the Release layer
+and `libVkLayer_khronos_validation.so` were loaded.
+
+The phase check uses an unmodified copy of `levels/world1/welcome_antarctica.stl`
+as `data/glyphshift-m5-test.stl`, launched by that simple filename. SuperTux's
+Windows CLI converted paths with separators into paths rejected by its own
+virtual filesystem; those failed attempts were excluded. Pause-on-focus-loss
+was disabled in the config loaded from the temporary Wine prefix, without taking the user's keyboard focus. The captured level test remained
+on its introduction screen; active gameplay and character movement were not
+validated. The driver floats,
+resizes and captures the named top-level game window, not Wine's internal
+presentation child. An earlier child-resize attempt produced an invalid black
+capture and was discarded. Keys are sent directly to the test window; no
+keyboard grabs or global held keys are used.
+
+Both successful runs (menu and level introduction) captured exactly two colors with the monochrome effect,
+more than two when disabled, and two again when enabled. They confirmed sizes
+640×480, 1000×300 and 800×600 and exited zero on WM_DELETE_WINDOW. Insert did
+not open an editor on the tested Wine path; only live-file controls are
+validated there. No GL/Vulkan validation errors were reported in the final
+Release game run, including teardown. Captures/logs reside under
+`/tmp/glyphshift-m5-proton-evidence` (Debug menu) and
+`/tmp/glyphshift-m5-proton-level` (Release level introduction).
+Durable menu captures: [original](docs/m5-supertux-original.png) and
+[monochrome glyph result](docs/m5-supertux-glyph.png).
+
+After these changes, `cmake --build --preset dev`, `ctest --preset dev`,
+`cmake --build --preset release` and the Release CTest command above passed
+again (10 Debug tests; 12 Release tests including both graphics smoke suites).
+The offline Proton test completes the requested **M5 validation matrix**.
+This does not establish full editor support in Wine, all games, VKD3D/D3D12,
+other hardware, Wayland or XCB/XI2/raw input. The broader product controls in
+"Definition of MVP done" are not newly implemented by M5, and complete MVP
+compatibility is not claimed.
 
 ## Milestones
 
@@ -1368,6 +1449,6 @@ The M0 implementation and verification above cover:
    confirm clean shutdown.
 5. Record the exact verified setup and build commands here.
 
-M0 through M4 are complete. The separately requested M5 is implemented but
-awaits the offline Proton validation described above. Do not start the later
-broader-Linux-support work automatically.
+M0 through the separately requested M5 are complete within the recorded
+verification scope and limitations. Do not start the later broader-Linux-support
+work automatically.

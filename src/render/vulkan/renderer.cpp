@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <glyphshift/core/glyph.hpp>
 #include <glyphshift/editor/editor.hpp>
@@ -16,6 +17,7 @@
 #include "editor_vert_spv.hpp"
 #include "glyph_frag_spv.hpp"
 #include "glyph_vert_spv.hpp"
+#include "present_chain.hpp"
 
 namespace glyphshift::vulkan {
 namespace {
@@ -90,7 +92,7 @@ bool negotiate_capture(DeviceDispatch& state,
                        const VkSwapchainCreateInfoKHR& input,
                        VkSwapchainCreateInfoKHR& output) noexcept {
   if (!state.render_api.available || !capture_format(input.imageFormat) ||
-      input.flags || input.imageArrayLayers != 1 ||
+      !supported_swapchain_flags(input.flags) || input.imageArrayLayers != 1 ||
       input.imageColorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
     return false;
   VkSurfaceCapabilitiesKHR capabilities{};
@@ -813,11 +815,23 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     }
     return device.present(queue, info);
   };
-  if (info->swapchainCount != 1 || info->pNext ||
+  if (info->swapchainCount != 1 || !supported_present_chain(info->pNext) ||
       info->waitSemaphoreCount > 64) {
-    warning(device,
-            "glyphshift: unsupported Vulkan present batch/pNext; forwarding "
-            "unchanged\n");
+    if (!device.render_warning.test_and_set(std::memory_order_relaxed)) {
+      diagnostic(
+          "glyphshift: unsupported Vulkan present batch/pNext; forwarding "
+          "unchanged (sTypes:");
+      const auto* extension =
+          static_cast<const VkBaseInStructure*>(info->pNext);
+      for (unsigned i = 0; extension && i < 8;
+           ++i, extension = extension->pNext) {
+        char type[32];
+        std::snprintf(type, sizeof(type), " %d",
+                      static_cast<int>(extension->sType));
+        diagnostic(type);
+      }
+      diagnostic(")\n");
+    }
     return forward();
   }
   std::shared_ptr<SwapchainState> state;
@@ -844,7 +858,11 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
                       state->families.begin() + state->family_count,
                       queue_state.family) !=
                 state->families.begin() + state->family_count
-          : device.single_family && device.only_family == queue_state.family;
+          : state->sharing == VK_SHARING_MODE_EXCLUSIVE;
+  // vkQueuePresentKHR requires its queue family to own an exclusive image.
+  // Submit on that same queue and wait the original semaphores: other device
+  // queue families do not invalidate this ownership contract. Graphics support
+  // is checked before allocating the renderer's command pool.
   if (!ownership || queue_state.flags) {
     warning(device,
             "glyphshift: unsupported Vulkan queue ownership/protection; "
