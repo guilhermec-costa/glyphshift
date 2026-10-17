@@ -7,16 +7,18 @@ glyph art on Linux. Mix characters, solid blocks and directional contours,
 choose your palette, and shape the result while the application is running.
 An in-game editor lets you experiment and save a different style for each game.
 
-![SuperTux rendered with the illustrated color preset](docs/illustration-color.png)
+![SuperTux rendered with local shape matching](docs/shape-color.png)
 
-*Illustrated color preset applied by the GPU shader to a captured SuperTux
-frame. The [live editor capture](docs/illustration-live-editor.png) shows the
+*Shape-aware illustrated color preset applied by the GPU shader to a captured SuperTux
+frame. The [live editor capture](docs/shape-live-editor.png) shows the
 effect running in the game through Proton.*
 
 ## Make it your own
 
 - **Two rendering styles:** classic luminance-based glyphs, or illustrated
   rendering with separate surface fill and directional contours.
+- **Local shape matching:** select glyphs by the light/dark arrangement inside
+  a cell to retain small silhouettes, with scene-colored paper to avoid black gaps.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
   or up to 256 custom Unicode characters, with local TTF/OTF fonts.
 - **Live art direction:** independent cell dimensions, source color or
@@ -29,11 +31,11 @@ effect running in the game through Proton.*
 
 | Original frame | Ink on paper |
 | --- | --- |
-| ![Original SuperTux frame](docs/illustration-original.png) | ![Illustrated ink preset](docs/illustration-ink.png) |
+| ![Original SuperTux frame](docs/illustration-original.png) | ![Shape-aware ink preset](docs/shape-ink.png) |
 
 These are comparisons of the same captured frame using the actual GPU renderer.
 More styles: [classic ASCII](docs/illustration-classic.png),
-[illustrated color](docs/illustration-color.png),
+[illustrated color](docs/shape-color.png),
 [coarser blocks](docs/illustration-blocks.png).
 
 ## Build from source
@@ -97,8 +99,9 @@ for the prepared local test environment; Steam is not required for that test.
 | F10 | Toggle the effect and compare with the original scene. |
 | Escape | Close the editor and return input to the application. |
 
-Start with **8×12 cells and glyph strength 1** for illustrated drawing. Open
-**Illustration** to adjust fill, contours and tone. Larger cells make individual
+The color and ink presets start with **6×10 cells and glyph strength 1** to
+retain smaller objects. Try **8×12** for larger, more recognizable characters.
+Open **Illustration** to adjust fill, contours and tone. Larger cells make individual
 characters easier to recognize; 4×4 cells cannot preserve every letter's shape.
 Use **Characters and font** to change the fill set, then **Apply characters**.
 Use **Save preset** to retain your applied settings.
@@ -109,9 +112,9 @@ Change the `GLYPHSHIFT_CONFIG` path in the launch command:
 
 | Preset | Look |
 | --- | --- |
-| [illustrated.conf](presets/illustrated.conf) | Colored characters, solid highlights and contrasting contours; 8×12. |
+| [illustrated.conf](presets/illustrated.conf) | Colored shading, local shape matching and scene-colored paper; 6×10. |
 | [illustrated-blocks.conf](presets/illustrated-blocks.conf) | Coarser text and blocks; 10×14. |
-| [illustrated-ink.conf](presets/illustrated-ink.conf) | Dark ink on warm paper; 8×12. |
+| [illustrated-ink.conf](presets/illustrated-ink.conf) | Sparse dark ink on warm paper, with local silhouette matching; 6×10. |
 | [readable.conf](presets/readable.conf) | Editable classic renderer preset for experimenting with scene/glyph blending. |
 | [classic.conf](presets/classic.conf) | Pure monochrome with the original glyph ramp. |
 

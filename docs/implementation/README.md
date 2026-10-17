@@ -59,6 +59,119 @@ Only implement work explicitly requested by the user.
 The original exclusions remain in force: no multiplayer/anti-cheat support,
 anti-cheat evasion, privileged targets or system-wide injection.
 
+## Shape-aware illustration refinement
+
+The user reported that the illustrated preset hid Tux and produced distracting
+repeated symbols/solid regions. The renderer now offers three additional live
+settings, serialized in per-game presets:
+
+```ini
+shape_matching=true
+shape_threshold=0.35
+scene_paper=0.95
+```
+
+`shape_matching` defaults to false for compatibility. It samples the four
+interior quadrant centers of a cell and classifies their light/dark arrangement
+when local contrast exceeds `shape_threshold` (0..1, default 0.2). A precomputed
+16-entry lookup selects the actual chosen glyph whose four quadrant coverages
+best match that arrangement. No per-frame CPU readback or GPU search over the
+font is needed. Custom character sets and local fonts still determine the
+available shapes; including Unicode quadrant blocks allows exact 2×2 silhouettes.
+Without those blocks the closest available text glyph is used.
+
+Matched cells use the two sampled source-color groups as their palette, keeping
+both dark silhouettes and light interior details. Monochrome uses the selected
+ink/paper colors and inverts the structural pattern for dark ink on light paper.
+Centered contour strokes are suppressed inside matched cells so that a slash
+or bar cannot overwrite their silhouette. Outside matched cells, ordinary tone
+mapping and directional contours remain active.
+
+When matching is enabled, partial Unicode blocks are excluded from the tonal
+ramp and reserved for shape selection, avoiding repeated half-block stripes in
+uniform surfaces. Solid blocks remain eligible for highlights. A partial-block-only
+set falls back to its full selection rather than leaving an empty ramp. Manual
+ordering, duplicates, density sorting and reversal continue to govern tonal fill;
+structural matching uses the spatial mask rather than tonal order.
+
+`scene_paper` (0..1, default 0) blends the configured paper toward cell-average
+scene color, and moderates normalized ink to retain dark-region brightness.
+In matched cells it uses the darker sample group instead of the cell average.
+It affects source color only. These are constant cell palettes composited
+through glyph masks: strength 1 does not blend per-pixel source detail into the
+result. Strength 0 retains the exact original source-color image.
+
+The lookup texture now has four 256-byte rows: legacy ordering, illustrated
+tone, structural patterns, and tonal fill excluding partial blocks. GLX, Vulkan
+and the preview tool all upload the same data. The existing four vec4 art
+parameters carry the controls in previously reserved components, keeping Vulkan
+push constants at 96 bytes. Atlas regeneration remains limited to character/font
+changes; changing these art controls does not rebuild GPU resources.
+
+The recommended color/ink presets now use 6×10 cells to preserve smaller objects,
+with sparse tonal ramps, stronger contour rejection and optional scene-colored
+paper. The coarser blocks preset retains the earlier style. No temporal state or
+hysteresis is implemented by this refinement; motion stability remains a TODO.
+
+Same-frame GPU previews: [color](../shape-color.png), [ink](../shape-ink.png),
+[original](../illustration-original.png). Earlier gallery assets below preserve
+historical results and settings. The new comparisons show a captured frame,
+not a gameplay smoothness measurement.
+The [3× Tux close-up](../shape-tux-comparison.png) compares the previous 8×12
+preset (left) and revised 6×10 preset (right); both rendering and cell-size
+changes contribute to that comparison.
+
+### Shape-refinement verification
+
+Verified on the existing NVIDIA/X11 environment. Debug built without warnings
+and passed all 12 tests. Release built without warnings and passed all 14 tests,
+including both expanded graphics smokes with Khronos synchronization validation
+(73.17 seconds). Final editor slider-width adjustments and additional persisted
+settings coverage were then rebuilt in both presets; Debug passed 12/12 again,
+and the four relevant Release format/illustration/preset/editor tests passed.
+
+The CPU test checks all 16 structural masks exactly, reserves partial blocks
+from tonal shading and checks a partial-block-only fallback. Settings and preset
+tests cover validation and nondefault persisted shape/paper settings. The GPU
+oracle passed the existing 16 area/contour cases plus 28 structural cases
+(14 mixed masks in source color and reversed monochrome), and two exact
+strength-zero bypasses. Both graphics smokes additionally exercise live
+shape/paper configuration and restoring the legacy renderer.
+
+Final focused Release tests on GLX/Vulkan fixtures and offline SuperTux clicked
+the new shape checkbox, checked `shape_matching=true` in the saved preset, and
+passed input, focus, three resizes and clean exit. The SuperTux level run loaded
+the revised color preset and captured the [running editor](../shape-live-editor.png).
+No GL debug or Vulkan validation errors were reported. The new source-color and
+ink previews and the live capture were inspected directly. These checks do not
+measure smoothness over a longer play session or claim new Mesa/hardware coverage.
+
+Commands actually executed included:
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --build --preset release
+setpriv --inh-caps=-all --ambient-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 ctest --preset release --output-on-failure
+setpriv --inh-caps=-all --ambient-caps=-all -- \
+  python3 tests/smoke/atlas_filter.py --build build/dev \
+  --output /tmp/glyphshift-shape/oracle
+setpriv --inh-caps=-all --ambient-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
+  /tmp/glyphshift-offline /usr/bin/python3 tests/smoke/editor_apps.py \
+  --build build/release --application supertux --level --illustrated \
+  --output /tmp/glyphshift-shape/live-supertux
+```
+
+The final focused matrix repeated the editor command for `glx-fixture`,
+`vulkan-fixture` and `supertux`, with `--level` only for SuperTux; output is under
+`/tmp/glyphshift-shape/final-APPLICATION`. Temporary prerequisites are described
+in the test guide. Formatting/whitespace, Python syntax and all eight generated
+glyph/editor SPIR-V modules also passed. No packages or downloads were added.
+
 ## Engineering reference and validation history
 
 The sections below preserve the original implementation brief, milestone exit

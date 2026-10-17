@@ -184,7 +184,10 @@ std::string serialize_settings(const Settings& s) {
            "\nedge_threshold=" + decimal(s.art.edge_threshold) +
            "\nfill_enabled=" + (s.art.fill ? "true" : "false") +
            "\ncontour_overlay=" + (s.art.contour_overlay ? "true" : "false") +
-           "\nforeground=" + rgb(s.art.foreground) + "\nbackground=" + rgb(s.art.background) + "\n";
+           "\nshape_matching=" + (s.art.shape_matching ? "true" : "false") +
+           "\nshape_threshold=" + decimal(s.art.shape_threshold) +
+           "\nscene_paper=" + decimal(s.art.scene_paper) + "\nforeground=" + rgb(s.art.foreground) +
+           "\nbackground=" + rgb(s.art.background) + "\n";
 }
 
 bool PresetStore::load(std::string_view name, Settings& settings, std::string& error) const {

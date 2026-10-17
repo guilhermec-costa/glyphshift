@@ -326,6 +326,25 @@ void controls(State& state,
             ImGui::Checkbox("Illustrated rendering", &art.illustrated);
             ImGui::Checkbox("Fill surfaces", &art.fill);
             ImGui::Checkbox("Contours over fill", &art.contour_overlay);
+            ImGui::Checkbox("Match local shapes", &art.shape_matching);
+            ImGui::SetNextItemWidth(150);
+            ImGui::SliderFloat("Shape threshold",
+                &art.shape_threshold,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SetNextItemWidth(150);
+            ImGui::SliderFloat("Scene-colored paper",
+                &art.scene_paper,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            ImGui::TextWrapped(
+                "Shape matching uses your selected glyphs to preserve small silhouettes. "
+                "Include quadrant blocks for finer shapes. Scene-colored paper affects source "
+                "color only.");
             ImGui::SliderFloat("Exposure",
                 &art.exposure,
                 .25F,

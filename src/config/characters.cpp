@@ -193,10 +193,12 @@ struct Font {
 
 CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
     CharacterAtlas atlas;
+    Codepoints fill_points;
     try {
         if (!valid_characters(selection))
             throw std::runtime_error("invalid character selection; using classic");
         const auto points = selected(selection);
+        fill_points = points;
         Font font;
         auto render = [&](unsigned g, std::uint32_t code) {
             if (procedural(atlas, g, code))
@@ -289,6 +291,7 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
     } catch (const std::exception& error) {
         // Keep contour fallback independent from a missing custom font.
         atlas = build_character_atlas(CharacterSelection{});
+        fill_points = selected(CharacterSelection{});
         std::snprintf(atlas.diagnostic.data(),
             atlas.diagnostic.size(),
             "Characters: %s",
@@ -326,6 +329,64 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
             }
         }
         atlas.ramp[256 + bin] = atlas.ramp[best];
+    }
+    // Find the closest selected glyph for each four-quadrant silhouette.
+    // This is initialization data, not a per-frame search over the atlas.
+    std::array<std::array<float, 4>, 256> quadrants{};
+    for (unsigned g = 0; g < atlas.count; ++g)
+        for (unsigned y = 0; y < 24; ++y)
+            for (unsigned x = 0; x < 16; ++x)
+                quadrants[g][(y >= 12 ? 2U : 0U) + (x >= 8 ? 1U : 0U)] +=
+                    static_cast<float>(atlas.pixels[((g / 16) * 24 + y) * character_atlas_width +
+                                                    (g % 16) * 16 + x]) /
+                    (255 * 8 * 12);
+    for (unsigned pattern = 0; pattern < 16; ++pattern) {
+        float best_error = std::numeric_limits<float>::max();
+        unsigned best = 0;
+        for (unsigned g = 0; g < atlas.count; ++g) {
+            float error = 0;
+            for (unsigned q = 0; q < 4; ++q) {
+                const float target = (pattern & (1U << q)) ? 1.0F : 0.0F;
+                const float delta = quadrants[g][q] - target;
+                error += delta * delta;
+            }
+            if (error < best_error) {
+                best_error = error;
+                best = g;
+            }
+        }
+        atlas.ramp[512 + pattern] = static_cast<std::uint8_t>(best);
+    }
+    std::array<std::uint8_t, 256> tonal{};
+    unsigned tonal_count = 0;
+    for (unsigned i = 0; i < atlas.count; ++i) {
+        const auto g = atlas.ramp[i];
+        const auto code = fill_points.values[g];
+        if (code < 0x2580 || code > 0x259f || code == 0x2588)
+            tonal[tonal_count++] = g;
+    }
+    // A blocks-only custom set is still valid and must remain usable.
+    if (!tonal_count) {
+        tonal_count = atlas.count;
+        std::copy_n(atlas.ramp.begin(), tonal_count, tonal.begin());
+    }
+    for (unsigned bin = 0; bin < 256; ++bin) {
+        const float t = static_cast<float>(bin) / 255;
+        unsigned best =
+            std::min(static_cast<unsigned>(t * static_cast<float>(tonal_count)), tonal_count - 1);
+        if (selection.density_order && !atlas.diagnostic[0]) {
+            const float target =
+                coverage[tonal[0]] * (1 - t) + coverage[tonal[tonal_count - 1]] * t;
+            float distance = std::numeric_limits<float>::max();
+            for (unsigned i = 0; i < tonal_count; ++i) {
+                const float delta = std::abs(coverage[tonal[i]] - target);
+                if (delta < distance) {
+                    distance = delta;
+                    best = i;
+                }
+            }
+        }
+        atlas.ramp[768 + bin] = tonal[best];
     }
     return atlas;
 }

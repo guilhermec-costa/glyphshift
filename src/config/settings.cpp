@@ -241,23 +241,33 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
             if (value != "classic" && value != "illustrated")
                 parsed.warnings |= invalid_art;
         } else if (key == "tone_exposure" || key == "tone_contrast" || key == "tone_gamma" ||
-                   key == "edge_strength" || key == "edge_threshold") {
-            float* target = key == "tone_exposure"   ? &parsed.value.art.exposure
-                            : key == "tone_contrast" ? &parsed.value.art.contrast
-                            : key == "tone_gamma"    ? &parsed.value.art.gamma
-                            : key == "edge_strength" ? &parsed.value.art.edge_strength
-                                                     : &parsed.value.art.edge_threshold;
-            const float fallback = key == "edge_threshold" ? defaults.art.edge_threshold : 1;
+                   key == "edge_strength" || key == "edge_threshold" || key == "shape_threshold" ||
+                   key == "scene_paper") {
+            float* target = key == "tone_exposure"     ? &parsed.value.art.exposure
+                            : key == "tone_contrast"   ? &parsed.value.art.contrast
+                            : key == "tone_gamma"      ? &parsed.value.art.gamma
+                            : key == "edge_strength"   ? &parsed.value.art.edge_strength
+                            : key == "shape_threshold" ? &parsed.value.art.shape_threshold
+                            : key == "scene_paper"     ? &parsed.value.art.scene_paper
+                                                       : &parsed.value.art.edge_threshold;
+            const float fallback = key == "edge_threshold"    ? defaults.art.edge_threshold
+                                   : key == "shape_threshold" ? defaults.art.shape_threshold
+                                   : key == "scene_paper"     ? defaults.art.scene_paper
+                                                              : 1;
             *target = fallback;
-            const bool edge = key.starts_with("edge_");
+            const bool edge =
+                key.starts_with("edge_") || key == "shape_threshold" || key == "scene_paper";
             if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
                 parsed.warnings |= invalid_art;
-        } else if (key == "fill_enabled" || key == "contour_overlay") {
-            auto& target =
-                key == "fill_enabled" ? parsed.value.art.fill : parsed.value.art.contour_overlay;
-            target = value != "false" && value != "0";
+        } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching") {
+            auto& target = key == "fill_enabled"     ? parsed.value.art.fill
+                           : key == "shape_matching" ? parsed.value.art.shape_matching
+                                                     : parsed.value.art.contour_overlay;
+            target = key != "shape_matching";
             if (value != "false" && value != "0" && value != "true" && value != "1")
                 parsed.warnings |= invalid_art;
+            else
+                target = value == "true" || value == "1";
         } else if (key == "foreground" || key == "background") {
             auto& target =
                 key == "foreground" ? parsed.value.art.foreground : parsed.value.art.background;
@@ -326,6 +336,8 @@ bool valid_art(const ArtSettings& a) noexcept {
             return false;
     for (const float v : {a.edge_strength,
              a.edge_threshold,
+             a.shape_threshold,
+             a.scene_paper,
              a.foreground[0],
              a.foreground[1],
              a.foreground[2],

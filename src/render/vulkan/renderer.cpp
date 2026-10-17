@@ -228,7 +228,7 @@ public:
         check(api_.CreateCommandPool(device_.handle, &pool, nullptr, &pool_),
             "create glyph command pool");
         texture(atlas_, VK_FORMAT_R32_SFLOAT, {integral_width, integral_height});
-        texture(ramp_, VK_FORMAT_R8_UINT, {256, 2});
+        texture(ramp_, VK_FORMAT_R8_UINT, {256, ramp_height});
         const auto font = editor::font();
         font_extent_ = {static_cast<uint32_t>(font.width), static_cast<uint32_t>(font.height)};
         texture(font_, VK_FORMAT_R8_UNORM, font_extent_);
@@ -317,7 +317,7 @@ public:
         check(api_.BeginCommandBuffer(frame.command, &begin), "begin glyph command buffer");
         if (!uploaded_) {
             upload(frame.command, atlas_, 0, {integral_width, integral_height});
-            upload(frame.command, ramp_, integral_bytes, {256, 2});
+            upload(frame.command, ramp_, integral_bytes, {256, ramp_height});
             upload(frame.command, font_, font_offset_, font_extent_);
         }
         barrier(frame.command,
@@ -441,7 +441,8 @@ private:
     std::vector<Frame> frames_;
     Texture atlas_, ramp_, font_;
     VkExtent2D font_extent_{};
-    static constexpr VkDeviceSize font_offset_ = (integral_bytes + 512 + 3) & ~VkDeviceSize{3};
+    static constexpr VkDeviceSize font_offset_ =
+        (integral_bytes + 256 * ramp_height + 3) & ~VkDeviceSize{3};
     VkBuffer staging_ = VK_NULL_HANDLE;
     VkDeviceMemory staging_memory_ = VK_NULL_HANDLE;
     VkSampler sampler_ = VK_NULL_HANDLE;

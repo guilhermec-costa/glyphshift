@@ -211,7 +211,7 @@ struct Context {
             0,
             GL_R8UI,
             256,
-            2,
+            ramp_height,
             0,
             GL_RED_INTEGER,
             GL_UNSIGNED_BYTE,

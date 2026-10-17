@@ -8,6 +8,8 @@ namespace glyphshift {
 struct ArtSettings {
     bool illustrated = false;
     bool fill = true, contour_overlay = true;
+    bool shape_matching = false;
+    float shape_threshold = 0.2F, scene_paper = 0.0F;
     float exposure = 1.0F, contrast = 1.0F, gamma = 1.0F;
     float edge_strength = 1.0F, edge_threshold = 0.18F;
     std::array<float, 3> foreground{1, 1, 1}, background{0, 0, 0};
@@ -41,11 +43,11 @@ inline std::array<float, 16> art_parameters(const Settings& s) {
         a.foreground[0],
         a.foreground[1],
         a.foreground[2],
-        0,
+        a.shape_matching ? a.shape_threshold : -1.0F,
         a.background[0],
         a.background[1],
         a.background[2],
-        0};
+        a.scene_paper};
 }
 
 enum SettingWarning : std::uint32_t {

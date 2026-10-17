@@ -33,11 +33,14 @@ inline constexpr unsigned character_atlas_bytes = character_atlas_width * charac
 inline constexpr unsigned integral_width = 16 * (character_tile_width + 1);
 inline constexpr unsigned integral_height = 17 * (character_tile_height + 1);
 inline constexpr unsigned integral_bytes = integral_width * integral_height * sizeof(float);
+inline constexpr unsigned ramp_height = 4;
 
 struct CharacterAtlas {
     std::array<std::uint8_t, character_atlas_bytes> pixels{};
     // Row zero preserves manual bins; row one maps tone to measured coverage.
-    std::array<std::uint8_t, 512> ramp{};
+    // Row two matches 2x2 light/dark structure to the actual selected masks.
+    // Row three reserves partial blocks for structure rather than tonal texture.
+    std::array<std::uint8_t, 256 * ramp_height> ramp{};
     // Per-glyph summed areas with zero borders: exact box filtering at any scale.
     std::array<float, integral_width * integral_height> integral{};
     unsigned count = 10;

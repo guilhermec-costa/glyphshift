@@ -113,14 +113,55 @@ void main() {
                     magnitude > .55 * (high-low);
         float tone = clamp((luma(average)*ART[0].x-.5)*ART[0].y+.5,0,1);
         tone = pow(tone,1.0/ART[0].z);
-        uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255)),1),0).r;
-        float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
+        uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255)),ART[2].w >= 0 ? 3 : 1),0).r;
         float peak = max(max(average.r,average.g),average.b);
         // Tone controls density; normalized chroma supplies ink color without
         // multiplying the source darkness into sparse glyphs a second time.
         vec3 ink = (SOURCE_COLOR != 0u && peak > .005) ? average / peak : ART[2].rgb;
-        result = mix(ART[3].rgb,ink,fill_mask);
-        if (edge) {
+        if (SOURCE_COLOR != 0u)
+            ink = mix(ink,min(average*1.4,vec3(1)),ART[3].w);
+        vec3 paper = SOURCE_COLOR != 0u ? mix(ART[3].rgb,average,ART[3].w) : ART[3].rgb;
+        bool shape = false;
+        if (ART[2].w >= 0 && ART[1].w > .5) {
+            // Interior quadrant centers retain small objects without sampling
+            // the neighboring cell into their silhouette. Palette entries are
+            // constant per cell, never a blend with per-pixel source detail.
+            vec3 quadrants[4];
+            float dark = 1, light = 0;
+            for (int q=0;q<4;++q) {
+                quadrants[q] = sample_source(origin + CELL *
+                    (vec2(q%2,q/2)*.5 + vec2(.25)));
+                dark = min(dark,luma(quadrants[q]));
+                light = max(light,luma(quadrants[q]));
+            }
+            float midpoint = (dark+light)*.5;
+            uint pattern = 0u;
+            vec3 dark_color = vec3(0), light_color = vec3(0);
+            float dark_count = 0, light_count = 0;
+            for (int q=0;q<4;++q) {
+                if (luma(quadrants[q]) > midpoint) {
+                    pattern |= 1u << uint(q);
+                    light_color += quadrants[q]; light_count += 1;
+                } else {
+                    dark_color += quadrants[q]; dark_count += 1;
+                }
+            }
+            shape = light-dark > max(ART[2].w,.0001) && pattern > 0u && pattern < 15u;
+            if (shape) {
+                if (SOURCE_COLOR != 0u) {
+                    ink = light_color / light_count;
+                    paper = mix(ART[3].rgb,dark_color/dark_count,ART[3].w);
+                } else if (luma(ART[2].rgb) < luma(ART[3].rgb)) {
+                    pattern = 15u-pattern;
+                }
+                glyph = texelFetch(ramp_image,ivec2(int(pattern),2),0).r;
+            }
+        }
+        float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
+        result = mix(paper,ink,fill_mask);
+        // A matched silhouette already owns its boundary; drawing another
+        // centered contour over it would replace useful character detail.
+        if (edge && !shape) {
             vec2 direction = abs(gradient);
             uint axis = direction.x > 2.414214*direction.y ? 0u
                       : direction.y > 2.414214*direction.x ? 1u
@@ -129,7 +170,7 @@ void main() {
             if (ART[0].w > .5) {
                 ivec2 corner = ivec2(int(glyph)%16,int(glyph)/16)*ivec2(17,25)+ivec2(16,24);
                 float coverage = ART[1].w > .5 ? texelFetch(atlas_image,corner,0).r/(255.0*16*24) : 0;
-                float ground = luma(mix(ART[3].rgb,ink,coverage));
+                float ground = luma(mix(paper,ink,coverage));
                 vec3 stroke = abs(luma(ART[2].rgb)-ground) >= abs(luma(ART[3].rgb)-ground)
                             ? ART[2].rgb : ART[3].rgb;
                 result = mix(result,stroke,mask);

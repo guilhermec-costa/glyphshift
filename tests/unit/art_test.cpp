@@ -48,7 +48,8 @@ int main() {
             "render_style=illustrated\nfill_enabled=false\ncontour_overlay="
             "false\ntone_exposure=1.4\ntone_"
             "contrast=1.2\ntone_gamma=0.8\nedge_strength=0.7\nedge_threshold=0."
-            "2\nforeground=0.2,0.3,0.4\nbackground=1,0.9,0.8\n");
+            "2\nforeground=0.2,0.3,0.4\nbackground=1,0.9,0.8\n"
+            "shape_matching=true\nshape_threshold=0.17\nscene_paper=0.65\n");
         check(!parsed.warnings && parsed.value.art.illustrated && !parsed.value.art.fill &&
                   !parsed.value.art.contour_overlay,
             "illustration config");
@@ -62,6 +63,10 @@ int main() {
                  "render_style=bad",
                  "fill_enabled=bad",
                  "contour_overlay=bad",
+                 "shape_matching=bad",
+                 "shape_threshold=nan",
+                 "shape_threshold=-0.1",
+                 "scene_paper=1.1",
                  "foreground=1,2,0",
                  "background=0,0",
                  "background=0,0,0,0"}) {
@@ -74,6 +79,28 @@ int main() {
         check(!valid_art(invalid), "nonfinite settings cannot be saved");
         check(parse_settings("edge_characters=\"|\"\n").warnings & invalid_characters,
             "four contour glyphs required");
+        const auto shape_selection =
+            parse_settings("character_set=custom\ncharacters=\" █▘▝▀▖▌▞▛▗▚▐▜▄▙▟\"\n").value.glyphs;
+        const auto shapes = build_character_atlas(shape_selection);
+        for (unsigned pattern = 0; pattern < 16; ++pattern) {
+            const auto glyph = shapes.ramp[512 + pattern];
+            for (unsigned y = 0; y < 24; ++y)
+                for (unsigned x = 0; x < 16; ++x) {
+                    const auto q = (y >= 12 ? 2U : 0U) + (x >= 8 ? 1U : 0U);
+                    const auto actual =
+                        shapes.pixels[((glyph / 16) * 24 + y) * character_atlas_width +
+                                      (glyph % 16) * 16 + x];
+                    check(actual == ((pattern & (1U << q)) ? 255 : 0),
+                        "all sixteen local silhouettes select exact quadrant masks");
+                }
+        }
+        for (unsigned bin = 0; bin < 256; ++bin)
+            check(shapes.ramp[768 + bin] < 2,
+                "partial blocks are reserved for structure, not repeated tonal texture");
+        const auto only_block = build_character_atlas(
+            parse_settings("character_set=custom\ncharacters=\"▌\"\n").value.glyphs);
+        check(only_block.ramp[768] == 0 && only_block.ramp[1023] == 0,
+            "partial-block-only sets retain a valid tonal fallback");
         auto selection = CharacterSelection{};
         selection.set = 5;
         selection.density_order = true;

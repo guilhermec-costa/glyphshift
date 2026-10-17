@@ -100,8 +100,9 @@ the game. The SuperTux test configuration was prepared with networking,
 update checks, and Discord integration disabled. Use only this offline run,
 with no active anti-cheat or online services.
 
-The command below starts with **Illustrated rendering**, 8×12 cells, glyph
-strength 1, and contours over fill, using `presets/illustrated.conf`.
+The command below starts with **Illustrated rendering**, 6×10 cells, glyph
+strength 1, local shape matching, scene-colored paper and contours over fill,
+using `presets/illustrated.conf`.
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -339,6 +340,20 @@ to Wine. The [recorded live capture](../docs/editor-supertux-play.png) shows tha
 running level; it is not a fixed-image preview or a gameplay performance test.
 
 ## Illustrated glyph drawing
+
+The color and ink presets now use 6×10 cells and **Match local shapes** to retain
+small silhouettes such as Tux. **Shape threshold** controls the minimum local
+contrast: lower values match more texture; higher values reserve shape matching
+for stronger features. **Scene-colored paper** reduces black holes in source
+color mode; it does not change monochrome ink/paper. Strength 1 still draws
+only cell palettes and glyph masks, without blending original per-pixel detail.
+Partial blocks in the selected set are reserved for silhouette matching rather
+than repeated surface shading. Remove them to match using only your text glyphs.
+Compare [color](../docs/shape-color.png) and [ink](../docs/shape-ink.png), rendered
+from the same [original frame](../docs/illustration-original.png).
+The [Tux close-up](../docs/shape-tux-comparison.png) shows the previous 8×12
+preset on the left and the revised 6×10 preset on the right, enlarged 3× with
+nearest-neighbor scaling. It compares the complete presets, including cell size.
 
 Restart the application through the rebuilt launcher before testing new shared
 libraries. For SuperTux, use the existing offline launch command above with

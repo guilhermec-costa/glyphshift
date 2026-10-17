@@ -103,6 +103,9 @@ def main():
                 control.click(30, 416)   # Enable illustrated rendering.
                 time.sleep(.5)
                 capture('illustration-enabled', True)
+                control.click(30, 505)   # Enable matching through the actual checkbox.
+                time.sleep(.5)
+                capture('shape-matching-enabled', True)
                 control.click(100, 388)
                 capture('illustrated-opened', True)
             # Actual mouse + keyboard numeric edit, then save a named preset.
@@ -125,6 +128,7 @@ def main():
             assert 'character_set=binary\n' in saved.read_text(), saved.read_text()
             if args.illustrated:
                 assert 'render_style=illustrated\n' in saved.read_text(), saved.read_text()
+                assert 'shape_matching=true\n' in saved.read_text(), saved.read_text()
             capture('edited-saved', True)
             control.key(0xff1b)
             capture('escape-closed', False)

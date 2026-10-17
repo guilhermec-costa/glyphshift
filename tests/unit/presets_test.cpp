@@ -54,6 +54,9 @@ int main() {
         custom.art.illustrated = true;
         custom.art.fill = false;
         custom.art.contour_overlay = false;
+        custom.art.shape_matching = true;
+        custom.art.shape_threshold = .31F;
+        custom.art.scene_paper = .85F;
         custom.art.exposure = 1.4F;
         custom.art.contrast = 1.2F;
         custom.art.gamma = .8F;

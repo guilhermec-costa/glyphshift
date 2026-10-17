@@ -154,7 +154,12 @@ int main(int argc, char** argv) {
             GL_RED,
             characters.integral.data(),
             GL_FLOAT);
-        const auto ramp = texture(2, GL_R8UI, 256, 2, GL_RED_INTEGER, characters.ramp.data());
+        const auto ramp = texture(2,
+            GL_R8UI,
+            256,
+            glyphshift::ramp_height,
+            GL_RED_INTEGER,
+            characters.ramp.data());
         const auto output = texture(3, GL_RGB8, width, height, GL_RGB, nullptr);
         GLuint fbo = 0, vao = 0;
         glGenFramebuffers(1, &fbo);

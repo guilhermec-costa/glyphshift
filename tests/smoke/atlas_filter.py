@@ -56,3 +56,38 @@ for ink in [0, 1]:
             expected = 128 if x in [35, 36] else ink * 255
             assert all(abs(c - expected) <= 1 for c in rgb[(y*w+x)*3:(y*w+x+1)*3]), (name, x, y)
 print('2 adaptive contour-over-fill GPU cases passed without cell-sized holes')
+# Structural matching must recover every mixed quadrant silhouette, including
+# dark objects on bright paper, with both source colors and reversed mono ink.
+for mode in ['source', 'mono']:
+    cw, ch, w, h = 8, 12, 128, 24
+    name = f'shape-matching-{mode}'
+    source = args.output / (name + '-source.ppm')
+    low, high = (24, 48, 72), (216, 192, 168)
+    pixels = bytearray()
+    for y in range(h):
+        for x in range(w):
+            pattern = x // cw
+            q = (2 if y % ch >= ch // 2 else 0) + (1 if x % cw >= cw // 2 else 0)
+            pixels.extend(high if pattern & (1 << q) else low)
+    source.write_bytes(f'P6\n{w} {h}\n255\n'.encode() + pixels)
+    config = args.output / (name + '.conf')
+    config.write_text(f'render_style=illustrated\ncolor_mode={mode}\nglyph_strength=1\n'
+        'cell_width=8\ncell_height=12\ncharacter_set=custom\n'
+        'characters=" █▘▝▀▖▌▞▛▗▚▐▜▄▙▟"\nshape_matching=true\n'
+        'shape_threshold=0.2\nscene_paper=1\n'
+        'foreground=0,0,0\nbackground=1,1,1\nedge_threshold=0.01\n')
+    output = args.output / (name + '.ppm')
+    subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
+    rgb = output.read_bytes().split(b'\n', 3)[3]
+    for y in range(h):
+        for x in range(cw, 15*cw):
+            i = (y*w+x)*3
+            q = (2 if y % ch >= ch // 2 else 0) + (1 if x % cw >= cw // 2 else 0)
+            lit = (x // cw) & (1 << q)
+            expected = pixels[i:i+3] if mode == 'source' else bytes([255 if lit else 0])*3
+            assert all(abs(a-b) <= 1 for a,b in zip(rgb[i:i+3], expected)), (mode,x,y)
+    # Strength zero must still bypass the entire structural renderer exactly.
+    config.write_text(config.read_text().replace('glyph_strength=1','glyph_strength=0').replace('color_mode=mono','color_mode=source'))
+    subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
+    assert output.read_bytes().split(b'\n',3)[3] == pixels
+print('28 GPU silhouette cases passed (14 masks x source/reversed mono), plus exact strength-zero bypass')
