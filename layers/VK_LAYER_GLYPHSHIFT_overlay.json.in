@@ -1,0 +1,11 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_GLYPHSHIFT_overlay",
+    "type": "GLOBAL",
+    "library_path": "../libglyphshift_vk.so",
+    "api_version": "@Vulkan_VERSION@",
+    "implementation_version": "1",
+    "description": "GlyphShift Vulkan pass-through"
+  }
+}

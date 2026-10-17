@@ -27,9 +27,13 @@ T info(VkStructureType type) {
 std::atomic<unsigned> validation_errors{0};
 VKAPI_ATTR VkBool32 VKAPI_CALL
 diagnostic(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-           VkDebugUtilsMessageTypeFlagsEXT,
+           VkDebugUtilsMessageTypeFlagsEXT type,
            const VkDebugUtilsMessengerCallbackDataEXT* data, void*) {
-  std::cerr << "Vulkan validation: " << data->pMessage << '\n';
+  const bool validation =
+      type & (VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT);
+  std::cerr << (validation ? "Vulkan validation: " : "Vulkan loader: ")
+            << data->pMessage << '\n';
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     ++validation_errors;
   return VK_FALSE;

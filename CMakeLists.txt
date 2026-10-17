@@ -22,8 +22,20 @@ set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS})
+add_library(glyphshift_vk SHARED
+    src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp)
+set_target_properties(glyphshift_vk PROPERTIES
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+target_include_directories(glyphshift_vk PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(glyphshift_vk PRIVATE Threads::Threads)
+set(vulkan_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/vulkan/exports.map")
+target_link_options(glyphshift_vk PRIVATE "LINKER:--version-script=${vulkan_exports}")
+set_property(TARGET glyphshift_vk APPEND PROPERTY LINK_DEPENDS "${vulkan_exports}")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/layers")
+configure_file(layers/VK_LAYER_GLYPHSHIFT_overlay.json.in
+    "${CMAKE_CURRENT_BINARY_DIR}/layers/VK_LAYER_GLYPHSHIFT_overlay.json" @ONLY)
 add_executable(glyphshift apps/launcher/main.cpp)
-add_dependencies(glyphshift glyphshift_gl)
+add_dependencies(glyphshift glyphshift_gl glyphshift_vk)
 
 # Keep the development compilation database at the checkout root for LSPs.
 # Release builds never replace it, and existing user-owned files are preserved.
@@ -100,6 +112,11 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/interpose_test.py"
         "$<TARGET_FILE:glyphshift-interpose-tests>" "$<TARGET_FILE:glyphshift_gl>"
         "$<TARGET_FILE:glyphshift-fake-glx>")
+    add_executable(glyphshift-vulkan-layer-tests tests/unit/vulkan_layer_test.cpp)
+    target_include_directories(glyphshift-vulkan-layer-tests PRIVATE ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+    target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
+    add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
     add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
     target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
     add_test(NAME core COMMAND glyphshift-core-tests)

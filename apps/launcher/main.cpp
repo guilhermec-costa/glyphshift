@@ -104,7 +104,7 @@ void check_target(int fd) {
       (elf.e_type != ET_EXEC && elf.e_type != ET_DYN) ||
       elf.e_phentsize != sizeof(Elf64_Phdr) || elf.e_phnum > 1024) {
     throw std::runtime_error(
-        "M1 requires a dynamically linked Linux x86-64 ELF target");
+        "GlyphShift requires a dynamically linked Linux x86-64 ELF target");
   }
   bool interpreter = false;
   for (unsigned i = 0; i < elf.e_phnum; ++i) {
@@ -123,11 +123,11 @@ void check_target(int fd) {
     throw std::runtime_error("static executables cannot use LD_PRELOAD");
 }
 
-std::string module_path() {
+std::string asset_path(const char* name) {
   // /proc/self/exe works independently of argv[0], PATH and the working
   // directory.
   const auto executable = std::filesystem::read_symlink("/proc/self/exe");
-  const auto module = executable.parent_path() / "libglyphshift_gl.so";
+  const auto module = executable.parent_path() / name;
   const auto path = module.string();
   if (path.find_first_of(" :\t\r\n\v\f") != std::string::npos)
     throw std::runtime_error(
@@ -144,11 +144,11 @@ std::string module_path() {
 
 int main(int argc, char** argv) {
   if (argc == 2 && std::string_view(argv[1]) == "--help") {
-    std::cout
-        << "Usage: glyphshift -- PROGRAM [ARGS...]\n"
-           "Launch a local/offline dynamically linked Linux x86-64 "
-           "application.\n"
-           "M1: GLX pass-through only. GLYPHSHIFT_LOG=1 enables diagnostics.\n";
+    std::cout << "Usage: glyphshift -- PROGRAM [ARGS...]\n"
+                 "Launch a local/offline dynamically linked Linux x86-64 "
+                 "application.\n"
+                 "GLX and Vulkan pass-through. GLYPHSHIFT_LOG=1 enables "
+                 "diagnostics.\n";
     return 0;
   }
   if (argc < 3 || std::string_view(argv[1]) != "--" || !*argv[2]) {
@@ -171,7 +171,29 @@ int main(int argc, char** argv) {
       throw system_error("open target");
     }
     check_target(file.get());
-    std::string preload = module_path();
+    std::string preload = asset_path("libglyphshift_gl.so");
+    (void)asset_path("libglyphshift_vk.so");
+    const auto manifest = asset_path("layers/VK_LAYER_GLYPHSHIFT_overlay.json");
+    const auto directory =
+        std::filesystem::path(manifest).parent_path().string();
+    // VK_LAYER_PATH overrides all normal discovery, including
+    // VK_ADD_LAYER_PATH. Preserve that explicit override when set; otherwise
+    // add our development directory without hiding system validation layers or
+    // existing additions.
+    const char* path_variable =
+        std::getenv("VK_LAYER_PATH") ? "VK_LAYER_PATH" : "VK_ADD_LAYER_PATH";
+    std::string search_path = directory;
+    if (const char* inherited = std::getenv(path_variable);
+        inherited && *inherited)
+      search_path += ":" + std::string(inherited);
+    if (setenv(path_variable, search_path.c_str(), 1) != 0)
+      throw system_error("set Vulkan layer discovery path");
+    std::string layers = "VK_LAYER_GLYPHSHIFT_overlay";
+    if (const char* inherited = std::getenv("VK_INSTANCE_LAYERS");
+        inherited && *inherited)
+      layers += ":" + std::string(inherited);
+    if (setenv("VK_INSTANCE_LAYERS", layers.c_str(), 1) != 0)
+      throw system_error("enable Vulkan layer");
     if (const char* inherited = std::getenv("LD_PRELOAD");
         inherited && *inherited)
       preload += ":" + std::string(inherited);

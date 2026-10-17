@@ -13,10 +13,10 @@ described here unless a change is explicitly documented.
 
 ## Current implementation
 
-M0 and M1 are implemented: Debug/Release builds, deterministic GLX/Vulkan
-fixtures, unit tests, and an OpenGL pass-through launcher/interposer. The
-Vulkan layer, glyph effect, and editor belong to later milestones. M1 leaves
-the application image unchanged and does not implement the product hotkeys.
+M0 through M2 are implemented: Debug/Release builds, deterministic GLX/Vulkan
+fixtures, unit tests, a launcher, GLX pass-through interposition, and a Vulkan
+pass-through loader layer. Both APIs leave the application image unchanged.
+Glyph rendering, the editor, and product hotkeys belong to later milestones.
 
 ## Product experience
 
@@ -269,7 +269,7 @@ Parsing, validation, defaults, and serialization must not depend on OpenGL or
 Vulkan. Invalid values should emit a useful warning and use safe defaults
 instead of terminating the game.
 
-## Development (M0–M1)
+## Development (M0–M2)
 
 ### Dependencies
 
@@ -322,8 +322,7 @@ with a warning. To opt out in a custom build, leave
 Warnings are enabled for all C++ targets: `-Wall -Wextra -Wpedantic
 -Wconversion -Wshadow`. CTest runs pure option/timing tests, both fixtures'
 `--help` paths, launcher process tests, and interposer tests without needing a
-display. When
-`clang-format` is present, it also tests the pre-commit hook. These do not
+display. When `clang-format` is present, it also tests the pre-commit hook. These do not
 claim graphics coverage.
 The two SPIR-V shaders are compiled locally by CMake; there are no downloaded
 build dependencies. Fixture shader files live in the corresponding build tree;
@@ -356,12 +355,14 @@ Deleted files are skipped, paths with spaces are supported, and missing
 `clang-format` fails with an installation instruction. Git clones do not
 activate hooks automatically; run the configuration command above locally.
 
-### Launch with GlyphShift (M1)
+### Launch with GlyphShift (M1–M2)
 
 ```bash
 ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
 GLYPHSHIFT_LOG=1 ./build/dev/glyphshift -- \
   ./build/dev/glyphshift-glx-fixture --frames 120
+VK_LAYER_VALIDATE_SYNC=1 ./build/dev/glyphshift -- \
+  ./build/dev/glyphshift-vulkan-fixture --validation
 ```
 
 The launcher finds `libglyphshift_gl.so` next to its own executable, prepends
@@ -372,7 +373,7 @@ with the target so exit codes and signals propagate naturally. Environment
 changes affect only this launch and its descendants; the invoking shell is
 unchanged. Building the `glyphshift` target also builds its shared library.
 
-M1 accepts readable, executable, dynamically linked Linux x86-64 ELF targets;
+The launcher accepts readable, executable, dynamically linked Linux x86-64 ELF targets;
 scripts, static executables, and other binary architectures are rejected.
 The module/build directory must not contain whitespace or colons because
 `LD_PRELOAD` uses them as separators. Target paths and arguments may contain
@@ -402,8 +403,77 @@ to forward to in that failure case. Initial symbol resolution/logging preserves
 
 M1 covers the dynamically linked GLX swap symbol. Graphics entry points
 obtained directly from driver procedure-address APIs have not been validated.
-Vulkan applications can run through the launcher unchanged, but no Vulkan
-entry point is intercepted and no Vulkan layer is enabled until M2.
+The Vulkan layer described below is also enabled for applications launched
+through GlyphShift; GLX applications do not initialize Vulkan as a result.
+
+### Vulkan pass-through layer (M2)
+
+The build adds `libglyphshift_vk.so` and
+`build/dev/layers/VK_LAYER_GLYPHSHIFT_overlay.json` (or the Release equivalent).
+This is an explicit development layer, not a system or implicit layer; the
+manifest's `GLOBAL` type means it covers instance and device calls. Nothing
+is installed in the system's Vulkan search directories.
+
+The launcher checks both libraries and the manifest, then enables
+`VK_LAYER_GLYPHSHIFT_overlay` through `VK_INSTANCE_LAYERS` for the launched
+process and its descendants. Existing requested layers are preserved. It
+prepends the local manifest directory to an existing `VK_LAYER_PATH` override;
+otherwise it prepends to `VK_ADD_LAYER_PATH`, preserving normal system layer
+discovery. This keeps system-installed validation layers available. Both loader
+discovery variables and the enable request are scoped to this launch, just like
+`LD_PRELOAD`; running a fixture directly does not enable GlyphShift.
+
+The layer follows the [Khronos loader/layer interface](https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderLayerInterface.md),
+negotiates interface version 2, and advances each loader creation-chain link
+before calling the next layer. Its only exported ELF entry point is
+`vkNegotiateLoaderLayerInterfaceVersion`; procedure-address functions are
+returned through negotiation. It does not link to the Vulkan loader or patch
+Vulkan entry points.
+
+Dispatch tables are registered per instance/device using the loader's dispatch
+keys. Physical-device and queue handles route through their owning instance
+and device, respectively; original handles are never wrapped or overwritten.
+Physical enumeration (including core/KHR device groups), logical-device
+creation/destruction, both queue retrieval methods, swapchain creation
+(including shared swapchains), image discovery, destruction, and presentation
+are intercepted. Queue family/index/flags and swapchain format/extent/images
+are retained as CPU metadata. Unknown commands forward to the appropriate
+next procedure-address function, including the physical-device chain; optional
+commands unavailable downstream remain null.
+
+Presentation forwards the exact `VkPresentInfoKHR` pointer, wait semaphores,
+image indices, `pNext`, per-swapchain results, and return code. It performs no
+rendering, command submission, GPU wait, image-layout transition, readback,
+or heap allocation. Registry locks are released before downstream calls.
+M2 leaves all swapchain recreation and GPU synchronization to the application.
+CPU metadata is removed on destruction. Optional metadata allocation failures
+leave forwarding intact and emit at most one opt-in warning per owner. If
+mandatory dispatch-state allocation fails during instance/device creation,
+the layer returns `VK_ERROR_OUT_OF_HOST_MEMORY` and rolls back any downstream
+object already created using the original allocation callbacks.
+
+`GLYPHSHIFT_LOG=1` reports instance/device and swapchain lifetime, and the first
+presentation per device. There is no repeated per-frame log. With validation
+enabled, the Vulkan loader may additionally emit general messages announcing
+`VK_INSTANCE_LAYERS`; the fixture labels these `Vulkan loader:` separately from
+`Vulkan validation:` messages. They remain visible. All error severities still
+make the fixture exit nonzero, including errors during teardown.
+
+For a development check with the temporary validation package from M0:
+
+```bash
+VK_LAYER_PATH=/tmp/glyphshift-m0-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 GLYPHSHIFT_LOG=1 \
+  ./build/dev/glyphshift -- ./build/dev/glyphshift-vulkan-fixture \
+  --validation --frames 120
+```
+
+With validation installed normally, omit `VK_LAYER_PATH`. Run each preset,
+resize the fixture repeatedly, and confirm clean exit and matching
+`Vulkan swapchain created` / `Vulkan swapchain destroyed` diagnostics. The
+manifest's library path is relative to its own location, so the launcher,
+libraries and `layers/` directory must stay together. Reconfigure after moving
+the source/build trees, as with the M0 fixture shader paths.
 
 ### Run and check the fixtures directly
 
@@ -588,6 +658,76 @@ GlyphShift initialization line.
 M1 stops at pass-through interposition. No Vulkan layer, glyph rendering,
 editor, game/Proton integration, or additional backend was implemented.
 
+### Verified M2 results
+
+Verified on 2026-10-17 using the Arch Linux/X11/i3/NVIDIA RTX 3060 Ti setup and
+the temporary Khronos validation package recorded for M0. M0/M1 and developer
+tooling were committed as `9959ae9` before starting M2.
+
+Commands executed for M2 include:
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+cmake --build --preset dev --target format-check
+git diff --check
+nm -D --defined-only build/dev/libglyphshift_vk.so
+ldd build/dev/libglyphshift_vk.so
+```
+
+Both presets built without compiler warnings and passed seven CTest tests.
+The new GPU-independent layer test loads the actual `.so` into a synthetic
+loader chain: negotiation (including rejection of interface 1), missing link
+info, layer/extension enumeration, two simultaneous instances/devices,
+physical-device groups and aliases, queue retrieval, swapchain and shared
+swapchain lifecycle, partial/full image discovery, unsupported/unknown
+commands (including safe physical-command classification when the next layer
+lacks a physical query hook), and cleanup were checked. It injects real C++ allocation failures
+to verify mandatory-state rollback and optional-metadata pass-through. It also
+checks exact create/present pointers and allocation callbacks, downstream error
+and per-swapchain results, 16,002 forwarded presents across concurrent queues,
+no allocation during presentation, and safe downstream reentry into procedure
+lookup. Launcher tests now cover preserving Vulkan discovery overrides and
+requested layers, plus failure when the Vulkan library or manifest is missing.
+Symbol inspection showed only the negotiation function exported; `ldd` showed
+no `libvulkan` dependency. The LSP database now contains 13 translation units.
+
+A temporary driver at `/tmp/glyphshift-m2-vulkan-check.py` was executed using:
+
+```bash
+setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m2-vulkan-check.py
+```
+
+It compared direct versus launched Vulkan fixtures in Debug and Release at
+`--fixed-time 1.25 --frames 1800`, with `--validation` and synchronization
+validation enabled. Each execution confirmed 12 real window resizes through
+the six M0 test dimensions repeated twice, then exited zero on
+`WM_DELETE_WINDOW`. For each launched execution the layer logged 16 matched
+swapchain creations/destructions, one instance/device lifecycle, and one
+forwarded-present diagnostic. Every corresponding direct/launched image
+matched exactly (`magick compare -metric RMSE`: `0 (0)` at all 12 sizes in
+each preset). No validation warnings/errors were introduced by GlyphShift.
+The loader's two general configuration messages about `VK_INSTANCE_LAYERS`
+were expected and reported separately, not suppressed.
+
+The GLX regression passed the same direct/launched image and resize checks in
+both presets, through `/tmp/glyphshift-m2-glx-check.py`. Dropping inherited
+capabilities is needed only for this external test environment, as explained
+under M1. Games, Proton, other GPUs/drivers, old loader interfaces, and rendering
+features from M3 onward are not claimed by these fixture tests.
+
+A source-only copy at `/tmp/glyphshift-m2-final-clean` configured with
+`cmake --preset dev`, rebuilt from scratch with
+`cmake --build --preset dev --clean-first`, and passed all seven tests with
+`ctest --preset dev`. Its launcher ran the Vulkan fixture for 60 frames with
+Khronos/synchronization validation and exited zero. The relative manifest
+library path and a newly generated LSP database were also checked in the clean
+source setup. Both working-tree presets separately exited zero after 120
+Vulkan frames with validation enabled.
+
 ## Milestones
 
 Implement and validate these in order. Both backends are part of the MVP; a
@@ -729,5 +869,5 @@ The M0 implementation and verification above cover:
    confirm clean shutdown.
 5. Record the exact verified setup and build commands here.
 
-M0 and the separately requested M1 are complete. M2 and later milestones
+M0, M1 and the separately requested M2 are complete. M3 and later milestones
 require separate requests; do not start them automatically.
