@@ -53,12 +53,24 @@
   X(PixelStorei, glPixelStorei)                       \
   X(BindBuffer, glBindBuffer)                         \
   X(DrawArrays, glDrawArrays)                         \
-  X(GetQueryiv, glGetQueryiv)
+  X(GetQueryiv, glGetQueryiv)                         \
+  X(GetStringi, glGetStringi)                         \
+  X(GetFloatv, glGetFloatv)                           \
+  X(GetBooleani_v, glGetBooleani_v)                   \
+  X(IsEnabledi, glIsEnabledi)                         \
+  X(Enablei, glEnablei)                               \
+  X(Disablei, glDisablei)                             \
+  X(ColorMaski, glColorMaski)                         \
+  X(DrawBuffers, glDrawBuffers)                       \
+  X(GetTexLevelParameteriv, glGetTexLevelParameteriv)
 namespace glyphshift::opengl {
 struct GlApi {
 #define MEMBER(member, name) decltype(&::name) member = nullptr;
   GLYPHSHIFT_GL_FUNCTIONS(MEMBER)
 #undef MEMBER
+  decltype(&::glViewportIndexedf) ViewportIndexedf = nullptr;
+  decltype(&::glScissorIndexed) ScissorIndexed = nullptr;
+  decltype(&::glClipControl) ClipControl = nullptr;
   bool available = false;
 };
 const GlApi& api();

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -315,10 +316,15 @@ class Renderer {
              "query formats");
     if (formats.size() == 1 && formats[0].format == VK_FORMAT_UNDEFINED)
       formats[0].format = VK_FORMAT_B8G8R8A8_UNORM;
+    const bool srgb = std::getenv("GLYPHSHIFT_FIXTURE_SRGB") != nullptr;
     const auto selected =
-        std::find_if(formats.begin(), formats.end(), [](const auto& f) {
-          return (f.format == VK_FORMAT_B8G8R8A8_UNORM ||
-                  f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+        std::find_if(formats.begin(), formats.end(), [&](const auto& f) {
+          const bool compatible =
+              srgb ? f.format == VK_FORMAT_B8G8R8A8_SRGB ||
+                         f.format == VK_FORMAT_R8G8B8A8_SRGB
+                   : f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+                         f.format == VK_FORMAT_R8G8B8A8_UNORM;
+          return compatible &&
                  f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
         });
     if (selected == formats.end())

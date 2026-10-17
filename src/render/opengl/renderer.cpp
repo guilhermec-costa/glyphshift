@@ -41,6 +41,13 @@ const GlApi& api() {
     if (!get)
       get = reinterpret_cast<GetProc>(dlsym(RTLD_NEXT, "glXGetProcAddress"));
     if (!get) return result;
+    result.ViewportIndexedf =
+        reinterpret_cast<decltype(result.ViewportIndexedf)>(
+            get(reinterpret_cast<const GLubyte*>("glViewportIndexedf")));
+    result.ScissorIndexed = reinterpret_cast<decltype(result.ScissorIndexed)>(
+        get(reinterpret_cast<const GLubyte*>("glScissorIndexed")));
+    result.ClipControl = reinterpret_cast<decltype(result.ClipControl)>(
+        get(reinterpret_cast<const GLubyte*>("glClipControl")));
     result.available = true;
 #define LOAD(member, name)                                   \
   result.member = reinterpret_cast<decltype(result.member)>( \
@@ -65,7 +72,9 @@ struct Context {
   GLuint program = 0, vao = 0, atlas = 0, ramp = 0;
   GLint size = -1, cell = -1, source_color = -1;
   unsigned clip_count = 0, tf_bindings = 0;
-  bool disabled = false, caps_ready = false;
+  bool disabled = false, caps_ready = false, viewport_array = false,
+       clip_control = false;
+  unsigned draw_buffers = 0;
   std::atomic<bool> bound{true}, retired{false};
   std::unordered_map<GLXDrawable, Drawable> drawables;
   void release() {
@@ -111,6 +120,25 @@ struct Context {
     gl.GetIntegerv(GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS, &feedback);
     if (clips < 0 || clips > 32 || feedback < 0 || feedback > 32)
       throw std::runtime_error("unsupported GL limits");
+    GLint buffers = 0, extensions = 0;
+    gl.GetIntegerv(GL_MAX_DRAW_BUFFERS, &buffers);
+    if (buffers < 1 || buffers > 32)
+      throw std::runtime_error("unsupported draw-buffer limit");
+    draw_buffers = static_cast<unsigned>(buffers);
+    viewport_array = major > 4 || (major == 4 && minor >= 1);
+    clip_control = major > 4 || (major == 4 && minor >= 5);
+    gl.GetIntegerv(GL_NUM_EXTENSIONS, &extensions);
+    for (GLint i = 0; i < extensions; ++i) {
+      const auto* name = reinterpret_cast<const char*>(
+          gl.GetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+      if (name && std::strcmp(name, "GL_ARB_viewport_array") == 0)
+        viewport_array = true;
+      if (name && std::strcmp(name, "GL_ARB_clip_control") == 0)
+        clip_control = true;
+    }
+    if ((viewport_array && (!gl.ViewportIndexedf || !gl.ScissorIndexed)) ||
+        (clip_control && !gl.ClipControl))
+      throw std::runtime_error("missing extended state entry point");
     clip_count = static_cast<unsigned>(clips);
     tf_bindings = static_cast<unsigned>(feedback);
     caps_ready = true;
@@ -148,6 +176,8 @@ struct Context {
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8UI,
                   static_cast<GLsizei>(default_ramp.size()), 1, 0,
                   GL_RED_INTEGER, GL_UNSIGNED_BYTE, default_ramp.data());
+    if (!vao || !atlas || !ramp)
+      throw std::runtime_error("GL object allocation failed");
     gl.UseProgram(program);
     gl.Uniform1i(gl.GetUniformLocation(program, "source_image"), 0);
     gl.Uniform1i(gl.GetUniformLocation(program, "atlas_image"), 1);
@@ -185,7 +215,8 @@ struct Context {
             const Settings& settings) {
     const auto& gl = api();
     if (busy()) return;
-    const GlState restore(gl, clip_count);
+    const GlState restore(gl, clip_count, draw_buffers, viewport_array,
+                          clip_control);
     GLboolean double_buffer = GL_FALSE;
     gl.GetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     if (!double_buffer) return;
@@ -195,6 +226,8 @@ struct Context {
     if (!drawable.image) {
       gl.GenTextures(1, &drawable.image);
       gl.GenFramebuffers(1, &drawable.framebuffer);
+      if (!drawable.image || !drawable.framebuffer)
+        throw std::runtime_error("GL capture object allocation failed");
     }
     gl.BindTexture(GL_TEXTURE_2D, drawable.image);
     texture_parameters(gl);
@@ -204,6 +237,14 @@ struct Context {
                     nullptr);
       drawable.width = width;
       drawable.height = height;
+      GLint allocated_width = 0, allocated_height = 0;
+      gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH,
+                                &allocated_width);
+      gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT,
+                                &allocated_height);
+      if (allocated_width != static_cast<GLint>(width) ||
+          allocated_height != static_cast<GLint>(height))
+        throw std::runtime_error("GL capture allocation failed");
     }
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.framebuffer);
     gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
@@ -217,8 +258,12 @@ struct Context {
                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     gl.DrawBuffer(GL_BACK);
-    gl.Viewport(0, 0, static_cast<GLsizei>(width),
-                static_cast<GLsizei>(height));
+    if (viewport_array)
+      gl.ViewportIndexedf(0, 0, 0, static_cast<float>(width),
+                          static_cast<float>(height));
+    else
+      gl.Viewport(0, 0, static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height));
     gl.UseProgram(program);
     gl.BindVertexArray(vao);
     for (unsigned i = 0; i < 3; ++i) {

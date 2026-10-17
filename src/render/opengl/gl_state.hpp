@@ -6,7 +6,8 @@
 namespace glyphshift::opengl {
 class GlState {
  public:
-  GlState(const GlApi& api, unsigned clip_count);
+  GlState(const GlApi& api, unsigned clip_count, unsigned draw_buffers,
+          bool viewport_array, bool clip_control);
   ~GlState();
   GlState(const GlState&) = delete;
   GlState& operator=(const GlState&) = delete;
@@ -14,15 +15,20 @@ class GlState {
  private:
   const GlApi& gl_;
   GLint program_{}, vao_{}, active_{}, unpack_buffer_{};
-  GLint read_fbo_{}, draw_fbo_{}, default_read_{}, default_draw_{};
-  std::array<GLint, 4> viewport_{}, scissor_{};
+  GLint read_fbo_{}, draw_fbo_{}, default_read_{};
+  std::array<GLenum, 32> default_draws_{};
+  unsigned draw_buffers_ = 0;
+  bool viewport_array_ = false, clip_control_ = false;
+  GLboolean blend_{}, scissor_enabled_{};
+  GLint clip_origin_{}, clip_depth_{};
+  std::array<GLfloat, 4> viewport_{};
+  std::array<GLint, 4> scissor_{};
   std::array<GLboolean, 4> color_{};
   std::array<GLint, 2> polygon_{};
   std::array<GLint, 3> textures_{}, samplers_{};
-  inline static constexpr std::array<GLenum, 13> capabilities_{
-      GL_BLEND,           GL_DEPTH_TEST,
-      GL_STENCIL_TEST,    GL_CULL_FACE,
-      GL_SCISSOR_TEST,    GL_FRAMEBUFFER_SRGB,
+  inline static constexpr std::array<GLenum, 11> capabilities_{
+      GL_DEPTH_TEST,      GL_STENCIL_TEST,
+      GL_CULL_FACE,       GL_FRAMEBUFFER_SRGB,
       GL_DITHER,          GL_RASTERIZER_DISCARD,
       GL_COLOR_LOGIC_OP,  GL_SAMPLE_ALPHA_TO_COVERAGE,
       GL_SAMPLE_COVERAGE, GL_SAMPLE_MASK,

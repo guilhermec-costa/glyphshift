@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <glyphshift/config/settings.hpp>
 #include <new>
 
 #include "dispatch.hpp"
@@ -142,6 +143,19 @@ CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* info,
     return VK_ERROR_OUT_OF_HOST_MEMORY;
   }
   state->physical = physical;
+  if (info->queueCreateInfoCount == 1 && info->pQueueCreateInfos) {
+    state->single_family = true;
+    state->only_family = info->pQueueCreateInfos[0].queueFamilyIndex;
+  }
+  for (auto* next = static_cast<const VkBaseInStructure*>(info->pNext); next;
+       next = next->pNext) {
+    if (next->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO) {
+      const auto* loader =
+          reinterpret_cast<const VkLayerDeviceCreateInfo*>(next);
+      if (loader->function == VK_LOADER_DATA_CALLBACK)
+        state->set_loader_data = loader->u.pfnSetDeviceLoaderData;
+    }
+  }
   state->instance = parent;
   state->get_proc = chain->u.pLayerInfo->pfnNextGetDeviceProcAddr;
   chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
@@ -164,6 +178,7 @@ DestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
   const auto state = find_device(dispatch_key(device));
   if (!state) return;
   remove_device(device);
+  release_renderers(*state);
   state->destroy(device, allocator);
   diagnostic("glyphshift: Vulkan device destroyed\n");
 }
@@ -195,12 +210,28 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceQueue2(VkDevice device,
 }
 void record_swapchain(const std::shared_ptr<DeviceDispatch>& state,
                       const VkSwapchainCreateInfoKHR& info,
-                      VkSwapchainKHR swapchain) {
+                      VkSwapchainKHR swapchain, bool allow_capture = true) {
   try {
+    auto metadata = std::make_shared<SwapchainState>();
+    metadata->format = info.imageFormat;
+    metadata->extent = info.imageExtent;
+    metadata->capture =
+        allow_capture && (info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) &&
+        (info.imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
+        info.imageArrayLayers == 1 && info.flags == 0 &&
+        info.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    metadata->sharing = info.imageSharingMode;
+    if (info.imageSharingMode == VK_SHARING_MODE_CONCURRENT) {
+      if (info.queueFamilyIndexCount > metadata->families.size())
+        metadata->capture = false;
+      else {
+        metadata->family_count = info.queueFamilyIndexCount;
+        for (uint32_t i = 0; i < metadata->family_count; ++i)
+          metadata->families[i] = info.pQueueFamilyIndices[i];
+      }
+    }
     const std::lock_guard lock(state->mutex);
-    state->swapchains.emplace(
-        swapchain,
-        SwapchainState{info.imageFormat, info.imageExtent, {}, false});
+    state->swapchains.emplace(swapchain, std::move(metadata));
   } catch (const std::bad_alloc&) {
     metadata_failure(state->metadata_warning);
   }
@@ -211,9 +242,23 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
     const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
   const auto state = find_device(dispatch_key(device));
   if (!state || !state->create_swapchain) return VK_ERROR_INITIALIZATION_FAILED;
-  const auto result =
-      state->create_swapchain(device, info, allocator, swapchain);
-  if (result == VK_SUCCESS) record_swapchain(state, *info, *swapchain);
+  VkSwapchainCreateInfoKHR capture_info{};
+  const bool capture = negotiate_capture(*state, *info, capture_info);
+  const auto* forwarded_info = capture ? &capture_info : info;
+  auto result =
+      state->create_swapchain(device, forwarded_info, allocator, swapchain);
+  bool allow_capture = true;
+  if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST && capture &&
+      forwarded_info->imageUsage != info->imageUsage) {
+    diagnostic(
+        "glyphshift: Vulkan capture usage rejected; retrying original "
+        "swapchain\n");
+    result = state->create_swapchain(device, info, allocator, swapchain);
+    forwarded_info = info;
+    allow_capture = false;
+  }
+  if (result == VK_SUCCESS)
+    record_swapchain(state, *forwarded_info, *swapchain, allow_capture);
   return result;
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreateSharedSwapchainsKHR(
@@ -226,7 +271,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSharedSwapchainsKHR(
                                                       allocator, swapchains);
   if (result == VK_SUCCESS) {
     for (uint32_t i = 0; i < count; ++i)
-      record_swapchain(state, infos[i], swapchains[i]);
+      record_swapchain(state, infos[i], swapchains[i], false);
   }
   return result;
 }
@@ -235,12 +280,17 @@ DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
                     const VkAllocationCallbacks* allocator) {
   const auto state = find_device(dispatch_key(device));
   if (!state || !state->destroy_swapchain) return;
-  // Remove metadata before the driver can recycle this non-dispatchable
-  // handle for a swapchain being created concurrently on another thread.
+  std::shared_ptr<SwapchainState> retired;
   {
     const std::lock_guard lock(state->mutex);
-    state->swapchains.erase(swapchain);
+    const auto found = state->swapchains.find(swapchain);
+    if (found != state->swapchains.end()) {
+      retired = std::move(found->second);
+      state->swapchains.erase(found);
+    }
   }
+  // Free layer-owned views/framebuffers while the app's swapchain still lives.
+  retired.reset();
   state->destroy_swapchain(device, swapchain, allocator);
   if (swapchain) diagnostic("glyphshift: Vulkan swapchain destroyed\n");
 }
@@ -256,8 +306,8 @@ VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(VkDevice device,
       const std::lock_guard lock(state->mutex);
       const auto found = state->swapchains.find(swapchain);
       if (found != state->swapchains.end()) {
-        found->second.images.assign(images, images + *count);
-        found->second.images_complete = result == VK_SUCCESS;
+        found->second->images.assign(images, images + *count);
+        found->second->images_complete = result == VK_SUCCESS;
       }
     } catch (const std::bad_alloc&) {
       metadata_failure(state->metadata_warning);
@@ -272,8 +322,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(VkQueue queue,
   if (diagnostics_enabled() &&
       !state->presented.test_and_set(std::memory_order_relaxed))
     diagnostic("glyphshift: Vulkan present forwarded\n");
-  // Do not allocate, submit work, touch semaphores or alter pNext/pResults.
-  return state->present(queue, info);
+  return render_present(*state, queue, info, glyphshift::runtime_settings());
 }
 VKAPI_ATTR VkResult VKAPI_CALL EnumerateInstanceExtensionProperties(
     const char* name, uint32_t* count, VkExtensionProperties*) {

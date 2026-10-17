@@ -58,6 +58,10 @@ void initialize(InstanceDispatch& state) {
   state.member =           \
       reinterpret_cast<PFN_##name>(state.get_proc(state.handle, #name))
   LOAD(destroy, vkDestroyInstance);
+  LOAD(memory_properties, vkGetPhysicalDeviceMemoryProperties);
+  LOAD(queue_properties, vkGetPhysicalDeviceQueueFamilyProperties);
+  LOAD(surface_capabilities, vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+  LOAD(format_properties, vkGetPhysicalDeviceFormatProperties);
   LOAD(enumerate_physical, vkEnumeratePhysicalDevices);
   LOAD(enumerate_groups, vkEnumeratePhysicalDeviceGroups);
   LOAD(enumerate_groups_khr, vkEnumeratePhysicalDeviceGroupsKHR);
@@ -77,6 +81,7 @@ void initialize(DeviceDispatch& state) {
   LOAD(get_images, vkGetSwapchainImagesKHR);
   LOAD(present, vkQueuePresentKHR);
 #undef LOAD
+  initialize_renderer_api(state);
 }
 bool diagnostics_enabled() noexcept {
   static const bool enabled = [] {

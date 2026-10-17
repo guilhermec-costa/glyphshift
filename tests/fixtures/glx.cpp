@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include "gl_state_probe.hpp"
 #include "window.hpp"
 
 namespace {
@@ -17,9 +18,11 @@ class Renderer {
   fixture::Window window;
   GLXContext context = nullptr;
   GLuint program = 0, vao = 0;
+  std::unique_ptr<fixture::GlStateProbe> probe;
   ~Renderer() {
     if (context) {
       if (glXMakeCurrent(window.display, window.handle, context)) {
+        probe.reset();
         if (vao) glDeleteVertexArrays(1, &vao);
         if (program) glDeleteProgram(program);
       }
@@ -76,7 +79,14 @@ class Renderer {
       auto callback =
           reinterpret_cast<PFNGLDEBUGMESSAGECALLBACKPROC>(glXGetProcAddressARB(
               reinterpret_cast<const GLubyte*>("glDebugMessageCallback")));
-      if (callback) {
+      bool supported = false;
+      GLint extension_count = 0;
+      glGetIntegerv(GL_NUM_EXTENSIONS, &extension_count);
+      for (GLint i = 0; i < extension_count; ++i)
+        supported |= std::strcmp(reinterpret_cast<const char*>(glGetStringi(
+                                     GL_EXTENSIONS, static_cast<GLuint>(i))),
+                                 "GL_KHR_debug") == 0;
+      if (callback && supported) {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         callback(
@@ -119,6 +129,10 @@ class Renderer {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
     glUseProgram(program);
+    if (std::getenv("GLYPHSHIFT_FIXTURE_STATE_CHECK")) {
+      probe = std::make_unique<fixture::GlStateProbe>();
+      glBindVertexArray(vao);
+    }
   }
   void run(const glyphshift::FixtureOptions& opts) {
     const auto size = glGetUniformLocation(program, "size");
@@ -135,7 +149,9 @@ class Renderer {
       glDrawArrays(GL_TRIANGLES, 0, 3);
       if (const auto error = glGetError(); error != GL_NO_ERROR)
         throw std::runtime_error("OpenGL error: " + std::to_string(error));
+      if (probe) probe->before();
       glXSwapBuffers(window.display, window.handle);
+      if (probe) probe->after(program, vao);
       fixture::pace(start, ++frame);
     }
     glFinish();

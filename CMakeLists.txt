@@ -24,8 +24,11 @@ set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core Threads::Threads)
+set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/opengl/exports.map")
+target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
+set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
 add_library(glyphshift_vk SHARED
-    src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp)
+    src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp src/render/vulkan/renderer.cpp)
 set_target_properties(glyphshift_vk PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_vk PRIVATE ${Vulkan_INCLUDE_DIRS})

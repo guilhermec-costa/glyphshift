@@ -8,7 +8,7 @@ for missing, recurse, logging in [(False, False, False), (False, False, True),
                                   (False, True, True), (True, False, True),
                                   (True, False, False)]:
     env = os.environ.copy()
-    for name in ['GLYPHSHIFT_LOG', 'GLYPHSHIFT_TEST_RECURSE', 'GLYPHSHIFT_TEST_MISSING']:
+    for name in ['GLYPHSHIFT_CONFIG', 'GLYPHSHIFT_LOG', 'GLYPHSHIFT_TEST_RECURSE', 'GLYPHSHIFT_TEST_MISSING']:
         env.pop(name, None)
     env['LD_PRELOAD'] = module if missing else module + ':' + fake
     if missing:

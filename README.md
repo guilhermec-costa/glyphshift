@@ -13,10 +13,10 @@ described here unless a change is explicitly documented.
 
 ## Current implementation
 
-M0 through M2 are complete. M3 is in progress: shared glyph semantics, a
-small built-in atlas, live settings, and the GLX renderer are implemented;
-the Vulkan glyph pass is being added next. The editor and product hotkeys
-remain in M4. Historical M0–M2 validation results are retained below.
+M0 through M3 are complete. Both backends apply the same built-in glyph atlas
+and ramp, with live cell dimensions, source/monochrome color, and effect toggle.
+The editor and product hotkeys remain in M4. Historical M0–M2 validation
+results are retained below.
 
 ## Product experience
 
@@ -355,7 +355,7 @@ Deleted files are skipped, paths with spaces are supported, and missing
 `clang-format` fails with an installation instruction. Git clones do not
 activate hooks automatically; run the configuration command above locally.
 
-### Launch with GlyphShift (M1–M2)
+### Launch with GlyphShift (M1–M3)
 
 ```bash
 ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
@@ -389,11 +389,13 @@ or otherwise unlaunchable targets return 126. The application's own exit code
 is returned after a successful exec. No installation or elevated privileges
 are required.
 
-The interposer exports only `glXSwapBuffers`, resolves the next symbol via
-`dlsym(RTLD_NEXT, ...)` once with thread-safe lazy initialization, and forwards
-the original display/drawable. It creates no GL resources and changes no GL
-state. There is no graphics work in a constructor, per-frame allocation, or
-per-frame logging. `GLYPHSHIFT_LOG=1` emits one initialization diagnostic on
+The interposer exports `glXSwapBuffers`, `glXMakeCurrent`,
+`glXMakeContextCurrent`, and `glXDestroyContext`. It resolves the next symbols
+via `dlsym(RTLD_NEXT, ...)` with thread-safe lazy initialization and forwards
+the original arguments. Context lifecycle hooks release owned resources while
+the context is still current. The M3 pass below runs before the original swap
+when enabled. There is no graphics work in a constructor, steady-frame heap
+allocation, or per-frame logging. `GLYPHSHIFT_LOG=1` emits one initialization diagnostic on
 the first swap; logging is otherwise off. A thread-local guard suppresses
 recursive reentry, with at most one opt-in warning. If the original symbol
 cannot be resolved, swaps are skipped with one opt-in diagnostic rather than
@@ -406,7 +408,7 @@ obtained directly from driver procedure-address APIs have not been validated.
 The Vulkan layer described below is also enabled for applications launched
 through GlyphShift; GLX applications do not initialize Vulkan as a result.
 
-### Vulkan pass-through layer (M2)
+### Vulkan loader layer (M2–M3)
 
 The build adds `libglyphshift_vk.so` and
 `build/dev/layers/VK_LAYER_GLYPHSHIFT_overlay.json` (or the Release equivalent).
@@ -441,11 +443,13 @@ are retained as CPU metadata. Unknown commands forward to the appropriate
 next procedure-address function, including the physical-device chain; optional
 commands unavailable downstream remain null.
 
-Presentation forwards the exact `VkPresentInfoKHR` pointer, wait semaphores,
+When disabled or outside the supported M3 capture path, presentation forwards
+the exact `VkPresentInfoKHR` pointer, wait semaphores,
 image indices, `pNext`, per-swapchain results, and return code. It performs no
 rendering, command submission, GPU wait, image-layout transition, readback,
 or heap allocation. Registry locks are released before downstream calls.
-M2 leaves all swapchain recreation and GPU synchronization to the application.
+The enabled M3 path adds the GPU work and synchronization described below;
+swapchain recreation remains the application's responsibility.
 CPU metadata is removed on destruction. Optional metadata allocation failures
 leave forwarding intact and emit at most one opt-in warning per owner. If
 mandatory dispatch-state allocation fails during instance/device creation,
@@ -475,13 +479,14 @@ manifest's library path is relative to its own location, so the launcher,
 libraries and `layers/` directory must stay together. Reconfigure after moving
 the source/build trees, as with the M0 fixture shader paths.
 
-### M3 development (in progress)
+### Glyph rendering and live controls (M3)
 
-GLX now applies the GPU glyph pass by default, using an original built-in 8×8
+GLX and Vulkan apply the GPU glyph pass by default, using an original built-in 8×8
 bitmap atlas and the shared ramp ` .:-=+*#%@`. Settings are independent from
 both APIs; shaders receive the ramp as lookup-texture data. A four-sample cell
-average uses shared Rec.709 luminance coefficients. The Vulkan renderer is
-still in progress at this point; do not treat M3 as complete yet.
+average uses shared Rec.709 luminance coefficients. GLSL is shared by both
+backends and embedded into the libraries (SPIR-V for Vulkan); there is no
+runtime glyph shader-file dependency.
 
 M3 controls use an optional live settings file; the editor and F10 remain M4:
 
@@ -514,11 +519,36 @@ thread marks a current context for retirement at its next unbind. Active
 queries or bound transform-feedback buffers conservatively skip the effect.
 `GLYPHSHIFT_FIXTURE_GL_DEBUG=1` enables the fixture's driver debug callback.
 
-Initial verification: eight Debug CTest tests passed, including deterministic
-ramp/luminance/atlas/config tests and live-file replacement. The GLX fixture
-rendered 120 frames and shut down without GL errors or driver debug messages.
-Live source/mono/13×19/off captures were inspected; the disabled 800×600,
-fixed-time-1.25 capture matched the M2 original exactly (RMSE `0 (0)`).
+`GLYPHSHIFT_FIXTURE_STATE_CHECK=1` surrounds each fixture swap with an
+independent adversarial state snapshot/check, including indexed color/blend,
+fractional/indexed viewports, scissor, clip control, FBO routes, textures,
+samplers, pixel-store settings and pack/unpack buffers when supported.
+
+The Vulkan layer requests transfer-source and color-attachment usage only
+when the surface supports it. A rejected expanded-usage creation is retried
+with the original request. Capture is a GPU image copy; only the built-in
+atlas/ramp are uploaded from host memory. Each swapchain image owns a capture
+texture, framebuffer, command buffer, submission fence and completion
+semaphore. The added submit waits on the application's original presentation
+semaphores, transitions PRESENT → TRANSFER_SRC → COLOR_ATTACHMENT → PRESENT,
+and signals the image's completion semaphore for downstream presentation.
+Other presentation fields, per-swapchain results and return codes are retained.
+Command buffers receive the loader's dispatch initialization callback.
+No per-frame device/queue-idle wait or steady-frame heap allocation is used.
+The renderer waits for its queue at swapchain teardown/resize; this follows
+the conventional unextended WSI lifetime model, whose teardown limits are
+explained in the [Khronos semaphore-reuse guide](https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html).
+
+The M3 Vulkan capture path supports SDR RGBA/BGRA 8-bit UNORM/SRGB, one image
+layer, and an unprotected graphics presentation queue. SRGB capture uses an
+UNORM view of the copied bytes and compensates for output attachment encoding.
+Exclusive sharing requires one logical-device queue family; concurrent sharing
+requires the presentation family in the declared list. Multi-swapchain present
+batches, presentation `pNext` chains, shared/protected swapchains, queue changes,
+and unsupported formats/usage conservatively forward unchanged, with an opt-in
+once-per-device diagnostic. Initialization failures disable that swapchain's
+effect and report the exact failure. These are fixture-scoped M3 capabilities;
+M5 owns broader multi-context/swapchain and application coverage.
 
 ### Run and check the fixtures directly
 
@@ -773,6 +803,103 @@ library path and a newly generated LSP database were also checked in the clean
 source setup. Both working-tree presets separately exited zero after 120
 Vulkan frames with validation enabled.
 
+### Verified M3 results
+
+Verified on 2026-10-17 in the Arch/X11/i3/NVIDIA RTX 3060 Ti environment
+recorded above. M2 was committed as `96f3503` before the separately requested
+M3. Shared glyph semantics and the initial GLX pass were committed during M3
+as `4bad030` and `040e4b9`; the latter corrects the dispatch-function list.
+
+Commands executed include:
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --build --preset release
+ctest --preset release
+python3 tools/format.py --apply
+python3 tools/format.py --check
+cmake --build --preset dev --target format-check
+git diff --check
+spirv-val --target-env vulkan1.0 build/dev/generated/glyph.vert.spv
+spirv-val --target-env vulkan1.0 build/dev/generated/glyph.frag.spv
+spirv-val --target-env vulkan1.0 build/release/generated/glyph.vert.spv
+spirv-val --target-env vulkan1.0 build/release/generated/glyph.frag.spv
+nm -D --defined-only build/dev/libglyphshift_gl.so
+nm -D --defined-only build/dev/libglyphshift_vk.so
+ldd build/dev/libglyphshift_gl.so
+ldd build/dev/libglyphshift_vk.so
+```
+
+Both presets passed all eight CTest tests without compiler warnings. New pure
+logic checks cover atlas pixels, luminance/ramp boundaries, reordered ramp
+data, invalid/nonfinite inputs, validated settings and live-file replacement.
+Existing launcher, staged-format-hook, GLX forwarding and synthetic Vulkan
+layer tests continue to pass. The root LSP database contains 19 translation
+units and continues to point to Debug. Neither injected library links to GL
+or the Vulkan loader; exported entry points are restricted to the four GLX
+hooks and Vulkan negotiation, respectively. Both generated glyph SPIR-V
+modules passed validation in each preset.
+
+A temporary X11 driver was executed with:
+
+```bash
+setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m3-matrix.py
+M3_API=vulkan M3_INJECTED_ONLY=1 setpriv --inh-caps=-all -- \
+  python3 /tmp/glyphshift-m3-matrix.py release
+```
+
+It uses `--fixed-time 1.25`, compares direct and injected fixtures, and confirms
+12 actual resizes through 320×240, 1024×768, 640×480, 1000×300, 300×800 and
+800×600, repeated. At every size it atomically replaces the settings file to
+select off, source 8×12, monochrome 8×12, source 13×19, and source 8×12 again.
+Disabled images match the direct original exactly; re-enabled images match
+the previous source image exactly. Monochrome captures contain only black
+and white. Source-color and changed-cell images were also inspected visually.
+The injected GLX runs enable both the independent hostile-state snapshot and
+KHR_debug callback. Vulkan runs enable Khronos core/synchronization validation
+using the temporary package recorded under M0. Captures require a visible,
+unobscured fixture; an initial obscured-window capture was rejected and the
+driver was corrected to activate/raise the fixture before captures and keep
+tall windows inside the screen. The final Vulkan Release round was repeated
+after ImageMagick capture failures; its complete 12-resize run then passed.
+Both presets passed all 48 cross-API mode/size comparisons with maximum
+normalized RMSE `0.000146148` (threshold `0.003`). All runs exited zero on
+`WM_DELETE_WINDOW`, with no GL debug or Vulkan validation warnings/errors,
+including teardown. The loader's expected layer-enablement announcements
+remained visible. Results are under `/tmp/glyphshift-m3-results`.
+
+A source-only copy at `/tmp/glyphshift-m3-clean`, excluding existing builds,
+Git/agent metadata and the root database, independently configured and built
+both presets with `cmake --preset dev` / `release` and their build commands.
+Both passed all eight tests and generated their own compilation database.
+Its final Debug GLX launcher also passed 60 frames with both state checking
+and KHR_debug enabled; its Release Vulkan launcher passed 60 frames with
+Khronos/synchronization validation enabled:
+
+```bash
+setpriv --inh-caps=-all -- env GLYPHSHIFT_FIXTURE_GL_DEBUG=1 \
+  GLYPHSHIFT_FIXTURE_STATE_CHECK=1 /tmp/glyphshift-m3-clean/build/dev/glyphshift \
+  -- /tmp/glyphshift-m3-clean/build/dev/glyphshift-glx-fixture --frames 60
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m0-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 /tmp/glyphshift-m3-clean/build/release/glyphshift \
+  -- /tmp/glyphshift-m3-clean/build/release/glyphshift-vulkan-fixture \
+  --validation --frames 60
+setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m3-srgb.py
+```
+
+The last temporary driver uses the clean Debug build and
+`GLYPHSHIFT_FIXTURE_SRGB=1`, an opt-in fixture format selection. Its source,
+mono, 13×19 and disabled live captures passed with clean exit after 101 frames
+and no validation warnings/errors. The source capture had 4,974 colors;
+monochrome contained exactly two. The source image was visually inspected. The default
+fixture continues to select UNORM.
+
+These are fixture results on the recorded GPU. Games, Proton, Mesa, other GPUs,
+Wayland and broader multi-context/swapchain cases were not verified. The M4
+editor/hotkeys and M5 integrations were not implemented.
+
 ## Milestones
 
 Implement and validate these in order. Both backends are part of the MVP; a
@@ -914,5 +1041,5 @@ The M0 implementation and verification above cover:
    confirm clean shutdown.
 5. Record the exact verified setup and build commands here.
 
-M0, M1 and the separately requested M2 are complete. M3 and later milestones
+M0 through the separately requested M3 are complete. M4 and later milestones
 require separate requests; do not start them automatically.

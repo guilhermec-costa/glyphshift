@@ -419,6 +419,7 @@ void device_checks(VkInstance instance, VkDevice device, int index) {
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   unsetenv("GLYPHSHIFT_LOG");
+  unsetenv("GLYPHSHIFT_CONFIG");
   void* library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
   if (!library) {
     std::cerr << dlerror() << '\n';
