@@ -17,6 +17,9 @@ namespace {
 constexpr unsigned insert = 0xff63, escape = 0xff1b, f10 = 0xffc7;
 struct State {
   Settings settings{}, external{};
+  CharacterSelection draft{}, draft_base{};
+  bool draft_ready = false;
+  std::array<char, 256> character_error{};
   bool ready = false, open = false, available = true;
   std::array<bool, 256> captured{}, pressed{};
   std::array<unsigned long, 256> released{};
@@ -197,7 +200,7 @@ void queue(State& state, const Input& event) {
 void controls(State& state, unsigned width, unsigned height, const char* api,
               const char* version, const char* error, Runtime& runtime) {
   const float w = std::min(348.0F, static_cast<float>(width) - 16.0F);
-  const float h = std::min(455.0F, static_cast<float>(height) - 16.0F);
+  const float h = std::min(620.0F, static_cast<float>(height) - 16.0F);
   ImGui::SetNextWindowPos({8, 8}, ImGuiCond_Always);
   ImGui::SetNextWindowSize({std::max(w, 1.0F), std::max(h, 1.0F)},
                            ImGuiCond_Always);
@@ -245,6 +248,49 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
                        "%.2f", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("0: scene detail  |  1: pure glyphs");
+    if (ImGui::CollapsingHeader("Characters and font")) {
+      if (!state.draft_ready || state.draft_base != state.settings.glyphs) {
+        state.draft = state.draft_base = state.settings.glyphs;
+        state.draft_ready = true;
+      }
+      if (ImGui::BeginCombo("Character set",
+                            character_sets[state.draft.set].data())) {
+        for (unsigned i = 0; i < character_sets.size(); ++i)
+          if (ImGui::Selectable(character_sets[i].data(),
+                                i == state.draft.set)) {
+            state.draft.set = i;
+            state.draft.density_order = (i == 1 || i == 2 || i == 5);
+          }
+        ImGui::EndCombo();
+      }
+      if (state.draft.set == 6)
+        ImGui::InputText("Sequence (UTF-8)", state.draft.text.data(),
+                         state.draft.text.size());
+      ImGui::InputText("Font file", state.draft.font.data(),
+                       state.draft.font.size());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(
+            "Absolute TTF/OTF path; empty uses system monospace. "
+            "Blocks/Braille are built in.");
+      ImGui::Checkbox("Sort by ink density", &state.draft.density_order);
+      ImGui::Checkbox("Reverse dark / light", &state.draft.reverse);
+      ImGui::TextWrapped(
+          "Up to 256 Unicode characters. Manual order: dark to light. Changes "
+          "apply on confirmation.");
+      if (ImGui::Button("Apply characters")) {
+        if (valid_characters(state.draft)) {
+          state.settings.glyphs = state.draft;
+          state.draft_base = state.draft;
+          state.character_error[0] = 0;
+        } else
+          std::snprintf(state.character_error.data(),
+                        state.character_error.size(),
+                        "Use 1..256 valid UTF-8 characters and an absolute "
+                        "font path (or empty).");
+      }
+      if (state.character_error[0])
+        ImGui::TextWrapped("%s", state.character_error.data());
+    }
     if (ImGui::Button("Reset to defaults")) state.settings = {};
     ImGui::Separator();
     ImGui::TextWrapped(
@@ -340,9 +386,13 @@ Frame::Frame(void* display, std::uint64_t window, unsigned width,
         const auto mapped = key(event.code);
         if (mapped != ImGuiKey_None)
           io.AddKeyEvent(mapped, event.kind == Kind::key_down);
+        const unsigned text_code =
+            event.code >= 0x01000000 ? event.code & 0xffffff : event.code;
         if (event.kind == Kind::key_down && !event.modified &&
-            event.code >= 32 && event.code < 127)
-          io.AddInputCharacter(event.code);
+            text_code >= 32 && text_code <= 0x10ffff &&
+            (event.code < 256 || event.code >= 0x01000000) &&
+            !(text_code >= 0xd800 && text_code <= 0xdfff))
+          io.AddInputCharacter(text_code);
       }
       if (event.kind == Kind::focus_lost) io.AddFocusEvent(false);
     }
@@ -375,6 +425,16 @@ void deactivate(void* display, std::uint64_t window) noexcept {
       found->second.open = false;
       found->second.count = 0;
     }
+  } catch (...) {
+  }
+}
+void character_report(const char* error) noexcept {
+  try {
+    auto& r = runtime();
+    const std::lock_guard lock(r.mutex);
+    if ((error && *error) ||
+        std::strncmp(r.error.data(), "Characters:", 11) == 0)
+      std::snprintf(r.error.data(), r.error.size(), "%s", error ? error : "");
   } catch (...) {
   }
 }

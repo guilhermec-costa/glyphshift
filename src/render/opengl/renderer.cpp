@@ -168,7 +168,37 @@ struct Context {
     tf_bindings = static_cast<unsigned>(feedback);
     caps_ready = true;
   }
-  void initialize() {
+  glyphshift::CharacterSelection selection{};
+  unsigned selected_count = 10;
+  std::unique_ptr<CharacterAtlas> character_data;
+  void update_characters(const glyphshift::CharacterSelection& value) {
+    const auto& gl = api();
+    const bool rebuilt = !character_data || selection != value;
+    if (rebuilt) {
+      character_data =
+          std::make_unique<CharacterAtlas>(build_character_atlas(value));
+      selection = value;
+    }
+    const auto& data = *character_data;
+    selected_count = data.count;
+    gl.ActiveTexture(GL_TEXTURE1);
+    gl.BindTexture(GL_TEXTURE_2D, atlas);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, character_atlas_width,
+                  character_atlas_height, 0, GL_RED, GL_UNSIGNED_BYTE,
+                  data.pixels.data());
+    gl.ActiveTexture(GL_TEXTURE2);
+    gl.BindTexture(GL_TEXTURE_2D, ramp);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, 256, 1, 0, GL_RED_INTEGER,
+                  GL_UNSIGNED_BYTE, data.ramp.data());
+    gl.UseProgram(program);
+    gl.Uniform1ui(gl.GetUniformLocation(program, "ramp_count"), selected_count);
+    editor::character_report(data.diagnostic.data());
+    if (rebuilt && data.diagnostic[0]) {
+      diagnostic(data.diagnostic.data());
+      diagnostic("\n");
+    }
+  }
+  void initialize(const glyphshift::CharacterSelection& characters) {
     const auto& gl = api();
     program = gl.CreateProgram();
     for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
@@ -192,23 +222,17 @@ struct Context {
     gl.ActiveTexture(GL_TEXTURE1);
     gl.BindTexture(GL_TEXTURE_2D, atlas);
     texture_parameters(gl);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlas_width, atlas_height, 0, GL_RED,
-                  GL_UNSIGNED_BYTE, default_atlas.data());
     gl.GenTextures(1, &ramp);
     gl.ActiveTexture(GL_TEXTURE2);
     gl.BindTexture(GL_TEXTURE_2D, ramp);
     texture_parameters(gl);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8UI,
-                  static_cast<GLsizei>(default_ramp.size()), 1, 0,
-                  GL_RED_INTEGER, GL_UNSIGNED_BYTE, default_ramp.data());
     if (!vao || !atlas || !ramp)
       throw std::runtime_error("GL object allocation failed");
     gl.UseProgram(program);
     gl.Uniform1i(gl.GetUniformLocation(program, "source_image"), 0);
     gl.Uniform1i(gl.GetUniformLocation(program, "atlas_image"), 1);
     gl.Uniform1i(gl.GetUniformLocation(program, "ramp_image"), 2);
-    gl.Uniform1ui(gl.GetUniformLocation(program, "ramp_count"),
-                  static_cast<GLuint>(default_ramp.size()));
+    update_characters(characters);
     size = gl.GetUniformLocation(program, "size");
     cell = gl.GetUniformLocation(program, "cell");
     source_color = gl.GetUniformLocation(program, "source_color");
@@ -352,7 +376,10 @@ struct Context {
     gl.GetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     if (!double_buffer) return;
     if (settings.enabled) {
-      if (!program) initialize();
+      if (!program)
+        initialize(settings.glyphs);
+      else if (selection != settings.glyphs)
+        update_characters(settings.glyphs);
       auto& drawable = drawables[handle];
       gl.ActiveTexture(GL_TEXTURE0);
       if (!drawable.image) {

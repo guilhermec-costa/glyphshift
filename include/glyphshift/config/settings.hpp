@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <glyphshift/config/characters.hpp>
 #include <string_view>
 
 namespace glyphshift {
@@ -10,6 +11,7 @@ struct Settings {
   bool source_color = true;
   bool enabled = true;
   float glyph_strength = 0.45F;
+  CharacterSelection glyphs{};
   bool operator==(const Settings&) const = default;
 };
 enum SettingWarning : std::uint32_t {
@@ -18,7 +20,8 @@ enum SettingWarning : std::uint32_t {
   invalid_color = 4,
   invalid_enabled = 8,
   unknown_setting = 16,
-  invalid_strength = 32
+  invalid_strength = 32,
+  invalid_characters = 64
 };
 struct ParsedSettings {
   Settings value;

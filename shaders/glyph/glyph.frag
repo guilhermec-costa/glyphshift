@@ -57,8 +57,10 @@ void main() {
     float luminance = dot(average, vec3(.2126,.7152,.0722));
     uint index = min(uint(clamp(luminance, 0.0, 1.0) * float(RAMP_COUNT)), RAMP_COUNT - 1u);
     uint glyph = texelFetch(ramp_image, ivec2(int(index),0), 0).r;
-    ivec2 local = ivec2(floor(fract(pixel / CELL) * 8.0));
-    float mask = texelFetch(atlas_image, ivec2(int(glyph)*8+local.x,local.y), 0).r;
+    ivec2 tile = textureSize(atlas_image, 0) / 16;
+    ivec2 local = ivec2(floor(fract(pixel / CELL) * vec2(tile)));
+    ivec2 atlas_at = ivec2(int(glyph) % 16, int(glyph) / 16) * tile + local;
+    float mask = texelFetch(atlas_image, atlas_at, 0).r;
     vec3 result = (SOURCE_COLOR != 0u ? average : vec3(1.0)) * mask;
     // Preserve fine silhouettes and HUD edges when the user prefers a readable
     // scene; strength 1 keeps the pure glyph mode, including binary mono.

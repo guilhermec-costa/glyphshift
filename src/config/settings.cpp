@@ -18,6 +18,45 @@ std::string_view trim(std::string_view text) {
   if (start == std::string_view::npos) return {};
   return text.substr(start, text.find_last_not_of(whitespace) - start + 1);
 }
+std::string_view uncomment(std::string_view text) {
+  bool quoted = false, escaped = false;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c == '\\' && quoted) {
+      escaped = true;
+      continue;
+    }
+    if (c == '"') quoted = !quoted;
+    if (c == '#' && !quoted) return text.substr(0, i);
+  }
+  return text;
+}
+bool string_value(std::string_view text, std::array<char, 1025>& output) {
+  output.fill(0);
+  const bool quoted = !text.empty() && text.front() == '"';
+  if (quoted) {
+    if (text.size() < 2 || text.back() != '"') return false;
+    text = text.substr(1, text.size() - 2);
+  }
+  std::size_t at = 0;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    char c = text[i];
+    if (quoted && c == '\\') {
+      if (++i == text.size() || (text[i] != '\\' && text[i] != '"'))
+        return false;
+      c = text[i];
+    } else if (quoted && c == '"')
+      return false;
+    if (static_cast<unsigned char>(c) < 32 || at + 1 >= output.size())
+      return false;
+    output[at++] = c;
+  }
+  return true;
+}
 bool cell(std::string_view text, unsigned& output) {
   unsigned value = 0;
   const auto [end, error] =
@@ -97,6 +136,8 @@ class Runtime {
       warning("glyphshift: invalid cell_height; using 12 (range 2..128)\n");
     if (parsed.warnings & invalid_color)
       warning("glyphshift: invalid color_mode; using source (source/mono)\n");
+    if (parsed.warnings & invalid_characters)
+      warning("glyphshift: invalid character selection; using classic\n");
     if (parsed.warnings & invalid_strength)
       warning("glyphshift: invalid glyph_strength; using 0.45 (range 0..1)\n");
     if (parsed.warnings & invalid_enabled)
@@ -115,13 +156,14 @@ class Runtime {
 }  // namespace
 ParsedSettings parse_settings(std::string_view text) noexcept {
   ParsedSettings parsed;
+  bool explicit_set = false, custom_text = false, explicit_order = false;
   const Settings defaults;
   while (!text.empty()) {
     const auto end = text.find('\n');
     auto line = trim(text.substr(0, end));
     text = end == std::string_view::npos ? std::string_view{}
                                          : text.substr(end + 1);
-    line = trim(line.substr(0, line.find('#')));
+    line = trim(uncomment(line));
     if (line.empty()) continue;
     const auto equal = line.find('=');
     if (equal == std::string_view::npos) {
@@ -154,6 +196,37 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
         parsed.warnings |= invalid_strength;
       else
         parsed.value.glyph_strength = strength;
+    } else if (key == "character_set") {
+      explicit_set = true;
+      bool found = false;
+      for (unsigned i = 0; i < character_sets.size(); ++i)
+        if (value == character_sets[i]) {
+          parsed.value.glyphs.set = i;
+          found = true;
+        }
+      if (!found) parsed.warnings |= invalid_characters;
+    } else if (key == "characters") {
+      custom_text = true;
+      if (!string_value(value, parsed.value.glyphs.text))
+        parsed.warnings |= invalid_characters;
+    } else if (key == "glyph_font") {
+      if (!string_value(value, parsed.value.glyphs.font))
+        parsed.warnings |= invalid_characters;
+    } else if (key == "glyph_order") {
+      explicit_order = true;
+      if (value == "density")
+        parsed.value.glyphs.density_order = true;
+      else if (value == "manual")
+        parsed.value.glyphs.density_order = false;
+      else
+        parsed.warnings |= invalid_characters;
+    } else if (key == "glyph_reverse") {
+      if (value == "true" || value == "1")
+        parsed.value.glyphs.reverse = true;
+      else if (value == "false" || value == "0")
+        parsed.value.glyphs.reverse = false;
+      else
+        parsed.warnings |= invalid_characters;
     } else if (key == "enabled") {
       parsed.value.enabled = defaults.enabled;
       if (value == "false" || value == "0")
@@ -163,6 +236,14 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
     } else
       parsed.warnings |= unknown_setting;
   }
+  if (custom_text && !explicit_set) parsed.value.glyphs.set = 6;
+  if (!explicit_order &&
+      (parsed.value.glyphs.set == 1 || parsed.value.glyphs.set == 2 ||
+       parsed.value.glyphs.set == 5))
+    parsed.value.glyphs.density_order = true;
+  if (!valid_characters(parsed.value.glyphs))
+    parsed.warnings |= invalid_characters;
+  if (parsed.warnings & invalid_characters) parsed.value.glyphs = {};
   return parsed;
 }
 Settings runtime_settings() noexcept {

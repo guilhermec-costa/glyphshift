@@ -15,6 +15,8 @@ void check(bool ok, const char* name) {
 }  // namespace
 int main() {
   using namespace glyphshift::editor;
+  check(IM_UNICODE_CODEPOINT_MAX == 0x10FFFF,
+        "full Unicode input representation");
   unsetenv("GLYPHSHIFT_CONFIG");
   unsetenv("GLYPHSHIFT_PRESET");
   setenv("GLYPHSHIFT_PROFILE", "unit-editor", 1);

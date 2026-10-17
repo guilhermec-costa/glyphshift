@@ -96,6 +96,13 @@ try:
         strength('1');pure=image(window,'strength-one');assert pure!=original
         strength('0.37');glyph=image(window,'strength-fraction')
         assert glyph!=original and glyph!=pure,'fractional strength did not change rendering'
+        # Select binary through the real editor, apply, then persist it.
+        x.key(window,0xff63);x.click(window,100,330)
+        x.click(window,100,359);x.click(window,100,456)
+        x.click(window,100,524);x.click(window,100,330);x.key(window,0xff1b)
+        selected=image(window,'selected-binary')
+        assert selected!=glyph,'editor character selector did not change output'
+        glyph=selected
         x.key(window,0xffc7)
         # Save the disabled effect under a named preset through the real UI.
         x.key(window,0xff63);x.click(window,90,122)
@@ -106,6 +113,7 @@ try:
         assert (directory/'night.conf').is_file(),'Save preset did not create named file; inspect editor.ppm'
         assert 'enabled=false' in (directory/'night.conf').read_text()
         assert 'glyph_strength=0.37\n' in (directory/'night.conf').read_text()
+        assert 'character_set=binary\n' in (directory/'night.conf').read_text()
         assert (directory/'active').read_text()=='night\n'
         x.key(window,0xff1b);text=finish(process,window,log)
         assert [line for line in text.splitlines() if line.startswith('Fixture input:')]==(['Fixture input: key down 97'] if api=='glx' else ['Fixture input: key up 97']),text
@@ -116,6 +124,31 @@ try:
             x.resize(window,w,h);before=image(window,f'resize-{index}-before')
             x.key(window,0xff63);assert image(window,f'resize-{index}-editor')!=before
             x.key(window,0xff1b);assert image(window,f'resize-{index}-after')==before
+        finish(process,window,log)
+    # Change atlas/ramp live, including 256 Braille cells and font fallback.
+    config=output/'characters.conf'
+    base='enabled=true\ncolor_mode=mono\nglyph_strength=1\ncell_width=8\ncell_height=12\n'
+    def characters(text):
+        temp=config.with_suffix('.tmp');temp.write_text(base+text);temp.replace(config);time.sleep(.25)
+    characters('character_set=classic\n')
+    with launch('characters',extra={'GLYPHSHIFT_CONFIG':str(config),'GLYPHSHIFT_PRESET':'default','GLYPHSHIFT_LOG':'1'}) as (process,window,log):
+        x.resize(window,800,600);classic=image(window,'characters-classic')
+        pictures=[]
+        for name,text in [
+            ('ascii','character_set=ascii\n'),
+            ('binary','character_set=binary\n'),
+            ('blocks','character_set=blocks\n'),
+            ('braille','character_set=braille\n'),
+            ('custom','characters=" .01ABCé░▒▓█"\nglyph_order=density\n'),
+            ('reverse','character_set=blocks\nglyph_reverse=true\n')]:
+            characters(text);picture=image(window,'characters-'+name)
+            assert picture!=classic,'character selection did not update: '+name
+            pictures.append(picture)
+        assert all(pictures[i]!=pictures[j] for i in range(len(pictures)) for j in range(i))
+        characters('character_set=ascii\nglyph_font="/missing/glyphshift-font.ttf"\n')
+        assert image(window,'characters-font-fallback')==classic,'missing font did not fall back safely'
+        characters('character_set=classic\n')
+        assert image(window,'characters-restored')==classic,'restoring the classic atlas changed its image'
         finish(process,window,log)
     # A fresh profile renders both contexts/swapchains, not the saved disabled effect.
     with launch('multi',extra={'GLYPHSHIFT_FIXTURE_MULTI':'1','GLYPHSHIFT_PRESET':'default'},bounded=True) as (process,window,log):
@@ -133,5 +166,5 @@ try:
             x.close(window);assert process.wait(timeout=15)==0,log.read_text()
             text=log.read_text();assert text.count('unsupported Vulkan present batch/pNext')==1,text
             assert 'Vulkan validation:' not in text,text
-    print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
+    print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
 finally:x.shutdown()

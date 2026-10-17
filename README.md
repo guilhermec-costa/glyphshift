@@ -21,7 +21,9 @@ coverage. The recorded M5 matrix includes native applications and an offline
 SuperTux Windows run through portable GE-Proton/DXVK. Input limitations remain
 explicit below; this does not claim general game compatibility or every future
 product control. A subsequent user-requested legibility pass adds configurable
-glyph strength and readable/classic example presets, described below.
+glyph strength and readable/classic example presets. A further explicit user
+request adds selectable character sets, custom UTF-8 sequences and local fonts,
+described below.
 Historical validation results are retained below.
 
 ## Product experience
@@ -285,7 +287,10 @@ dropping and live visual adjustments, see the [test guide](tests/README.md).
 Build on Linux x86-64 with a C++20 compiler (including floating-point
 `std::from_chars`), CMake 3.20 or newer, Ninja, Xlib development headers,
 OpenGL/GLX development libraries, Vulkan headers and loader, and
-`glslangValidator`. Tests and developer formatting commands additionally use
+`glslangValidator`. Character atlas generation additionally needs FreeType,
+Fontconfig and pkg-config development files. Nonprocedural sets need an
+installed monospace font or an explicit local TTF/OTF path.
+Tests and developer formatting commands additionally use
 Python 3 and Git. Formatting requires `clang-format` (verified with 22.1.8).
 Running the fixtures requires an accessible X11 display,
 an OpenGL 3.3 core driver, and a Vulkan 1.0 driver supporting Xlib surfaces,
@@ -298,7 +303,7 @@ Arch Linux package names (package installation was not performed during M0):
 ```bash
 sudo pacman -S --needed base-devel cmake ninja libx11 libglvnd \
   vulkan-headers vulkan-icd-loader glslang vulkan-validation-layers \
-  python git clang
+  python git clang freetype2 fontconfig pkgconf ttf-dejavu
 ```
 
 Install the Vulkan ICD matching the GPU separately, for example `nvidia-utils`
@@ -677,7 +682,7 @@ scene detail reduced to 100×50 cells at 800×600. It was not a satisfactory
 readability default. The user requested better visual quality with configurable
 style. Both APIs now expose **Glyph strength** in the editor, config file and
 saved per-game presets. The default is 0.45 with source color; cell defaults
-remain 8×12. Strength 1 retains pure glyph rendering, including binary mono.
+remain 8×12. Strength 1 retains pure glyph rendering, including binary mono with the built-in classic atlas.
 Strength 0 uses per-pixel source color or grayscale; F10 still bypasses the
 entire effect and restores the original image regardless of color mode.
 Intermediate strength is an explicit blend of the source pixels and the glyph
@@ -771,6 +776,118 @@ validation diagnostics. Live captures/logs are under
 `/tmp/glyphshift-quality/proton`; the complete resize/input/preset acceptance
 checks are the passing GLX/Vulkan fixtures above. Wine editor/hotkey limitations
 from M5 remain; this quality change does not implement a new input backend.
+
+### Character selection and fonts (explicitly requested after M5)
+
+The glyph ramp is now configurable per game and shared by GLX/Vulkan. The
+editor's **Characters and font** section provides a set selector, a custom
+sequence field, a local font path, density sorting and dark/light reversal.
+Edits remain a draft until **Apply characters**, so typing does not rebuild GPU
+resources on every keystroke. Use **Save preset** to persist the applied
+selection alongside the other effect settings. Selecting a different set keeps
+the custom draft text available for later use.
+
+| character_set | Available characters |
+| --- | --- |
+| classic | Original built-in ` .:-=+*#%@` ramp. |
+| ascii | All 95 printable ASCII characters, U+0020..U+007E. |
+| alphanumeric | Space, dot, digits, lowercase and uppercase Latin letters. |
+| binary | Space, `0`, `1`. |
+| blocks | Space and `░▒▓█`. |
+| braille | All 256 Braille patterns, U+2800..U+28FF. |
+| custom | The supplied UTF-8 sequence, 1..256 Unicode scalar values. |
+
+Example live config, usable in the Proton command from the test guide:
+
+```ini
+character_set=custom
+characters=" .01ABCé░▒▓█"
+glyph_order=density
+glyph_reverse=false
+glyph_font=""
+```
+
+Character selection works with the existing strength/color/cell controls.
+`glyph_order=manual` maps the supplied order from dark to light; duplicate
+characters are allowed and give those glyphs more bins. `glyph_order=density`
+stably sorts by rasterized ink coverage. ASCII, alphanumeric and Braille default
+to density ordering unless overridden; other sets default to manual order.
+`glyph_reverse=true` reverses the resulting ramp. Setting `characters` without
+an explicit character_set selects custom automatically. If both are present,
+the explicit character_set wins. Custom sequences are limited to 256 codepoints
+and 1024 UTF-8 bytes, including spaces and duplicates.
+
+Quote character sequences to preserve leading/trailing spaces and literal `#`.
+Inside quoted strings, `\\` represents a literal backslash and `\"` a literal
+quote. A `#` outside quotes starts a comment. Control characters, malformed
+UTF-8, surrogates and out-of-range scalars are rejected with a safe classic
+fallback. Named presets serialize the selection, text, font path, ordering and
+reverse flag, including correct quoting.
+
+With an empty glyph_font, the classic set retains its original bitmap; other
+text glyphs use the system monospace face discovered through Fontconfig.
+A nonempty glyph_font must be an absolute path to a local Unicode TTF/OTF
+font; paths containing spaces or `#` should be quoted. Blocks U+2580..U+259F
+and Braille are generated internally, including when used in a custom sequence,
+so they do not require font coverage. Unavailable fonts, unsupported bitmap
+formats or missing codepoints produce a diagnostic and use the built-in
+classic set rather than rendering missing-glyph boxes or terminating the game.
+The diagnostic identifies the missing U+ codepoint when applicable.
+
+The atlas uses a 16×16 grid of 16×24 tiles, with a separate 256-entry ramp
+texture. The original classic masks are replicated exactly into those tiles.
+Both backends update lazily when the applied selection changes. GLX caches the
+CPU atlas across context switches; Vulkan retires the old renderer outside
+registry locks, waits its queue during this explicit change and creates fresh
+resources. Stable frames do not rasterize fonts, discover fonts or upload a
+new atlas. Font files are read at initialization/selection changes; replacing
+the same font file on disk does not automatically trigger a reload.
+
+This is per-codepoint glyph rendering, not text shaping: ligatures, combining
+sequences, emoji sequences, color emoji and complex-script layout are not
+implemented. The editor retains its own default UI font; its UTF-8 field may
+show fallback boxes for symbols absent from that UI font. The rendered effect
+uses the selected glyph font. The Xlib adapter accepts basic Latin and Unicode
+keysyms but does not implement IME composition or general clipboard integration;
+use a UTF-8 config file for sequences your desktop input path cannot enter.
+Wine editor/input limitations remain unchanged; file-based selection works
+through the same live-config mechanism.
+
+Ready-to-edit examples:
+[ASCII](presets/characters-ascii.conf),
+[blocks](presets/characters-blocks.conf),
+[Braille](presets/characters-braille.conf),
+[custom](presets/characters-custom.conf).
+
+Character-selection verification on 2026-10-17 used the existing NVIDIA/X11
+setup and Mesa llvmpipe. Both presets built without compiler warnings. Debug
+CTest passed 11 tests; Release passed 13, including the extended GLX/Vulkan
+smoke suites with Khronos core/synchronization validation. The smoke selects
+binary through the actual editor, applies it, saves it and checks the restored
+image after process restart. A separate live-file loop switches classic,
+ASCII, binary, blocks, Braille, custom Unicode, and reversed order, checks that
+the images differ, checks missing-font fallback against the exact classic
+image, and restores the classic result. Existing resize, input, state probes,
+multi-context/swapchain and pass-through failure checks remain active. Mesa
+GLX passed the same extended smoke using the environment recorded above.
+
+The new characters CPU test checks UTF-8 scalar decoding (including a non-BMP
+codepoint), malformed/control/overlong input rejection, 256-character bounds,
+classic mask preservation, procedural coverage, density sorting/reversal,
+complete printable ASCII rasterization, quoted config round trips and missing
+font fallback. Preset tests include custom Unicode, quoting, order and reverse
+persistence; the editor is compiled consistently with 32-bit Unicode support.
+
+A source-only copy at `/tmp/glyphshift-characters-clean` independently configured
+and built Release and passed all 11 CPU tests. The working builds also passed
+format/whitespace checks and validation of all eight glyph/editor SPIR-V
+modules. Shared editor exports remain limited to GlyphShift APIs. FreeType
+2.14.3 and Fontconfig 2.18.3 were available; no packages or fonts were installed.
+Actual shader previews of the saved SuperTux capture were inspected:
+[ASCII](docs/characters-ascii.png), [blocks](docs/characters-blocks.png),
+[Braille](docs/characters-braille.png). These are fixed-image GPU previews,
+not additional Proton/gameplay validations. Wine input, Mesa Vulkan and broader
+compatibility limits recorded under M5 remain unchanged.
 
 ### Automated graphics smoke tests (M5)
 

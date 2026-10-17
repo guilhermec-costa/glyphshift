@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <fstream>
 #include <glyphshift/config/presets.hpp>
 #include <iostream>
@@ -44,8 +45,18 @@ int main() {
           "per-game isolation");
     check(serialize_settings(expected) ==
               "enabled=false\ncell_width=21\ncell_height=19\ncolor_mode="
-              "mono\nglyph_strength=0.37\n",
+              "mono\nglyph_strength=0.37\ncharacter_set=classic\ncharacters=\" "
+              ".:-=+*#%@\"\nglyph_font=\"\"\nglyph_order=manual\nglyph_reverse="
+              "false\n",
           "canonical settings");
+    auto custom = expected;
+    custom.glyphs.set = 6;
+    std::strcpy(custom.glyphs.text.data(), " ░▒▓█#\\\"");
+    custom.glyphs.density_order = true;
+    custom.glyphs.reverse = true;
+    check(first.save("characters", custom, error) &&
+              first.load("characters", actual, error) && actual == custom,
+          "custom Unicode selection persists");
     auto precise = expected;
     precise.glyph_strength = .123456789F;
     check(first.save("precise", precise, error) &&

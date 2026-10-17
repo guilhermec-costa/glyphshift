@@ -31,6 +31,7 @@ class GS_EDITOR_API Frame {
 };
 GS_EDITOR_API void deactivate(void* display, std::uint64_t window) noexcept;
 GS_EDITOR_API void report(const char* error) noexcept;
+GS_EDITOR_API void character_report(const char* error) noexcept;
 GS_EDITOR_API void forget(void* display, std::uint64_t window) noexcept;
 // Platform boundary: no graphics or X11 headers in the editor model.
 enum class Kind {

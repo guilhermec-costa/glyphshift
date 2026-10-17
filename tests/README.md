@@ -141,7 +141,7 @@ glyph_strength=0.45
 | `glyph_strength=0` | Original scene in source mode; grayscale in mono mode. |
 | `glyph_strength=0.25` or `0.45` | More scene detail preserved alongside glyphs. |
 | `glyph_strength=0.75` | Stronger glyph presence. |
-| `glyph_strength=1` | Pure glyphs; binary black/white output in mono mode. |
+| `glyph_strength=1` | Pure glyphs; classic is binary in mono mode, while antialiased fonts can have gray edges. |
 | `color_mode=source` / `mono` | Switch between source color and monochrome. |
 | `enabled=false` | Original image, regardless of color mode. |
 
@@ -155,6 +155,51 @@ during gameplay was not validated. A later run confirmed live style switching,
 but the game refused the requested resize. That run does not count as a complete
 resize/clean-exit pass. This test does not establish general Proton game
 compatibility.
+
+## Character sets, custom sequences, and fonts
+
+In either native fixture, open **Insert → Characters and font**. Choose
+classic, ASCII, alphanumeric, binary, blocks, Braille, or custom. For custom,
+enter the sequence in dark-to-light order or enable **Sort by ink density**.
+Use **Reverse dark / light** to invert the order. Optionally enter an absolute
+TTF/OTF path; empty uses system monospace (classic keeps its built-in bitmap).
+Press **Apply characters**, then **Save preset** if you want to keep the result.
+Changing the draft alone does not apply or save it.
+
+For SuperTux, add these keys to the file already used by GLYPHSHIFT_CONFIG:
+
+```ini
+character_set=custom
+characters=" .01ABCé░▒▓█"
+glyph_order=density
+glyph_reverse=false
+glyph_font=""
+```
+
+Save the file while the game is running. Try character_set values `ascii`,
+`blocks`, `braille`, and `binary`, or keep `custom` and edit the sequence. Quotes
+preserve spaces and literal `#`; escape backslashes as `\\` and quotes as `\"`.
+Manual order is dark-to-light; density order is measured from the actual glyph
+coverage. All choices are part of named presets.
+
+You can also point GLYPHSHIFT_CONFIG at the supplied examples:
+[ASCII](../presets/characters-ascii.conf),
+[blocks](../presets/characters-blocks.conf),
+[Braille](../presets/characters-braille.conf),
+[custom](../presets/characters-custom.conf).
+
+Custom sequences accept 1..256 Unicode codepoints, at most 1024 UTF-8 bytes.
+Blocks and Braille are built in; other symbols need coverage in the selected
+font. Missing fonts/glyphs show a diagnostic and fall back to classic. This
+supports individual symbols rather than shaped text, ligatures, or color emoji.
+The editor's UI font/input method may not display or enter every symbol;
+UTF-8 file editing is the reliable path for those sequences.
+
+Reopen a saved fixture preset without GLYPHSHIFT_CONFIG to verify that its
+character set, custom sequence, font path, ordering and reversal survive restart.
+The graphics smoke tests also select binary through the editor and save/reload
+it, then switch classic/ASCII/binary/blocks/Braille/custom/reverse live and test
+missing-font fallback on both APIs.
 
 ## Troubleshooting
 
@@ -219,7 +264,8 @@ setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset release
 If the Khronos layer is not installed system-wide, insert the same
 `env VK_LAYER_PATH=...` shown above before `ctest`.
 
-Observed results (10 Debug tests, 12 Release tests, Mesa GLX, and Mesa
+Observed results (historical runs and the character-selection suite: 11 Debug
+tests, 13 Release tests, Mesa GLX, and Mesa
 Vulkan/Proton limitations) are recorded in the [main README](../README.md).
 This guide documents how to reproduce the tests; creating it does not constitute
 a new run of the graphics tests or the game.

@@ -129,6 +129,16 @@ PresetStore::PresetStore(std::filesystem::path home, std::string id) {
     throw std::invalid_argument("invalid preset directory/profile");
   directory_ = std::move(home) / "glyphshift" / "profiles" / id;
 }
+namespace {
+std::string quoted(std::string_view text) {
+  std::string result = "\"";
+  for (char c : text) {
+    if (c == '"' || c == '\\') result += '\\';
+    result += c;
+  }
+  return result + '"';
+}
+}  // namespace
 std::string serialize_settings(const Settings& s) {
   // Locale-independent shortest round-trip; games may change LC_NUMERIC.
   std::array<char, 64> strength{};
@@ -140,7 +150,12 @@ std::string serialize_settings(const Settings& s) {
          "\ncell_width=" + std::to_string(s.cell_width) +
          "\ncell_height=" + std::to_string(s.cell_height) +
          "\ncolor_mode=" + (s.source_color ? "source" : "mono") +
-         "\nglyph_strength=" + std::string(strength.data(), end) + "\n";
+         "\nglyph_strength=" + std::string(strength.data(), end) +
+         "\ncharacter_set=" + std::string(character_sets.at(s.glyphs.set)) +
+         "\ncharacters=" + quoted(s.glyphs.text.data()) +
+         "\nglyph_font=" + quoted(s.glyphs.font.data()) +
+         "\nglyph_order=" + (s.glyphs.density_order ? "density" : "manual") +
+         "\nglyph_reverse=" + (s.glyphs.reverse ? "true" : "false") + "\n";
 }
 bool PresetStore::load(std::string_view name, Settings& settings,
                        std::string& error) const {
@@ -172,6 +187,10 @@ bool PresetStore::save(std::string_view name, const Settings& settings,
     error =
         "invalid preset name (letters, digits, dot, underscore or hyphen; max "
         "64)";
+    return false;
+  }
+  if (!valid_characters(settings.glyphs)) {
+    error = "invalid character selection";
     return false;
   }
   if (!std::isfinite(settings.glyph_strength) || settings.glyph_strength < 0 ||

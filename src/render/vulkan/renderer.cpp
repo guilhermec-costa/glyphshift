@@ -112,14 +112,18 @@ class GlyphRenderer {
  public:
   GlyphRenderer(DeviceDispatch& device, VkSwapchainKHR swapchain,
                 const SwapchainState& state, VkQueue queue,
-                QueueState queue_state)
+                QueueState queue_state, const CharacterSelection& characters)
       : device_(device),
         api_(device.render_api),
         swapchain_(swapchain),
         extent_(state.extent),
         format_(state.format),
         queue_(queue),
-        queue_state_(queue_state) {}
+        queue_state_(queue_state),
+        selection_(characters) {}
+  bool matches(const CharacterSelection& value) const {
+    return selection_ == value;
+  }
   ~GlyphRenderer() {
     const auto device = device_.handle;
     // This wait is teardown/resize only. Ordinary frames wait only their own
@@ -157,6 +161,12 @@ class GlyphRenderer {
     if (staging_memory_) api_.FreeMemory(device, staging_memory_, nullptr);
   }
   void initialize() {
+    atlas_data_ = build_character_atlas(selection_);
+    editor::character_report(atlas_data_.diagnostic.data());
+    if (atlas_data_.diagnostic[0]) {
+      diagnostic(atlas_data_.diagnostic.data());
+      diagnostic("\n");
+    }
     uint32_t family_count = 0;
     device_.instance->queue_properties(device_.physical, &family_count,
                                        nullptr);
@@ -196,9 +206,9 @@ class GlyphRenderer {
     pool.queueFamilyIndex = queue_state_.family;
     check(api_.CreateCommandPool(device_.handle, &pool, nullptr, &pool_),
           "create glyph command pool");
-    texture(atlas_, VK_FORMAT_R8_UNORM, {atlas_width, atlas_height});
-    texture(ramp_, VK_FORMAT_R8_UINT,
-            {static_cast<uint32_t>(default_ramp.size()), 1});
+    texture(atlas_, VK_FORMAT_R8_UNORM,
+            {character_atlas_width, character_atlas_height});
+    texture(ramp_, VK_FORMAT_R8_UINT, {256, 1});
     const auto font = editor::font();
     font_extent_ = {static_cast<uint32_t>(font.width),
                     static_cast<uint32_t>(font.height)};
@@ -291,9 +301,9 @@ class GlyphRenderer {
     check(api_.BeginCommandBuffer(frame.command, &begin),
           "begin glyph command buffer");
     if (!uploaded_) {
-      upload(frame.command, atlas_, 0, {atlas_width, atlas_height});
-      upload(frame.command, ramp_, default_atlas.size(),
-             {static_cast<uint32_t>(default_ramp.size()), 1});
+      upload(frame.command, atlas_, 0,
+             {character_atlas_width, character_atlas_height});
+      upload(frame.command, ramp_, character_atlas_bytes, {256, 1});
       upload(frame.command, font_, font_offset_, font_extent_);
     }
     barrier(frame.command, frame.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -348,7 +358,7 @@ class GlyphRenderer {
                                 static_cast<float>(settings.cell_width),
                                 static_cast<float>(settings.cell_height),
                                 settings.source_color ? 1U : 0U,
-                                static_cast<uint32_t>(default_ramp.size()),
+                                atlas_data_.count,
                                 (format_ == VK_FORMAT_B8G8R8A8_SRGB ||
                                  format_ == VK_FORMAT_R8G8B8A8_SRGB)
                                     ? 1U
@@ -389,6 +399,8 @@ class GlyphRenderer {
   VkFormat format_;
   VkQueue queue_;
   QueueState queue_state_;
+  CharacterSelection selection_;
+  CharacterAtlas atlas_data_;
   VkPhysicalDeviceMemoryProperties memory_{};
   std::mutex mutex_;
   bool uploaded_ = false, submitted_ = false;
@@ -396,7 +408,7 @@ class GlyphRenderer {
   Texture atlas_, ramp_, font_;
   VkExtent2D font_extent_{};
   static constexpr VkDeviceSize font_offset_ =
-      (default_atlas.size() + default_ramp.size() + 3) & ~VkDeviceSize{3};
+      (character_atlas_bytes + 256 + 3) & ~VkDeviceSize{3};
   VkBuffer staging_ = VK_NULL_HANDLE;
   VkDeviceMemory staging_memory_ = VK_NULL_HANDLE;
   VkSampler sampler_ = VK_NULL_HANDLE;
@@ -493,9 +505,9 @@ class GlyphRenderer {
     void* mapped = nullptr;
     check(api_.MapMemory(device_.handle, staging_memory_, 0, bytes, 0, &mapped),
           "map atlas upload");
-    std::memcpy(mapped, default_atlas.data(), default_atlas.size());
-    std::memcpy(static_cast<std::uint8_t*>(mapped) + default_atlas.size(),
-                default_ramp.data(), default_ramp.size());
+    std::memcpy(mapped, atlas_data_.pixels.data(), atlas_data_.pixels.size());
+    std::memcpy(static_cast<std::uint8_t*>(mapped) + character_atlas_bytes,
+                atlas_data_.ramp.data(), atlas_data_.ramp.size());
     std::memcpy(static_cast<std::uint8_t*>(mapped) + font_offset_, font.pixels,
                 static_cast<std::size_t>(font.width) *
                     static_cast<std::size_t>(font.height));
@@ -879,11 +891,14 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     editor_frame.complete(0);
     return device.present(queue, info);
   }
-  std::shared_ptr<GlyphRenderer> renderer;
+  std::shared_ptr<GlyphRenderer> renderer, retired;
   bool initialize = false, blocked = false;
   {
     const std::lock_guard lock(state->mutex);
     blocked = state->render_failed || state->initializing;
+    if (state->renderer &&
+        !state->renderer->matches(editor_frame.settings.glyphs))
+      retired = std::move(state->renderer);
     renderer = state->renderer;
     if (!blocked && !renderer) {
       state->initializing = initialize = true;
@@ -894,10 +909,12 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     editor::deactivate(state->display, state->window);
     return forward();
   }
+  retired.reset();
   try {
     if (initialize) {
       renderer = std::make_shared<GlyphRenderer>(device, info->pSwapchains[0],
-                                                 *state, queue, queue_state);
+                                                 *state, queue, queue_state,
+                                                 editor_frame.settings.glyphs);
       renderer->initialize();
       const std::lock_guard lock(state->mutex);
       state->renderer = renderer;

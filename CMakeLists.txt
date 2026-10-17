@@ -9,6 +9,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Keep ImGui's text representation consistent across the shared model, GPU
+# backends and vendor sources, including characters outside the BMP.
+add_compile_definitions(IMGUI_USE_WCHAR32)
 set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 
@@ -16,6 +19,9 @@ find_package(X11 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
+find_package(Freetype REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 
 add_library(glyphshift_imgui STATIC third_party/imgui/imgui.cpp
@@ -25,14 +31,14 @@ set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_options(glyphshift_imgui PRIVATE -w)
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp)
+add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp)
 set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
 set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
 target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
 set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
 target_include_directories(glyphshift_editor PUBLIC include)
-target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads)
+target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG)
 
 add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
     src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp src/editor/x11_interpose.cpp)
@@ -186,6 +192,9 @@ if(BUILD_TESTING)
     target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
     add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
+    add_executable(glyphshift-character-tests tests/unit/characters_test.cpp)
+    target_link_libraries(glyphshift-character-tests PRIVATE glyphshift_editor)
+    add_test(NAME characters COMMAND glyphshift-character-tests)
     add_executable(glyphshift-presets-tests tests/unit/presets_test.cpp)
     target_link_libraries(glyphshift-presets-tests PRIVATE glyphshift_editor Threads::Threads)
     add_test(NAME presets COMMAND glyphshift-presets-tests)

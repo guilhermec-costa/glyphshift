@@ -98,6 +98,9 @@ int main(int argc, char** argv) {
                     std::istreambuf_iterator<char>()));
     require(!parsed.warnings, "Invalid settings");
     const auto& settings = parsed.value;
+    const auto characters = glyphshift::build_character_atlas(settings.glyphs);
+    if (characters.diagnostic[0])
+      std::cerr << characters.diagnostic.data() << '\n';
     const Context context(width, height);
     const auto program = glCreateProgram();
     for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
@@ -126,12 +129,11 @@ int main(int argc, char** argv) {
     flip(pixels, width, height);
     const auto source =
         texture(0, GL_RGB8, width, height, GL_RGB, pixels.data());
-    const auto atlas =
-        texture(1, GL_R8, glyphshift::atlas_width, glyphshift::atlas_height,
-                GL_RED, glyphshift::default_atlas.data());
-    const auto ramp = texture(
-        2, GL_R8UI, static_cast<unsigned>(glyphshift::default_ramp.size()), 1,
-        GL_RED_INTEGER, glyphshift::default_ramp.data());
+    const auto atlas = texture(1, GL_R8, glyphshift::character_atlas_width,
+                               glyphshift::character_atlas_height, GL_RED,
+                               characters.pixels.data());
+    const auto ramp =
+        texture(2, GL_R8UI, 256, 1, GL_RED_INTEGER, characters.ramp.data());
     const auto output = texture(3, GL_RGB8, width, height, GL_RGB, nullptr);
     GLuint fbo = 0, vao = 0;
     glGenFramebuffers(1, &fbo);
@@ -152,8 +154,7 @@ int main(int argc, char** argv) {
                 static_cast<float>(settings.cell_height));
     glUniform1ui(glGetUniformLocation(program, "source_color"),
                  settings.source_color);
-    glUniform1ui(glGetUniformLocation(program, "ramp_count"),
-                 static_cast<GLuint>(glyphshift::default_ramp.size()));
+    glUniform1ui(glGetUniformLocation(program, "ramp_count"), characters.count);
     glUniform1f(glGetUniformLocation(program, "glyph_strength"),
                 settings.glyph_strength);
     glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
