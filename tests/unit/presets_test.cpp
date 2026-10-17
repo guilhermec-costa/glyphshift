@@ -43,13 +43,24 @@ int main() {
           "presets survive process restart");
     check(!other.load("night", actual, error) && error.empty(),
           "per-game isolation");
-    check(serialize_settings(expected) ==
+    check(serialize_settings(expected).starts_with(
               "enabled=false\ncell_width=21\ncell_height=19\ncolor_mode="
               "mono\nglyph_strength=0.37\ncharacter_set=classic\ncharacters=\" "
               ".:-=+*#%@\"\nglyph_font=\"\"\nglyph_order=manual\nglyph_reverse="
-              "false\n",
-          "canonical settings");
+              "false\n") &&
+              parse_settings(serialize_settings(expected)).value == expected,
+          "canonical settings and extended round trip");
     auto custom = expected;
+    custom.art.illustrated = true;
+    custom.art.fill = false;
+    custom.art.contour_overlay = false;
+    custom.art.exposure = 1.4F;
+    custom.art.contrast = 1.2F;
+    custom.art.gamma = .8F;
+    custom.art.edge_strength = .75F;
+    custom.art.edge_threshold = .2F;
+    custom.art.foreground = {.1F, .3F, .7F};
+    custom.art.background = {.8F, .9F, 1};
     custom.glyphs.set = 6;
     std::strcpy(custom.glyphs.text.data(), " ░▒▓█#\\\"");
     custom.glyphs.density_order = true;

@@ -149,6 +149,30 @@ try:
         assert image(window,'characters-font-fallback')==classic,'missing font did not fall back safely'
         characters('character_set=classic\n')
         assert image(window,'characters-restored')==classic,'restoring the classic atlas changed its image'
+        # Illustration controls are shared by both backends, with no atlas
+        # rebuild for tone/color edits and dedicated slots for contour glyphs.
+        art='render_style=illustrated\ncolor_mode=source\nedge_threshold=0.014\n'
+        characters(art);illustrated=image(window,'illustrated-fill-contours')
+        assert illustrated!=classic
+        characters(art+'contour_overlay=false\n');replaced=image(window,'illustrated-replace-contours')
+        assert replaced!=illustrated,'contour overlay option missing'
+        characters(art+'edge_strength=0\n');filled=image(window,'illustrated-fill-only')
+        assert filled!=illustrated,'contour contribution did not change image'
+        characters(art+'edge_characters="████"\n')
+        assert image(window,'illustrated-custom-contours')!=illustrated,'custom contours did not update'
+        characters(art+'fill_enabled=false\n');outline=image(window,'illustrated-outline-only')
+        assert outline!=illustrated and outline!=filled,'independent contour/fill controls missing'
+        characters(art+'edge_strength=0\nfill_enabled=false\nbackground=0.2,0.3,0.4\n')
+        paper=image(window,'illustrated-paper')[2]
+        assert max(paper[0::3])-min(paper[0::3])==0 and all(abs(a-b)<=1 for a,b in zip(paper[:3],[51,77,102])),'background compositing incorrect'
+        characters(art+'edge_strength=0\ntone_exposure=2\ntone_contrast=1.3\ntone_gamma=0.7\n')
+        assert image(window,'illustrated-tone')!=filled,'tone controls missing'
+        characters(art+'glyph_strength=0\n')
+        assert image(window,'illustrated-zero')==original,'zero strength must preserve source'
+        characters(art+'cell_width=4\ncell_height=4\n')
+        assert image(window,'illustrated-small-cells')!=illustrated,'small-cell sampling missing'
+        characters('character_set=classic\n')
+        assert image(window,'illustrated-restore-classic')==classic
         finish(process,window,log)
     # A fresh profile renders both contexts/swapchains, not the saved disabled effect.
     with launch('multi',extra={'GLYPHSHIFT_FIXTURE_MULTI':'1','GLYPHSHIFT_PRESET':'default'},bounded=True) as (process,window,log):
@@ -166,5 +190,7 @@ try:
             x.close(window);assert process.wait(timeout=15)==0,log.read_text()
             text=log.read_text();assert text.count('unsupported Vulkan present batch/pNext')==1,text
             assert 'Vulkan validation:' not in text,text
+    if api=='glx':
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
     print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
 finally:x.shutdown()

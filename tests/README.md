@@ -320,3 +320,69 @@ that the colored world appears, and captures the reopened panel with source
 color, 6×10 cells and strength 0.35. This also checks that keyboard input returns
 to Wine. The [recorded live capture](../docs/editor-supertux-play.png) shows that
 running level; it is not a fixed-image preview or a gameplay performance test.
+
+## Illustrated glyph drawing
+
+Restart the application through the rebuilt launcher before testing new shared
+libraries. For SuperTux, use the existing offline launch command above with
+`GLYPHSHIFT_CONFIG="$PWD/presets/illustrated.conf"`. Alternative starting points
+are `illustrated-blocks.conf` (text + solid block) and `illustrated-ink.conf`
+(dark ink on warm paper).
+
+Open **Insert → Illustration → Illustrated rendering** to switch an existing
+session. Try 8×12 or 10×14 cells and strength 1 first, then adjust exposure,
+contrast and gamma. Compare **Fill surfaces** on/off and contour strength 0/1.
+Raise contour threshold to retain fewer, stronger outlines. **Contours over
+fill** keeps the underlying block/character and automatically chooses a
+contrasting ink/paper stroke; disable it to replace fill in contour cells. Ink colors the
+contours and monochrome fill; Paper sets their background. Contour glyphs are
+four UTF-8 characters in vertical/horizontal/slash/backslash order and need
+**Apply contours**. Use **Save preset** to retain the result. Existing fill
+sets/custom characters/fonts continue to work independently.
+
+The old mode remains available as `render_style=classic`. At 4×4, filtering
+preserves average ink, but letters may still be too small to recognize. The
+new mode currently uses spatial filtering, not temporal hysteresis.
+
+The expanded graphics smoke checks the new controls on GLX/Vulkan, including
+fill/contour separation, custom Unicode contours, tone/colors, small cells,
+source identity at strength 0 and restoring classic output. GLX additionally
+runs an independent analytic GPU oracle for half/quadrant block masks at seven
+cell sizes, with source-color normalization and colored ink/paper composition:
+
+```bash
+python3 tests/smoke/atlas_filter.py --build build/dev \
+  --output /tmp/glyphshift-art-filter
+```
+
+All 14 cases must differ from the analytic rectangle coverage by at most one
+8-bit intensity step per component. Two additional contour-compositing cases
+check adaptive light/dark strokes without erasing the filled cell. This test uses the actual shared fragment
+shader in the preview tool, with readback confined to developer verification.
+
+To enable illustration using actual mouse input, save it and exercise the
+focused editor workflow, add `--illustrated`:
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application glx-fixture --illustrated --output /tmp/glyphshift-art-editor-glx
+setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
+  tests/smoke/editor_apps.py --build build/release --application supertux \
+  --level --illustrated --output /tmp/glyphshift-art-supertux
+```
+
+Use the validation environment described above for Vulkan. The level test
+captures `world-original.ppm` with the effect disabled and `world-styled.ppm`
+with the supplied illustrated config, then opens the editor over the running
+level. Its original frame can also be fed to `glyphshift-preview` for exact
+same-frame style comparisons without further game launches.
+
+Recorded same-frame comparisons: [original](../docs/illustration-original.png),
+[classic ASCII](../docs/illustration-classic.png),
+[illustrated color](../docs/illustration-color.png),
+[blocks](../docs/illustration-blocks.png), [ink](../docs/illustration-ink.png).
+These styled images are GPU previews of the same source frame.
+The [live editor capture](../docs/illustration-live-editor.png) separately shows
+the final mode running through Proton. Full commands/results and the Mesa
+pbuffer limitation are recorded in the main README's illustrated-renderer
+verification section.

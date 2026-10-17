@@ -34,6 +34,11 @@ inline constexpr auto default_atlas = [] {
             (glyph_rows[glyph][y] & (1U << (7 - x))) ? 255 : 0;
   return pixels;
 }();
+float tone_luminance(float value, float exposure, float contrast,
+                     float gamma) noexcept;
+// Row-major 3x3 luminance neighborhood. -1 means fill, 0..3 are | - / \\.
+int contour_glyph(std::span<const float, 9> levels, float strength,
+                  float threshold) noexcept;
 float luminance(float red, float green, float blue) noexcept;
 std::uint8_t mapped_glyph(float luminance,
                           std::span<const std::uint8_t> ramp) noexcept;

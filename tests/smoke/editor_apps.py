@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--application', choices=['glx-fixture', 'vulkan-fixture', 'glxgears', 'vkcube', 'supertux'], required=True)
     parser.add_argument('--apps', type=Path, default=Path('/tmp/glyphshift-m5-apps'))
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--illustrated', action='store_true', help='Enable the new rendering mode through the actual panel')
     parser.add_argument('--level', action='store_true', help='Use the previously prepared offline SuperTux test level')
     args = parser.parse_args()
     args.build = args.build.resolve()
@@ -96,6 +97,14 @@ def main():
             capture('closed', False)
             control.key(0xff63)
             capture('opened', True)
+            if args.illustrated:
+                control.click(100, 388)  # Illustration section, after Reset.
+                capture('illustration-controls', True)
+                control.click(30, 416)   # Enable illustrated rendering.
+                time.sleep(.5)
+                capture('illustration-enabled', True)
+                control.click(100, 388)
+                capture('illustrated-opened', True)
             # Actual mouse + keyboard numeric edit, then save a named preset.
             control.click(100, 214, 0xffe3)
             control.key(ord('a'), 0xffe3)
@@ -114,6 +123,8 @@ def main():
             assert saved.exists(), 'Save preset did not create a file'
             assert 'cell_width=21\n' in saved.read_text(), saved.read_text()
             assert 'character_set=binary\n' in saved.read_text(), saved.read_text()
+            if args.illustrated:
+                assert 'render_style=illustrated\n' in saved.read_text(), saved.read_text()
             capture('edited-saved', True)
             control.key(0xff1b)
             capture('escape-closed', False)
@@ -141,7 +152,17 @@ def main():
                 # the level introduction into the colored world before reopening.
                 control.key(0xff0d)
                 time.sleep(2)
-                config.write_text('color_mode=source\nglyph_strength=0.35\ncell_width=6\ncell_height=10\n')
+                config.write_text('enabled=false\n')
+                time.sleep(.3)
+                w, h, original = x.image(window)
+                (out / 'world-original.ppm').write_bytes(f'P6\n{w} {h}\n255\n'.encode() + original)
+                if args.illustrated:
+                    config.write_text((Path(__file__).resolve().parents[2] / 'presets/illustrated.conf').read_text())
+                else:
+                    config.write_text('color_mode=source\nglyph_strength=0.35\ncell_width=6\ncell_height=10\n')
+                time.sleep(.3)
+                w, h, styled = x.image(window)
+                (out / 'world-styled.ppm').write_bytes(f'P6\n{w} {h}\n255\n'.encode() + styled)
                 time.sleep(.3)
                 control.key(0xff63)
                 time.sleep(.3)

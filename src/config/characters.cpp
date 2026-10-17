@@ -3,10 +3,12 @@
 #include FT_FREETYPE_H
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <glyphshift/config/characters.hpp>
 #include <glyphshift/core/glyph.hpp>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -50,11 +52,13 @@ bool decode_characters(std::string_view text, Codepoints& output) noexcept {
 }
 bool valid_characters(const CharacterSelection& selection) noexcept {
   if (selection.set >= character_sets.size() || selection.text.back() ||
-      selection.font.back())
+      selection.font.back() || selection.edges.back())
     return false;
   Codepoints points;
   if (selection.text[0] || selection.set == 6)
     if (!decode_characters(selection.text.data(), points)) return false;
+  if (!decode_characters(selection.edges.data(), points) || points.count != 4)
+    return false;
   return !selection.font[0] || selection.font[0] == '/';
 }
 namespace {
@@ -183,60 +187,80 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
     if (!valid_characters(selection))
       throw std::runtime_error("invalid character selection; using classic");
     const auto points = selected(selection);
+    Font font;
+    auto render = [&](unsigned g, std::uint32_t code) {
+      if (procedural(atlas, g, code)) return;
+      if (!font.face) {
+        const std::string path =
+            selection.font[0] ? selection.font.data() : default_font();
+        if (FT_Init_FreeType(&font.library) ||
+            FT_New_Face(font.library, path.c_str(), 0, &font.face) ||
+            FT_Select_Charmap(font.face, FT_ENCODING_UNICODE) ||
+            FT_Set_Pixel_Sizes(font.face, 0, 20))
+          throw std::runtime_error("cannot load Unicode font; using classic");
+      }
+      if (!FT_Get_Char_Index(font.face, code) ||
+          FT_Load_Char(font.face, code,
+                       FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL)) {
+        char message[128];
+        std::snprintf(message, sizeof(message),
+                      "font has no U+%04X; using classic", code);
+        throw std::runtime_error(message);
+      }
+      const auto& bitmap = font.face->glyph->bitmap;
+      if (!bitmap.width || !bitmap.rows) return;
+      if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
+        throw std::runtime_error(
+            "font needs grayscale outlines; using classic");
+      const float scale =
+          std::min({1.0F, 14.0F / static_cast<float>(bitmap.width),
+                    22.0F / static_cast<float>(bitmap.rows)});
+      const unsigned width = std::max(
+          1U, static_cast<unsigned>(static_cast<float>(bitmap.width) * scale));
+      const unsigned height = std::max(
+          1U, static_cast<unsigned>(static_cast<float>(bitmap.rows) * scale));
+      for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x) {
+          const unsigned sy =
+              std::min(bitmap.rows - 1,
+                       static_cast<unsigned>(static_cast<float>(y) / scale));
+          const unsigned sx =
+              std::min(bitmap.width - 1,
+                       static_cast<unsigned>(static_cast<float>(x) / scale));
+          const auto row = bitmap.pitch >= 0 ? sy : bitmap.rows - 1 - sy;
+          const auto pitch = static_cast<unsigned>(
+              bitmap.pitch >= 0 ? bitmap.pitch : -bitmap.pitch);
+          pixel(atlas, g, (16 - width) / 2 + x, (24 - height) / 2 + y,
+                bitmap.buffer[row * pitch + sx]);
+        }
+    };
     if (selection.set == 0 && !selection.font[0])
       classic(atlas);
     else {
       atlas.count = points.count;
-      Font font;
       for (unsigned g = 0; g < points.count; ++g) {
         atlas.ramp[g] = static_cast<std::uint8_t>(g);
-        const auto code = points.values[g];
-        if (procedural(atlas, g, code)) continue;
-        if (!font.face) {
-          const std::string path =
-              selection.font[0] ? selection.font.data() : default_font();
-          if (FT_Init_FreeType(&font.library) ||
-              FT_New_Face(font.library, path.c_str(), 0, &font.face) ||
-              FT_Select_Charmap(font.face, FT_ENCODING_UNICODE) ||
-              FT_Set_Pixel_Sizes(font.face, 0, 20))
-            throw std::runtime_error("cannot load Unicode font; using classic");
-        }
-        if (!FT_Get_Char_Index(font.face, code) ||
-            FT_Load_Char(font.face, code,
-                         FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL)) {
-          char message[128];
-          std::snprintf(message, sizeof(message),
-                        "font has no U+%04X; using classic", code);
-          throw std::runtime_error(message);
-        }
-        const auto& bitmap = font.face->glyph->bitmap;
-        if (!bitmap.width || !bitmap.rows) continue;
-        if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
-          throw std::runtime_error(
-              "font needs grayscale outlines; using classic");
-        const float scale =
-            std::min({1.0F, 14.0F / static_cast<float>(bitmap.width),
-                      22.0F / static_cast<float>(bitmap.rows)});
-        const unsigned width = std::max(
-            1U,
-            static_cast<unsigned>(static_cast<float>(bitmap.width) * scale));
-        const unsigned height = std::max(
-            1U, static_cast<unsigned>(static_cast<float>(bitmap.rows) * scale));
-        for (unsigned y = 0; y < height; ++y)
-          for (unsigned x = 0; x < width; ++x) {
-            const unsigned sy =
-                std::min(bitmap.rows - 1,
-                         static_cast<unsigned>(static_cast<float>(y) / scale));
-            const unsigned sx =
-                std::min(bitmap.width - 1,
-                         static_cast<unsigned>(static_cast<float>(x) / scale));
-            const auto row = bitmap.pitch >= 0 ? sy : bitmap.rows - 1 - sy;
-            const auto pitch = static_cast<unsigned>(
-                bitmap.pitch >= 0 ? bitmap.pitch : -bitmap.pitch);
-            pixel(atlas, g, (16 - width) / 2 + x, (24 - height) / 2 + y,
-                  bitmap.buffer[row * pitch + sx]);
-          }
+        render(g, points.values[g]);
       }
+    }
+    Codepoints edges;
+    decode_characters(selection.edges.data(), edges);
+    for (unsigned e = 0; e < 4; ++e) {
+      const auto code = edges.values[e];
+      if (code == '|' || code == '-' || code == '/' || code == '\\') {
+        for (unsigned y = 0; y < 24; ++y)
+          for (unsigned x = 0; x < 16; ++x) {
+            const float px = (static_cast<float>(x) + .5F) / 16;
+            const float py = (static_cast<float>(y) + .5F) / 24;
+            const bool lit =
+                code == '|' ? std::abs(px - .5F) < .075F
+                : code == '-'
+                    ? std::abs(py - .5F) < .05F
+                    : std::abs(px - (code == '/' ? 1 - py : py)) < .075F;
+            if (lit) pixel(atlas, 256 + e, x, y, 255);
+          }
+      } else
+        render(256 + e, code);
     }
     if (selection.density_order) {
       std::array<std::uint64_t, 256> coverage{};
@@ -253,9 +277,44 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
     if (selection.reverse)
       std::reverse(atlas.ramp.begin(), atlas.ramp.begin() + atlas.count);
   } catch (const std::exception& error) {
-    classic(atlas);
+    // Keep contour fallback independent from a missing custom font.
+    atlas = build_character_atlas(CharacterSelection{});
     std::snprintf(atlas.diagnostic.data(), atlas.diagnostic.size(),
                   "Characters: %s", error.what());
+  }
+  std::array<float, 256> coverage{};
+  for (unsigned g = 0; g < 260; ++g) {
+    const unsigned bx = (g % 16) * 17, by = (g / 16) * 25;
+    for (unsigned y = 0; y < 24; ++y) {
+      float row = 0;
+      for (unsigned x = 0; x < 16; ++x) {
+        row += atlas.pixels[((g / 16) * 24 + y) * character_atlas_width +
+                            (g % 16) * 16 + x];
+        atlas.integral[(by + y + 1) * integral_width + bx + x + 1] =
+            row + atlas.integral[(by + y) * integral_width + bx + x + 1];
+      }
+    }
+    if (g < 256)
+      coverage[g] = atlas.integral[(by + 24) * integral_width + bx + 16];
+  }
+  for (unsigned bin = 0; bin < 256; ++bin) {
+    const float t = static_cast<float>(bin) / 255;
+    unsigned best =
+        std::min(static_cast<unsigned>(t * static_cast<float>(atlas.count)),
+                 atlas.count - 1);
+    if (selection.density_order && !atlas.diagnostic[0]) {
+      const float target = coverage[atlas.ramp[0]] * (1 - t) +
+                           coverage[atlas.ramp[atlas.count - 1]] * t;
+      float distance = std::numeric_limits<float>::max();
+      for (unsigned i = 0; i < atlas.count; ++i) {
+        const float delta = std::abs(coverage[atlas.ramp[i]] - target);
+        if (delta < distance) {
+          distance = delta;
+          best = i;
+        }
+      }
+    }
+    atlas.ramp[256 + bin] = atlas.ramp[best];
   }
   return atlas;
 }

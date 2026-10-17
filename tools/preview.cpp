@@ -56,7 +56,8 @@ void flip(std::vector<unsigned char>& pixels, unsigned width, unsigned height) {
       std::swap(pixels[y * row + x], pixels[(height - 1 - y) * row + x]);
 }
 GLuint texture(unsigned unit, GLint internal, unsigned width, unsigned height,
-               GLenum format, const void* data) {
+               GLenum format, const void* data,
+               GLenum type = GL_UNSIGNED_BYTE) {
   GLuint name = 0;
   glGenTextures(1, &name);
   glActiveTexture(GL_TEXTURE0 + unit);
@@ -64,7 +65,7 @@ GLuint texture(unsigned unit, GLint internal, unsigned width, unsigned height,
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexImage2D(GL_TEXTURE_2D, 0, internal, static_cast<GLsizei>(width),
-               static_cast<GLsizei>(height), 0, format, GL_UNSIGNED_BYTE, data);
+               static_cast<GLsizei>(height), 0, format, type, data);
   return name;
 }
 }  // namespace
@@ -129,11 +130,11 @@ int main(int argc, char** argv) {
     flip(pixels, width, height);
     const auto source =
         texture(0, GL_RGB8, width, height, GL_RGB, pixels.data());
-    const auto atlas = texture(1, GL_R8, glyphshift::character_atlas_width,
-                               glyphshift::character_atlas_height, GL_RED,
-                               characters.pixels.data());
+    const auto atlas = texture(1, GL_R32F, glyphshift::integral_width,
+                               glyphshift::integral_height, GL_RED,
+                               characters.integral.data(), GL_FLOAT);
     const auto ramp =
-        texture(2, GL_R8UI, 256, 1, GL_RED_INTEGER, characters.ramp.data());
+        texture(2, GL_R8UI, 256, 2, GL_RED_INTEGER, characters.ramp.data());
     const auto output = texture(3, GL_RGB8, width, height, GL_RGB, nullptr);
     GLuint fbo = 0, vao = 0;
     glGenFramebuffers(1, &fbo);
@@ -157,6 +158,8 @@ int main(int argc, char** argv) {
     glUniform1ui(glGetUniformLocation(program, "ramp_count"), characters.count);
     glUniform1f(glGetUniformLocation(program, "glyph_strength"),
                 settings.glyph_strength);
+    const auto art = glyphshift::art_parameters(settings);
+    glUniform4fv(glGetUniformLocation(program, "art[0]"), 4, art.data());
     glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
     glDisable(GL_DITHER);
     if (!settings.enabled) {

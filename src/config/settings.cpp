@@ -67,6 +67,28 @@ bool cell(std::string_view text, unsigned& output) {
   output = value;
   return true;
 }
+bool number(std::string_view text, float& output, float low, float high) {
+  float value = 0;
+  const auto [end, error] =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (error != std::errc{} || end != text.data() + text.size() ||
+      !std::isfinite(value) || value < low || value > high)
+    return false;
+  output = value;
+  return true;
+}
+bool rgb(std::string_view text, std::array<float, 3>& output) {
+  std::array<float, 3> value{};
+  for (unsigned i = 0; i < 3; ++i) {
+    const auto comma = text.find(',');
+    if ((i < 2) != (comma != std::string_view::npos) ||
+        !number(trim(text.substr(0, comma)), value[i], 0, 1))
+      return false;
+    if (i < 2) text.remove_prefix(comma + 1);
+  }
+  output = value;
+  return true;
+}
 void warning(const char* message, std::size_t size) noexcept {
   const auto ignored = write(STDERR_FILENO, message, size);
   (void)ignored;
@@ -130,6 +152,9 @@ class Runtime {
     const auto parsed =
         parse_settings({buffer, static_cast<std::size_t>(count)});
     current_ = parsed.value;
+    if (parsed.warnings & invalid_art)
+      warning(
+          "glyphshift: invalid illustration setting; using safe defaults\n");
     if (parsed.warnings & invalid_width)
       warning("glyphshift: invalid cell_width; using 8 (range 2..128)\n");
     if (parsed.warnings & invalid_height)
@@ -196,6 +221,40 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
         parsed.warnings |= invalid_strength;
       else
         parsed.value.glyph_strength = strength;
+    } else if (key == "render_style") {
+      parsed.value.art.illustrated = value == "illustrated";
+      if (value != "classic" && value != "illustrated")
+        parsed.warnings |= invalid_art;
+    } else if (key == "tone_exposure" || key == "tone_contrast" ||
+               key == "tone_gamma" || key == "edge_strength" ||
+               key == "edge_threshold") {
+      float* target = key == "tone_exposure"   ? &parsed.value.art.exposure
+                      : key == "tone_contrast" ? &parsed.value.art.contrast
+                      : key == "tone_gamma"    ? &parsed.value.art.gamma
+                      : key == "edge_strength"
+                          ? &parsed.value.art.edge_strength
+                          : &parsed.value.art.edge_threshold;
+      const float fallback =
+          key == "edge_threshold" ? defaults.art.edge_threshold : 1;
+      *target = fallback;
+      const bool edge = key.starts_with("edge_");
+      if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
+        parsed.warnings |= invalid_art;
+    } else if (key == "fill_enabled" || key == "contour_overlay") {
+      auto& target = key == "fill_enabled" ? parsed.value.art.fill
+                                           : parsed.value.art.contour_overlay;
+      target = value != "false" && value != "0";
+      if (value != "false" && value != "0" && value != "true" && value != "1")
+        parsed.warnings |= invalid_art;
+    } else if (key == "foreground" || key == "background") {
+      auto& target = key == "foreground" ? parsed.value.art.foreground
+                                         : parsed.value.art.background;
+      target = key == "foreground" ? defaults.art.foreground
+                                   : defaults.art.background;
+      if (!rgb(value, target)) parsed.warnings |= invalid_art;
+    } else if (key == "edge_characters") {
+      if (!string_value(value, parsed.value.glyphs.edges))
+        parsed.warnings |= invalid_characters;
     } else if (key == "character_set") {
       explicit_set = true;
       bool found = false;
@@ -245,6 +304,15 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
     parsed.warnings |= invalid_characters;
   if (parsed.warnings & invalid_characters) parsed.value.glyphs = {};
   return parsed;
+}
+bool valid_art(const ArtSettings& a) noexcept {
+  for (const float v : {a.exposure, a.contrast, a.gamma})
+    if (!std::isfinite(v) || v < .25F || v > 4) return false;
+  for (const float v :
+       {a.edge_strength, a.edge_threshold, a.foreground[0], a.foreground[1],
+        a.foreground[2], a.background[0], a.background[1], a.background[2]})
+    if (!std::isfinite(v) || v < 0 || v > 1) return false;
+  return true;
 }
 Settings runtime_settings() noexcept {
   try {

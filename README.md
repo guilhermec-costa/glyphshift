@@ -27,6 +27,9 @@ described below.
 A subsequent explicit request adds X11 editor input for real applications,
 including privately resolved Xlib paths and the tested SuperTux/Proton setup;
 see [real-application editor input](#real-application-editor-input-requested-after-m5).
+An explicit subsequent request adds an opt-in illustrated renderer with
+independent contours/fill, filtered glyph coverage and tonal/color controls;
+see [illustrated rendering](#illustrated-rendering-requested-after-m5).
 Historical validation results are retained below.
 
 ## Product experience
@@ -1027,6 +1030,198 @@ be removed by a reboot; the linked level capture is committed in this repository
 This remains an X11 windowed/borderless integration. Native Wayland, exclusive
 fullscreen, application-owned active input grabs, general XI2/raw-input
 suppression, IME and arbitrary games are not established by this change.
+
+### Illustrated rendering (requested after M5)
+
+The user requested a glyph drawing with recognizable characters and directional
+contours, referencing [AcerolaFX's ASCII shader](https://github.com/GarrettGunnell/AcerolaFX/blob/main/Shaders/AcerolaFX_ASCII.fx).
+This is a new implementation of that general direction, using the final color
+image only. No AcerolaFX code or textures were copied. Scene depth/normals,
+ReShade/GShade integration and new platform backends are not added.
+
+Existing configs retain `render_style=classic` by default. To use the new mode,
+open **Insert → Illustration → Illustrated rendering**, or launch with an
+example live config:
+
+```bash
+GLYPHSHIFT_CONFIG="$PWD/presets/illustrated.conf" ./build/dev/glyphshift -- ./game
+GLYPHSHIFT_CONFIG="$PWD/presets/illustrated-blocks.conf" ./build/dev/glyphshift -- ./game
+GLYPHSHIFT_CONFIG="$PWD/presets/illustrated-ink.conf" ./build/dev/glyphshift -- ./game
+```
+
+The first renders bright colored glyphs and solid highlights with adaptive
+light/dark contours.
+The second mixes text and a solid block with a manual fill ramp. The third
+uses a reversed manual ramp with extra spaces for dark ink on warm paper.
+All use strength 1 so the complete drawing comes from glyphs. They are editable starting points,
+not a promise that one style suits every game's textures or HUD.
+`presets/readable.conf` is not changed by this feature.
+
+**Illustration** exposes the render mode, independent fill toggle, exposure,
+contrast, gamma, contour strength/threshold, contour compositing, ink/paper
+colors, and four custom contour characters. Edits to the four characters require **Apply contours**;
+other controls update immediately. **Save preset** persists all fields. The
+existing **Characters and font** controls select the fill set and its ordering.
+Contours have separate atlas slots and do not reduce the 256-character fill
+limit. The new controls follow Reset to defaults, leaving existing widget
+positions above it intact; scroll the panel when necessary.
+
+```ini
+render_style=illustrated
+cell_width=8
+cell_height=12
+glyph_strength=1
+tone_exposure=1.15
+tone_contrast=1.2
+tone_gamma=1
+edge_strength=1
+edge_threshold=0.18
+fill_enabled=true
+contour_overlay=true
+foreground=0.92,0.97,1
+background=0.015,0.025,0.045
+# Exactly four Unicode scalars, ordered vertical, horizontal, /, backslash.
+edge_characters="|-/\\"
+```
+
+Exposure/contrast/gamma accept finite 0.25..4 (defaults 1). Contour strength and
+threshold accept 0..1 (defaults 1 and 0.18); strength 0 disables contours.
+Colors are three comma-separated finite RGB components in 0..1, defaulting to
+white ink and black paper. `fill_enabled=false` produces contour-only output;
+with contours also disabled, the result is the paper color. Four spaces can
+intentionally suppress the contour glyphs. Invalid fields warn and fall back
+to bounded defaults. Preset saves reject invalid fields and serialized data
+larger than the existing 4096-byte limit.
+
+The illustrated pass samples a weighted 3×3 neighborhood at the scale of each
+cell. A Sobel gradient classifies vertical, horizontal and two diagonal
+contours. A magnitude threshold and a directional-coherence test reject weak
+or symmetric fine texture. Cell-boundary samples include adjacent pixels, so
+edges aligned with the character grid are still detected. By default, contour
+strokes overlay the luminance fill instead of erasing an entire cell. Each cell chooses whichever ink/paper color contrasts more with
+its mean filled color, keeping dark strokes visible on bright blocks and vice
+versa. Set `contour_overlay=false` for contour-replaces-fill behavior with a
+fixed foreground stroke. Default `|`, `-`, `/`, backslash
+contours are built-in full-cell strokes; other contour characters use the
+selected local font or procedural block/Braille support. Unavailable glyphs
+use the same diagnosed safe classic fallback as other character selections.
+
+Exposure and contrast transform luminance, followed by a power of 1/gamma.
+Fill selection with density ordering uses a 256-bin lookup calibrated to
+measured glyph coverage, including reversed order; manual ordering retains its
+supplied bins. Source color is normalized by its strongest RGB component to
+supply bright ink without multiplying source darkness into sparse glyphs
+again. Foreground colors monochrome fill; foreground/paper form the adaptive
+contour palette, and background supplies paper. Glyph strength retains its
+existing source/gray blend behavior,
+including exact source pixels at strength 0 in source mode. F10 still bypasses
+the complete effect.
+
+The atlas upload is now a 272×425 R32F summed-area texture containing 260
+independent 17×25 tiles, including zero borders around 16×24 glyph masks.
+Bilinear interpolation of integral values integrates each output pixel's exact
+rectangular footprint in the mask, avoiding neighboring-glyph bleeding and
+minification holes. The legacy mode samples the original nearest texel through
+the same representation; its glyph masks and mapping remain unchanged. CPU
+rasterization/integral construction happens at initialization or character/font
+changes, never per frame. The ramp texture has two 256-byte rows for legacy
+and calibrated mappings. Both backends use the same fragment source and 64
+bytes of shared art parameters; Vulkan's full push constants are 96 bytes,
+within Vulkan 1.0's guaranteed minimum. Tone, color and style edits do not
+rebuild atlas/GPU resources. No new intermediate framebuffer, queue/device
+idle per frame, or CPU framebuffer readback was added to the injected path.
+
+Small cells still have a physical information limit: 4×4 cannot preserve the
+identity of arbitrary letters. Filtering preserves their ink coverage instead
+of dropping strokes, and the panel suggests 8×12 or larger for readable text.
+Contour selection remains spatial; temporal hysteresis is not implemented by
+this change. HUD/text can still lose detail in a full glyph drawing; reducing
+strength remains a configurable compromise.
+
+#### Illustrated renderer verification and comparisons
+
+Verified on 2026-10-17 on the existing Arch/X11/i3/NVIDIA RTX 3060 Ti setup.
+Debug passed 12 CPU tests. Release passed all 14 tests, including the expanded
+GLX/Vulkan graphics smokes with Khronos core/synchronization validation
+(69.50 seconds total). A source-only Release copy under
+`/tmp/glyphshift-illustration-clean` built without warnings and passed 12 CPU
+tests. Formatting, whitespace, Python syntax, all eight glyph/editor SPIR-V
+modules and documentation examples/links were checked. No dependencies were
+installed or downloaded for this change.
+
+The new CPU test checks tone response, four contour orientations, symmetric
+texture rejection, configuration validation/round trips, reconstruction of all
+260 glyph masks from their summed areas, area conservation from 2×2 through
+128×128 and monotonic calibrated density bins. Preset tests additionally save
+and reload nondefault illustration fields, including custom palettes and
+contour compositing. GPU smoke checks new mode/old mode restoration, contour
+strength, replacement/overlay, fill separation, custom Unicode contour glyphs,
+tone, background colors, small cells and exact source output at strength zero.
+The analytic GPU oracle passed 14 independent half/quadrant-block scaling and
+color-composition cases at error <=1/255, plus two cases proving adaptive
+light/dark contour strokes preserve the surrounding solid fill. Comparison of
+ten same-scene GLX/Vulkan outputs had maximum normalized RMSE 0.0000114
+(tolerance 0.003); most cases matched exactly.
+
+Focused Release tests activated illustration through the actual panel on both
+fixtures and on offline SuperTux/GE-Proton/DXVK, saved the selected mode and
+binary fill, and passed keyboard/mouse, focus, three open-panel resizes and
+clean exit. The level test confirmed Enter returning to Wine after closing the
+editor, then captured the final illustrated preset and reopened panel over the
+running world. Vulkan validation reported no errors, including teardown.
+The additional SRGB focused test passed after the driver added control-state
+captures and more pacing between the new mode checkbox and header collapse;
+the first missed-selection attempt is not counted as successful verification.
+
+Mesa llvmpipe passed the focused illustrated GLX window workflow, including
+actual UI selection, preset saving, resize and input restoration. The separate
+Mesa offscreen oracle could not run: GLX pbuffer context creation failed with
+`failed to create drawable` / `Cannot create offscreen GLX context` on this
+NVIDIA X server. Neither Xvfb nor Xephyr is installed for an isolated retry.
+Thus the analytic oracle is verified on NVIDIA, not Mesa; the windowed Mesa
+shader/input checks passed. Mesa Vulkan and other hardware remain outside this
+change's verified matrix.
+
+Main verification commands (the temporary validation/offline prerequisites
+are the same ones described above):
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --build --preset release
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 ctest --preset release
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
+  /tmp/glyphshift-offline /usr/bin/python3 tests/smoke/editor_apps.py \
+  --build build/release --application supertux --level --illustrated \
+  --output /tmp/glyphshift-illustration/final-supertux
+setpriv --inh-caps=-all -- env __GLX_VENDOR_LIBRARY_NAME=mesa \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+  python3 tests/smoke/editor_apps.py --build build/release \
+  --application glx-fixture --illustrated --output /tmp/glyphshift-illustration/mesa-editor
+```
+
+Logs/captures are under `/tmp/glyphshift-illustration`; temporary evidence may
+disappear after reboot. Durable comparisons below use exactly the same original
+live SuperTux frame as input to the actual GPU preview shader. The styled
+comparisons are fixed-frame previews, separate from the live integration test.
+Open them at their native resolution to judge individual glyphs.
+
+| Comparison | Image |
+| --- | --- |
+| Original live frame, effect off | [Original](docs/illustration-original.png) |
+| Classic renderer, full ASCII, 8×12, strength 1 | [Previous mapping](docs/illustration-classic.png) |
+| Illustrated text + weighted solid highlights, 8×12 | [Color](docs/illustration-color.png) |
+| Coarser text + blocks, 10×14 | [Blocks](docs/illustration-blocks.png) |
+| Reversed text and blank paper, 8×12 | [Ink](docs/illustration-ink.png) |
+| Actual final Vulkan/Proton panel over the running level | [Live editor](docs/illustration-live-editor.png) |
+
+These checks do not establish temporal stability, a gameplay performance
+benchmark or universal artistic quality. The provided styles are configurable;
+no later Linux-support milestone was started.
 
 ### Automated graphics smoke tests (M5)
 

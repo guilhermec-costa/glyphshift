@@ -250,11 +250,11 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
                        "%.2f", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("0: scene detail  |  1: pure glyphs");
+    if (!state.draft_ready || state.draft_base != state.settings.glyphs) {
+      state.draft = state.draft_base = state.settings.glyphs;
+      state.draft_ready = true;
+    }
     if (ImGui::CollapsingHeader("Characters and font")) {
-      if (!state.draft_ready || state.draft_base != state.settings.glyphs) {
-        state.draft = state.draft_base = state.settings.glyphs;
-        state.draft_ready = true;
-      }
       if (ImGui::BeginCombo("Character set",
                             character_sets[state.draft.set].data())) {
         for (unsigned i = 0; i < character_sets.size(); ++i)
@@ -294,6 +294,54 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
         ImGui::TextWrapped("%s", state.character_error.data());
     }
     if (ImGui::Button("Reset to defaults")) state.settings = {};
+    if (ImGui::CollapsingHeader("Illustration")) {
+      auto& art = state.settings.art;
+      ImGui::Checkbox("Illustrated rendering", &art.illustrated);
+      ImGui::Checkbox("Fill surfaces", &art.fill);
+      ImGui::Checkbox("Contours over fill", &art.contour_overlay);
+      ImGui::SliderFloat("Exposure", &art.exposure, .25F, 4, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp);
+      ImGui::SliderFloat("Contrast", &art.contrast, .25F, 4, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp);
+      ImGui::SliderFloat("Gamma", &art.gamma, .25F, 4, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp);
+      ImGui::SliderFloat("Contour strength", &art.edge_strength, 0, 1, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp);
+      ImGui::SliderFloat("Contour threshold", &art.edge_threshold, 0, 1, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp);
+      ImGui::ColorEdit3("Ink / contours", art.foreground.data(),
+                        ImGuiColorEditFlags_Float);
+      ImGui::ColorEdit3("Paper", art.background.data(),
+                        ImGuiColorEditFlags_Float);
+      ImGui::InputText("Contour glyphs", state.draft.edges.data(),
+                       state.draft.edges.size());
+      ImGui::TextWrapped(
+          "Four glyphs: vertical, horizontal, / and \\. Apply to update the "
+          "atlas.");
+      if (ImGui::Button("Apply contours")) {
+        auto selection = state.settings.glyphs;
+        selection.edges = state.draft.edges;
+        if (valid_characters(selection)) {
+          state.settings.glyphs = selection;
+          state.draft = state.draft_base = selection;
+          state.character_error[0] = 0;
+        } else
+          std::snprintf(state.character_error.data(),
+                        state.character_error.size(),
+                        "Use exactly four valid UTF-8 contour characters.");
+      }
+      if (state.character_error[0])
+        ImGui::TextWrapped("%s", state.character_error.data());
+      if (art.illustrated &&
+          (state.settings.cell_width < 8 || state.settings.cell_height < 12))
+        ImGui::TextWrapped(
+            "Small cells merge letter strokes. Try 8 x 12 or larger for "
+            "readable characters.");
+      ImGui::TextWrapped(
+          "Use glyph strength 1 for an image drawn entirely by glyphs. Ink "
+          "colors contours and monochrome fill; source fill uses normalized "
+          "scene color.");
+    }
     ImGui::Separator();
     ImGui::TextWrapped(
         "Insert: editor  |  Escape: close\nF10: effect on / off");

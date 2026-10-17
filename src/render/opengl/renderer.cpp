@@ -183,12 +183,11 @@ struct Context {
     selected_count = data.count;
     gl.ActiveTexture(GL_TEXTURE1);
     gl.BindTexture(GL_TEXTURE_2D, atlas);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, character_atlas_width,
-                  character_atlas_height, 0, GL_RED, GL_UNSIGNED_BYTE,
-                  data.pixels.data());
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R32F, integral_width, integral_height, 0,
+                  GL_RED, GL_FLOAT, data.integral.data());
     gl.ActiveTexture(GL_TEXTURE2);
     gl.BindTexture(GL_TEXTURE_2D, ramp);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, 256, 1, 0, GL_RED_INTEGER,
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, 256, 2, 0, GL_RED_INTEGER,
                   GL_UNSIGNED_BYTE, data.ramp.data());
     gl.UseProgram(program);
     gl.Uniform1ui(gl.GetUniformLocation(program, "ramp_count"), selected_count);
@@ -436,6 +435,8 @@ struct Context {
                    static_cast<float>(settings.cell_height));
       gl.Uniform1ui(source_color, settings.source_color ? 1 : 0);
       gl.Uniform1f(glyph_strength, settings.glyph_strength);
+      const auto art = art_parameters(settings);
+      gl.Uniform4fv(gl.GetUniformLocation(program, "art[0]"), 4, art.data());
       gl.DrawArrays(GL_TRIANGLES, 0, 3);
     }
     if (ui) draw_editor(*ui, width, height);

@@ -138,6 +138,17 @@ std::string quoted(std::string_view text) {
   }
   return result + '"';
 }
+std::string decimal(float value) {
+  std::array<char, 64> buffer{};
+  const auto [end, error] =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+  if (error != std::errc{})
+    throw std::runtime_error("cannot serialize illustration value");
+  return {buffer.data(), end};
+}
+std::string rgb(const std::array<float, 3>& value) {
+  return decimal(value[0]) + "," + decimal(value[1]) + "," + decimal(value[2]);
+}
 }  // namespace
 std::string serialize_settings(const Settings& s) {
   // Locale-independent shortest round-trip; games may change LC_NUMERIC.
@@ -155,7 +166,18 @@ std::string serialize_settings(const Settings& s) {
          "\ncharacters=" + quoted(s.glyphs.text.data()) +
          "\nglyph_font=" + quoted(s.glyphs.font.data()) +
          "\nglyph_order=" + (s.glyphs.density_order ? "density" : "manual") +
-         "\nglyph_reverse=" + (s.glyphs.reverse ? "true" : "false") + "\n";
+         "\nglyph_reverse=" + (s.glyphs.reverse ? "true" : "false") +
+         "\nedge_characters=" + quoted(s.glyphs.edges.data()) +
+         "\nrender_style=" + (s.art.illustrated ? "illustrated" : "classic") +
+         "\ntone_exposure=" + decimal(s.art.exposure) +
+         "\ntone_contrast=" + decimal(s.art.contrast) +
+         "\ntone_gamma=" + decimal(s.art.gamma) +
+         "\nedge_strength=" + decimal(s.art.edge_strength) +
+         "\nedge_threshold=" + decimal(s.art.edge_threshold) +
+         "\nfill_enabled=" + (s.art.fill ? "true" : "false") +
+         "\ncontour_overlay=" + (s.art.contour_overlay ? "true" : "false") +
+         "\nforeground=" + rgb(s.art.foreground) +
+         "\nbackground=" + rgb(s.art.background) + "\n";
 }
 bool PresetStore::load(std::string_view name, Settings& settings,
                        std::string& error) const {
@@ -189,6 +211,10 @@ bool PresetStore::save(std::string_view name, const Settings& settings,
         "64)";
     return false;
   }
+  if (!valid_art(settings.art)) {
+    error = "invalid illustration settings";
+    return false;
+  }
   if (!valid_characters(settings.glyphs)) {
     error = "invalid character selection";
     return false;
@@ -205,8 +231,12 @@ bool PresetStore::save(std::string_view name, const Settings& settings,
   }
   const File dir{open_directory(directory_, true, error)};
   if (dir.fd < 0) return false;
-  return atomic_file(dir.fd, std::string(name) + ".conf",
-                     serialize_settings(settings), error);
+  const auto text = serialize_settings(settings);
+  if (text.size() > 4096) {
+    error = "serialized preset exceeds 4096 bytes";
+    return false;
+  }
+  return atomic_file(dir.fd, std::string(name) + ".conf", text, error);
 }
 bool PresetStore::select(std::string_view name, std::string& error) const {
   error.clear();

@@ -193,6 +193,9 @@ if(BUILD_TESTING)
     target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
     add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
+    add_executable(glyphshift-art-tests tests/unit/art_test.cpp)
+    target_link_libraries(glyphshift-art-tests PRIVATE glyphshift_core glyphshift_editor)
+    add_test(NAME illustration COMMAND glyphshift-art-tests)
     add_executable(glyphshift-character-tests tests/unit/characters_test.cpp)
     target_link_libraries(glyphshift-character-tests PRIVATE glyphshift_editor)
     add_test(NAME characters COMMAND glyphshift-character-tests)
@@ -229,7 +232,7 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
         add_custom_target(smoke-${api}
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py"
                 --build "${CMAKE_BINARY_DIR}" --api ${api}
-            DEPENDS glyphshift glyphshift-${api}-fixture glyphshift-fault-glx
+            DEPENDS glyphshift glyphshift-${api}-fixture glyphshift-fault-glx glyphshift-preview
             USES_TERMINAL VERBATIM)
         if(GLYPHSHIFT_GPU_SMOKE_TESTS)
             add_test(NAME smoke-${api} COMMAND "${Python3_EXECUTABLE}"
@@ -241,6 +244,6 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
     add_custom_target(smoke
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api glx
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api vulkan
-        DEPENDS glyphshift glyphshift-glx-fixture glyphshift-vulkan-fixture glyphshift-fault-glx
+        DEPENDS glyphshift glyphshift-glx-fixture glyphshift-vulkan-fixture glyphshift-fault-glx glyphshift-preview
         USES_TERMINAL VERBATIM)
 endif()

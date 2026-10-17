@@ -71,8 +71,9 @@ struct Parameters {
   float width, height, cell_width, cell_height;
   uint32_t source_color, ramp_count, output_srgb;
   float glyph_strength;
+  std::array<float, 16> art;
 };
-static_assert(sizeof(Parameters) == 32);
+static_assert(sizeof(Parameters) == 96);
 }  // namespace
 
 void initialize_renderer_api(DeviceDispatch& state) {
@@ -180,8 +181,8 @@ class GlyphRenderer {
     if (!extent_.width || !extent_.height || !capture_format(format_))
       throw std::runtime_error("unsupported swapchain extent/format");
     device_.instance->memory_properties(device_.physical, &memory_);
-    for (const auto format :
-         {capture_format(format_), VK_FORMAT_R8_UNORM, VK_FORMAT_R8_UINT}) {
+    for (const auto format : {capture_format(format_), VK_FORMAT_R8_UNORM,
+                              VK_FORMAT_R8_UINT, VK_FORMAT_R32_SFLOAT}) {
       VkFormatProperties properties{};
       device_.instance->format_properties(device_.physical, format,
                                           &properties);
@@ -206,9 +207,8 @@ class GlyphRenderer {
     pool.queueFamilyIndex = queue_state_.family;
     check(api_.CreateCommandPool(device_.handle, &pool, nullptr, &pool_),
           "create glyph command pool");
-    texture(atlas_, VK_FORMAT_R8_UNORM,
-            {character_atlas_width, character_atlas_height});
-    texture(ramp_, VK_FORMAT_R8_UINT, {256, 1});
+    texture(atlas_, VK_FORMAT_R32_SFLOAT, {integral_width, integral_height});
+    texture(ramp_, VK_FORMAT_R8_UINT, {256, 2});
     const auto font = editor::font();
     font_extent_ = {static_cast<uint32_t>(font.width),
                     static_cast<uint32_t>(font.height)};
@@ -301,9 +301,8 @@ class GlyphRenderer {
     check(api_.BeginCommandBuffer(frame.command, &begin),
           "begin glyph command buffer");
     if (!uploaded_) {
-      upload(frame.command, atlas_, 0,
-             {character_atlas_width, character_atlas_height});
-      upload(frame.command, ramp_, character_atlas_bytes, {256, 1});
+      upload(frame.command, atlas_, 0, {integral_width, integral_height});
+      upload(frame.command, ramp_, integral_bytes, {256, 2});
       upload(frame.command, font_, font_offset_, font_extent_);
     }
     barrier(frame.command, frame.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -363,7 +362,8 @@ class GlyphRenderer {
                                  format_ == VK_FORMAT_R8G8B8A8_SRGB)
                                     ? 1U
                                     : 0U,
-                                settings.glyph_strength};
+                                settings.glyph_strength,
+                                art_parameters(settings)};
     api_.CmdPushConstants(
         frame.command, layout_,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -408,7 +408,7 @@ class GlyphRenderer {
   Texture atlas_, ramp_, font_;
   VkExtent2D font_extent_{};
   static constexpr VkDeviceSize font_offset_ =
-      (character_atlas_bytes + 256 + 3) & ~VkDeviceSize{3};
+      (integral_bytes + 512 + 3) & ~VkDeviceSize{3};
   VkBuffer staging_ = VK_NULL_HANDLE;
   VkDeviceMemory staging_memory_ = VK_NULL_HANDLE;
   VkSampler sampler_ = VK_NULL_HANDLE;
@@ -505,8 +505,8 @@ class GlyphRenderer {
     void* mapped = nullptr;
     check(api_.MapMemory(device_.handle, staging_memory_, 0, bytes, 0, &mapped),
           "map atlas upload");
-    std::memcpy(mapped, atlas_data_.pixels.data(), atlas_data_.pixels.size());
-    std::memcpy(static_cast<std::uint8_t*>(mapped) + character_atlas_bytes,
+    std::memcpy(mapped, atlas_data_.integral.data(), integral_bytes);
+    std::memcpy(static_cast<std::uint8_t*>(mapped) + integral_bytes,
                 atlas_data_.ramp.data(), atlas_data_.ramp.size());
     std::memcpy(static_cast<std::uint8_t*>(mapped) + font_offset_, font.pixels,
                 static_cast<std::size_t>(font.width) *
