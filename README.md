@@ -277,6 +277,9 @@ instead of terminating the game.
 
 ## Development (M0–M5)
 
+For hands-on fixture and offline SuperTux commands, including capability
+dropping and live visual adjustments, see the [test guide](tests/README.md).
+
 ### Dependencies
 
 Build on Linux x86-64 with a C++20 compiler (including floating-point
