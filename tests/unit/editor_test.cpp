@@ -79,6 +79,14 @@ int main() {
     auto f = frame();
     check(!f.draw_data, "focus loss closes capture");
   }
+  // A key release may go to another application after focus changes. Missing
+  // that release must not make Insert look permanently held on return.
+  key(0xff63, 118, true);
+  input(display, 42, {Kind::focus_lost});
+  {
+    auto f = frame();
+    check(!f.draw_data, "focus loss while Insert held closes editor");
+  }
   report("Shader test diagnostic");
   key(0xff63, 118, true);
   key(0xff63, 118, false);

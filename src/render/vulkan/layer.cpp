@@ -248,10 +248,18 @@ DestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
                   const VkAllocationCallbacks* allocator) {
   const auto state = find_instance(dispatch_key(instance));
   if (!state) return;
+  std::pair<void*, std::uint64_t> window{};
   {
     const std::lock_guard lock(state->mutex);
-    state->surfaces.erase(surface);
+    const auto found = state->surfaces.find(surface);
+    if (found != state->surfaces.end()) {
+      window = found->second;
+      state->surfaces.erase(found);
+    }
   }
+  // Retire editor input outside the registry lock, including when the host
+  // resolves Xlib privately and bypasses our window-destruction hooks.
+  if (window.first) editor::forget(window.first, window.second);
   const auto next = reinterpret_cast<PFN_vkDestroySurfaceKHR>(
       state->get_proc(instance, "vkDestroySurfaceKHR"));
   if (next) next(instance, surface, allocator);

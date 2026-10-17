@@ -486,9 +486,9 @@ void render(Display* display, GLXDrawable drawable) noexcept {
     if (!width || !height) return;
     if (!state->caps_ready) state->probe();
     const auto start = std::chrono::steady_clock::now();
-    editor::Frame frame(
-        display, drawable, width, height, "OpenGL",
-        reinterpret_cast<const char*>(gl.GetString(GL_VERSION)));
+    editor::Frame frame(display, drawable, width, height, "OpenGL",
+                        reinterpret_cast<const char*>(gl.GetString(GL_VERSION)),
+                        true);
     if (frame.settings.enabled || frame.draw_data)
       state->draw(drawable, width, height, frame.settings, frame.draw_data);
     frame.complete(std::chrono::duration<double, std::milli>(

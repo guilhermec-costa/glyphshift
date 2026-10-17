@@ -886,7 +886,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
   const auto start = std::chrono::steady_clock::now();
   editor::Frame editor_frame(state->display, state->window, state->extent.width,
                              state->extent.height, "Vulkan",
-                             device.version.data());
+                             device.version.data(), true);
   if (!editor_frame.settings.enabled && !editor_frame.draw_data) {
     editor_frame.complete(0);
     return device.present(queue, info);

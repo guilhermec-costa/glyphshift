@@ -2,6 +2,7 @@
 #include <dlfcn.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <glyphshift/editor/editor.hpp>
 #include <map>
 #include <mutex>
@@ -54,6 +55,9 @@ void install() {
   (void)done;
 }
 bool consume(XEvent* event) {
+  // Focused regressions deliberately bypass every legacy event filter, even
+  // if a driver happens to call an interposed Xlib function internally.
+  if (std::getenv("GLYPHSHIFT_FIXTURE_PRIVATE_XLIB")) return false;
   using namespace glyphshift::editor;
   Input input{};
   switch (event->type) {
@@ -85,6 +89,9 @@ bool consume(XEvent* event) {
       input.y = static_cast<float>(event->xmotion.y);
       break;
     case FocusOut:
+      if (event->xfocus.detail == NotifyInferior ||
+          event->xfocus.mode != NotifyNormal)
+        return false;
       input.kind = Kind::focus_lost;
       break;
     default:

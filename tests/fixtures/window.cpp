@@ -2,6 +2,7 @@
 
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
+#include <dlfcn.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -67,9 +68,18 @@ void Window::create(XVisualInfo* visual, const char* title) {
 }
 bool Window::poll() {
   resized = false;
-  while (XPending(display)) {
+  // Regression target for applications such as vkcube/Wine that fetch Xlib
+  // functions privately and bypass LD_PRELOAD event interposition.
+  static const auto library = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
+  static const auto pending = reinterpret_cast<decltype(&XPending)>(
+      library ? dlsym(library, "XPending") : nullptr);
+  static const auto next = reinterpret_cast<decltype(&XNextEvent)>(
+      library ? dlsym(library, "XNextEvent") : nullptr);
+  const bool private_input =
+      std::getenv("GLYPHSHIFT_FIXTURE_PRIVATE_XLIB") && pending && next;
+  while ((private_input ? pending : &XPending)(display)) {
     XEvent event{};
-    XNextEvent(display, &event);
+    (private_input ? next : &XNextEvent)(display, &event);
     if (event.type == ClientMessage &&
         event.xclient.message_type ==
             XInternAtom(display, "WM_PROTOCOLS", False) &&

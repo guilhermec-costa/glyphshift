@@ -121,10 +121,16 @@ while allowing Unix/X11 sockets. It does not isolate the filesystem. If the
 wrapper is missing, restore the test environment files before running the game;
 do not remove it from the command as a workaround.
 
-**Insert and the GlyphShift hotkeys have not been validated under Wine; Insert
-did not open the editor in the tested SuperTux setup.** Adjust the file specified
-by `GLYPHSHIFT_CONFIG` instead. Edit and save it while the game is running;
-changes apply live without restarting the game.
+After rebuilding, restart SuperTux through the launcher above and focus its
+window. **Insert** opens the GlyphShift editor; mouse and keyboard edit values,
+**Save preset** persists them, and **Escape**, **Insert** or the title-bar close
+button returns input to the game. **F10** toggles the effect. This uses the new
+window-scoped X11 input path; older builds from M5 did not support the panel
+in this Wine setup.
+
+If a hotkey conflicts with another X11 grab, stderr reports an editor-input
+diagnostic. The optional file specified by `GLYPHSHIFT_CONFIG` also remains
+usable: edit and save it while the game runs to apply changes without restart.
 
 For example:
 
@@ -158,7 +164,8 @@ compatibility.
 
 ## Character sets, custom sequences, and fonts
 
-In either native fixture, open **Insert → Characters and font**. Choose
+In either native fixture or the tested SuperTux/Proton setup, open
+**Insert → Characters and font**. Choose
 classic, ASCII, alphanumeric, binary, blocks, Braille, or custom. For custom,
 enter the sequence in dark-to-light order or enable **Sort by ink density**.
 Use **Reverse dark / light** to invert the order. Optionally enter an absolute
@@ -269,3 +276,47 @@ tests, 13 Release tests, Mesa GLX, and Mesa
 Vulkan/Proton limitations) are recorded in the [main README](../README.md).
 This guide documents how to reproduce the tests; creating it does not constitute
 a new run of the graphics tests or the game.
+
+## Focused editor acceptance tests
+
+Unlike the no-focus graphics smoke, this driver temporarily focuses a test
+application and sends real XTest keyboard/pointer events. Do not interact with
+the desktop during the run. It checks focus before injecting events and restores
+focus and pointer when they still belong to the test. Install libXtst if your
+system does not already provide it; no Python packages are required.
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application glx-fixture --output /tmp/glyphshift-editor-glx
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application vulkan-fixture --output /tmp/glyphshift-editor-vulkan
+```
+
+The Vulkan fixture needs the validation layer, including VK_LAYER_PATH when
+using the temporary extraction. Use the same capability-dropping prefix as
+above if required by your environment. Both fixtures resolve their event
+functions privately in this test, so the legacy Xlib hooks cannot supply editor
+input. The driver checks mouse/keyboard edits, character-set selection, saved
+preset contents, hotkeys,
+resize while open, focus loss, title-bar close, ordinary host input restoration
+and clean exit. Captures and application logs are saved under `--output`.
+
+With the M5 applications still available, `--application glxgears` and
+`--application vkcube` exercise real native applications. To test the authorized
+Windows SuperTux offline, preserving the existing network restriction:
+
+```bash
+setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
+  tests/smoke/editor_apps.py --build build/dev --application supertux \
+  --output /tmp/glyphshift-editor-supertux
+```
+
+These tests require the `/tmp` application paths documented above; they do not
+download or install dependencies. They are opt-in because they use desktop focus.
+
+Add `--level` to the SuperTux test to use the previously prepared test level.
+After checking the editor, it sends Enter to advance the introduction, verifies
+that the colored world appears, and captures the reopened panel with source
+color, 6×10 cells and strength 0.35. This also checks that keyboard input returns
+to Wine. The [recorded live capture](../docs/editor-supertux-play.png) shows that
+running level; it is not a fixed-image preview or a gameplay performance test.

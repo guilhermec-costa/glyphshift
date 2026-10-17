@@ -16,7 +16,7 @@ GS_EDITOR_API void input_adapter(InputAdapter attach, InputAdapter detach);
 class GS_EDITOR_API Frame {
  public:
   Frame(void* display, std::uint64_t window, unsigned width, unsigned height,
-        const char* backend, const char* version);
+        const char* backend, const char* version, bool x11_input = false);
   ~Frame();
   Frame(const Frame&) = delete;
   Frame& operator=(const Frame&) = delete;

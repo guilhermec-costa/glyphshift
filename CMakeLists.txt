@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+pkg_check_modules(XCB_INPUT REQUIRED IMPORTED_TARGET xcb xcb-keysyms)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 
 add_library(glyphshift_imgui STATIC third_party/imgui/imgui.cpp
@@ -31,14 +32,14 @@ set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_options(glyphshift_imgui PRIVATE -w)
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp)
+add_library(glyphshift_editor SHARED src/editor/editor.cpp src/editor/x11_input.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp)
 set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
 set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
 target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
 set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
-target_include_directories(glyphshift_editor PUBLIC include)
-target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG)
+target_include_directories(glyphshift_editor PUBLIC include PRIVATE ${X11_INCLUDE_DIR})
+target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG PkgConfig::XCB_INPUT)
 
 add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
     src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp src/editor/x11_interpose.cpp)
@@ -95,7 +96,7 @@ set_target_properties(glyphshift_core PROPERTIES POSITION_INDEPENDENT_CODE ON CX
 target_include_directories(glyphshift_core PUBLIC include)
 add_library(fixture_window STATIC tests/fixtures/window.cpp)
 target_include_directories(fixture_window PUBLIC tests/fixtures)
-target_link_libraries(fixture_window PUBLIC glyphshift_core X11::X11)
+target_link_libraries(fixture_window PUBLIC glyphshift_core X11::X11 ${CMAKE_DL_LIBS})
 
 # Compile the very same gradient source for the two APIs. Files are read at
 # startup by these development fixtures; no installation is required for M0.

@@ -12,6 +12,8 @@
 #include <map>
 #include <memory>
 
+#include "x11_input.hpp"
+
 namespace glyphshift::editor {
 namespace {
 constexpr unsigned insert = 0xff63, escape = 0xff1b, f10 = 0xffc7;
@@ -320,7 +322,8 @@ Font font() {
   return r.font();
 }
 Frame::Frame(void* display, std::uint64_t window, unsigned width,
-             unsigned height, const char* backend, const char* version)
+             unsigned height, const char* backend, const char* version,
+             bool x11_input)
     : lock_(runtime().mutex) {
   auto& r = runtime();
   auto& state = r.states[{display, window}];
@@ -335,6 +338,11 @@ Frame::Frame(void* display, std::uint64_t window, unsigned width,
     state.external = external;
     state.ready = true;
   }
+  // Targeted synthetic fixture tests retain the original Xlib queue adapter.
+  const bool platform =
+      x11_input && !std::getenv("GLYPHSHIFT_FIXTURE_NO_FOCUS");
+  if (platform) x11::poll(display, window, state.open);
+  const bool initially_open = state.open;
   previous_ = ImGui::GetCurrentContext();
   if (state.open && width > 16 && height > 16) {
     if (!state.context) {
@@ -403,6 +411,8 @@ Frame::Frame(void* display, std::uint64_t window, unsigned width,
     draw_data = state.open ? ImGui::GetDrawData() : nullptr;
   } else
     state.count = 0;
+  if (platform && initially_open != state.open)
+    x11::sync(display, window, state.open);
   settings = state.settings;
 }
 Frame::~Frame() {
@@ -420,6 +430,7 @@ void deactivate(void* display, std::uint64_t window) noexcept {
     const std::lock_guard lock(r.mutex);
     const auto found = r.states.find({display, window});
     if (found != r.states.end()) {
+      x11::forget(display, window);
       if (r.detach) r.detach(display, window);
       found->second.available = false;
       found->second.open = false;
@@ -450,6 +461,7 @@ void forget(void* display, std::uint64_t window) noexcept {
   try {
     auto& r = runtime();
     const std::lock_guard lock(r.mutex);
+    x11::forget(display, window);
     if (r.detach) r.detach(display, window);
     r.states.erase({display, window});
   } catch (...) {
@@ -464,6 +476,9 @@ bool input(void* display, std::uint64_t window, const Input& event) noexcept {
     auto& state = found->second;
     if (event.kind == Kind::focus_lost) {
       state.open = false;
+      state.pressed.fill(false);
+      state.captured.fill(false);
+      state.buttons.fill(false);
       queue(state, event);
       return false;
     }

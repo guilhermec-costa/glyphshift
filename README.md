@@ -24,6 +24,9 @@ product control. A subsequent user-requested legibility pass adds configurable
 glyph strength and readable/classic example presets. A further explicit user
 request adds selectable character sets, custom UTF-8 sequences and local fonts,
 described below.
+A subsequent explicit request adds X11 editor input for real applications,
+including privately resolved Xlib paths and the tested SuperTux/Proton setup;
+see [real-application editor input](#real-application-editor-input-requested-after-m5).
 Historical validation results are retained below.
 
 ## Product experience
@@ -288,7 +291,8 @@ Build on Linux x86-64 with a C++20 compiler (including floating-point
 `std::from_chars`), CMake 3.20 or newer, Ninja, Xlib development headers,
 OpenGL/GLX development libraries, Vulkan headers and loader, and
 `glslangValidator`. Character atlas generation additionally needs FreeType,
-Fontconfig and pkg-config development files. Nonprocedural sets need an
+Fontconfig and pkg-config development files. Real-application editor input
+additionally requires libxcb and xcb-keysyms development files. Nonprocedural sets need an
 installed monospace font or an explicit local TTF/OTF path.
 Tests and developer formatting commands additionally use
 Python 3 and Git. Formatting requires `clang-format` (verified with 22.1.8).
@@ -303,7 +307,7 @@ Arch Linux package names (package installation was not performed during M0):
 ```bash
 sudo pacman -S --needed base-devel cmake ninja libx11 libglvnd \
   vulkan-headers vulkan-icd-loader glslang vulkan-validation-layers \
-  python git clang freetype2 fontconfig pkgconf ttf-dejavu
+  python git clang freetype2 fontconfig pkgconf ttf-dejavu libxcb xcb-util-keysyms
 ```
 
 Install the Vulkan ICD matching the GPU separately, for example `nvidia-utils`
@@ -623,7 +627,9 @@ the effect disabled skips all GPU rendering work. First use, window/target
 initialization and geometry-capacity growth may allocate; stable frames reuse
 resources. ImGui symbols remain hidden from host applications.
 
-The X11 adapter filters Xlib events for registered presentation windows only.
+The original M4/M5 X11 adapter filters Xlib events for registered presentation
+windows only. The newer real-application input path below supersedes its
+private-Xlib limitation for the tested applications.
 GLX identifies the current drawable; Vulkan tracks Xlib surface creation to
 find its display/window. Supported event paths are `XPending`, `XEventsQueued`,
 `XNextEvent`, `XPeekEvent`, `XCheckWindowEvent`, `XCheckMaskEvent` and
@@ -850,8 +856,9 @@ show fallback boxes for symbols absent from that UI font. The rendered effect
 uses the selected glyph font. The Xlib adapter accepts basic Latin and Unicode
 keysyms but does not implement IME composition or general clipboard integration;
 use a UTF-8 config file for sequences your desktop input path cannot enter.
-Wine editor/input limitations remain unchanged; file-based selection works
-through the same live-config mechanism.
+At the time of this character-selection pass, Wine editor/input limitations
+remained unchanged; the subsequent real-application input work is recorded below.
+File-based selection remains available.
 
 Ready-to-edit examples:
 [ASCII](presets/characters-ascii.conf),
@@ -886,8 +893,140 @@ modules. Shared editor exports remain limited to GlyphShift APIs. FreeType
 Actual shader previews of the saved SuperTux capture were inspected:
 [ASCII](docs/characters-ascii.png), [blocks](docs/characters-blocks.png),
 [Braille](docs/characters-braille.png). These are fixed-image GPU previews,
-not additional Proton/gameplay validations. Wine input, Mesa Vulkan and broader
-compatibility limits recorded under M5 remain unchanged.
+not additional Proton/gameplay validations. At this stage Wine input, Mesa
+Vulkan and broader compatibility limits recorded under M5 remained unchanged.
+
+### Real-application editor input (requested after M5)
+
+The editor now has a dedicated X11 input connection shared by both rendering
+backends. It does not depend on intercepting the application's event queue.
+This addresses the private-Xlib path used by vkcube and the tested Wine/Proton
+path, where rendering targets an internal child rather than the managed game
+window. The existing fixture-focused Xlib adapter remains available.
+
+Press **Insert** with the game focused, edit with mouse or keyboard, and use
+**Escape**, **Insert** or the panel's close button to return to the game.
+**F10** toggles the effect whether the editor is open or closed. **Save preset**
+persists edits; external live-config files remain optional and are never
+rewritten by the editor. Restart the application through the rebuilt launcher
+to load the updated libraries.
+
+The platform adapter lives separately from the API-independent model. It
+opens an owned XCB connection using the application's X11 display, finds the
+managed client ancestor of the presentation surface, and registers passive
+Insert/F10 grabs only on that client. It never registers root-window grabs.
+While the editor is open, an input-only child receives keyboard and pointer
+input, translates coordinates into the presentation surface, and returns focus
+to the previous child on close. There is no active keyboard/pointer grab that
+would lock out window-manager shortcuts. Losing focus closes the editor without
+taking focus back from another application. Closing retains input until
+UI-owned key/button releases arrive, preventing those releases from leaking
+into the game. Native FocusOut notifications let applications reset held input. If the window
+manager returns focus to the managed parent during a pointer move or resize,
+the adapter keeps editor focus within that same client until closing.
+
+The child tracks the client size, supplies a pointer cursor, and is unmapped
+when closed. Renderer failure and surface/window retirement release owned
+input resources. Checked XCB requests avoid replacing the host's process-wide
+Xlib error handler; a conflicting hotkey grab reports one diagnostic and
+releases grabs acquired by this adapter. Stable frames reuse the connection
+and child, with a bounded event drain. The legacy synthetic-event smoke uses
+its existing no-focus fixture mode; a separate focused test exercises the new
+path with actual XTest keyboard/pointer events and private-Xlib fixtures.
+
+Run the focused test only in an available X11 desktop session. It temporarily
+focuses its test application and moves the pointer, verifies focus before each
+input action, and restores focus/pointer afterward when still owned by the
+test. It requires libXtst at runtime and accepts the already extracted native
+applications/Proton setup described under M5. It installs/downloads nothing:
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application glx-fixture --output /tmp/glyphshift-editor-glx
+VK_LAYER_VALIDATE_SYNC=1 python3 tests/smoke/editor_apps.py --build build/dev \
+  --application vulkan-fixture --output /tmp/glyphshift-editor-vulkan
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application glxgears --output /tmp/glyphshift-editor-glxgears
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application vkcube --output /tmp/glyphshift-editor-vkcube
+/tmp/glyphshift-offline /usr/bin/python3 tests/smoke/editor_apps.py \
+  --build build/dev --application supertux --output /tmp/glyphshift-editor-supertux
+```
+
+The last command requires the authorized offline wrapper, extracted game and
+Proton prefix from the test guide. Keep the network restriction in place.
+For the temporary validation package, supply the recorded VK_LAYER_PATH;
+capability-bearing agent environments additionally use setpriv as under M1.
+The driver saves captures/logs and checks real numeric editing, character-set selection/application, named
+preset saving, Insert/Escape/F10, three resizes with the editor open, focus loss,
+reopening and the title-bar close button. Fixtures additionally verify that UI
+input is suppressed and ordinary keyboard/pointer input returns afterward.
+These focused checks are opt-in rather than part of unattended CTest.
+
+Verified on 2026-10-17 in the existing Arch/X11/i3/NVIDIA environment. Debug
+and Release built successfully; Debug passed all 11 CPU tests. An independent
+source-only Release build at `/tmp/glyphshift-editor-clean` also passed 11 CPU
+tests without compiler warnings. Formatting, Git whitespace, documentation
+links/shell syntax, editor exports and all eight generated glyph/editor SPIR-V
+modules were checked. No packages, Steam installation or downloads were added;
+libxcb 1.17.0 and xcb-keysyms 0.4.1 were already available.
+
+The focused Debug matrix passed both fixtures, glxgears, vkcube and offline
+SuperTux. The final focused Release matrix additionally selected/applied the
+binary character set through the editor and verified its saved preset along
+with a typed cell width of 21. Both private-Xlib fixtures, glxgears, vkcube,
+SuperTux's menu and its prepared level introduction passed. In that final
+matrix **all legacy Xlib event filters were disabled by the test mode**, even
+if a graphics driver called them internally. The new input adapter therefore
+supplied the actual mouse/keyboard interactions itself. No GL debug or Vulkan
+core/synchronization validation errors were observed, including clean exit.
+
+A further Release level run closed the editor, sent Enter to the game, verified
+that the introduction advanced into the colored world, and reopened the panel
+using a live readable config (source color, 6×10, strength 0.35). This confirms
+keyboard input returning to the tested Wine application, beyond the fixture's
+strict keyboard/button event log checks. The [live level capture](docs/editor-supertux-play.png)
+was inspected directly; it is an actual application capture, not a fixed-image
+shader preview. This does not measure gameplay smoothness or aesthetic quality
+throughout a play session.
+
+Verification commands included:
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --build --preset release
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
+  /tmp/glyphshift-offline /usr/bin/python3 tests/smoke/editor_apps.py \
+  --build build/release --application supertux --level \
+  --output /tmp/glyphshift-editor-apps/play-supertux
+```
+
+The complete Release CTest suite passed all 13 tests, including both legacy
+no-focus GLX/Vulkan graphics smokes (57.09 seconds total), with core and
+synchronization validation enabled. Mesa llvmpipe also passed the focused GLX
+editor test with legacy filters disabled, including character selection,
+keyboard/pointer suppression and restoration, preset saving and focus changes:
+
+```bash
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 ctest --preset release
+setpriv --inh-caps=-all -- env __GLX_VENDOR_LIBRARY_NAME=mesa \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+  python3 tests/smoke/editor_apps.py --build build/release \
+  --application glx-fixture --output /tmp/glyphshift-editor-apps/mesa-focused
+```
+
+Other focused Release outputs are under `/tmp/glyphshift-editor-apps/strict-*`;
+the corresponding matrix log is `strict-matrix.log`. Temporary evidence can
+be removed by a reboot; the linked level capture is committed in this repository.
+
+This remains an X11 windowed/borderless integration. Native Wayland, exclusive
+fullscreen, application-owned active input grabs, general XI2/raw-input
+suppression, IME and arbitrary games are not established by this change.
 
 ### Automated graphics smoke tests (M5)
 
