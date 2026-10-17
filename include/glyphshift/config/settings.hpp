@@ -9,6 +9,7 @@ struct Settings {
   unsigned cell_height = 12;
   bool source_color = true;
   bool enabled = true;
+  float glyph_strength = 0.45F;
   bool operator==(const Settings&) const = default;
 };
 enum SettingWarning : std::uint32_t {
@@ -16,7 +17,8 @@ enum SettingWarning : std::uint32_t {
   invalid_height = 2,
   invalid_color = 4,
   invalid_enabled = 8,
-  unknown_setting = 16
+  unknown_setting = 16,
+  invalid_strength = 32
 };
 struct ParsedSettings {
   Settings value;

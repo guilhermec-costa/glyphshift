@@ -9,6 +9,7 @@ layout(push_constant) uniform Parameters {
     uint source_color;
     uint ramp_count;
     uint output_srgb;
+    float glyph_strength;
 } params;
 layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
@@ -18,6 +19,7 @@ layout(set=0, binding=2) uniform usampler2D ramp_image;
 #define SOURCE_COLOR params.source_color
 #define RAMP_COUNT params.ramp_count
 #define OUTPUT_SRGB params.output_srgb
+#define GLYPH_STRENGTH params.glyph_strength
 #else
 uniform sampler2D source_image;
 uniform sampler2D atlas_image;
@@ -26,11 +28,13 @@ uniform vec2 size;
 uniform vec2 cell;
 uniform uint source_color;
 uniform uint ramp_count;
+uniform float glyph_strength;
 #define SIZE size
 #define CELL cell
 #define SOURCE_COLOR source_color
 #define RAMP_COUNT ramp_count
 #define OUTPUT_SRGB 0u
+#define GLYPH_STRENGTH glyph_strength
 #endif
 layout(location=0) out vec4 color;
 vec3 sample_source(vec2 pixel) {
@@ -56,6 +60,12 @@ void main() {
     ivec2 local = ivec2(floor(fract(pixel / CELL) * 8.0));
     float mask = texelFetch(atlas_image, ivec2(int(glyph)*8+local.x,local.y), 0).r;
     vec3 result = (SOURCE_COLOR != 0u ? average : vec3(1.0)) * mask;
+    // Preserve fine silhouettes and HUD edges when the user prefers a readable
+    // scene; strength 1 keeps the pure glyph mode, including binary mono.
+    vec3 scene = sample_source(pixel);
+    if (SOURCE_COLOR == 0u)
+        scene = vec3(dot(scene, vec3(.2126,.7152,.0722)));
+    result = mix(scene, result, clamp(GLYPH_STRENGTH, 0.0, 1.0));
     if (OUTPUT_SRGB != 0u)
         result = mix(result / 12.92, pow((result + .055) / 1.055, vec3(2.4)), step(vec3(.04045), result));
     color = vec4(result, 1.0);

@@ -20,7 +20,9 @@ M5 adds per-game named presets, automated graphics smoke tests and robustness
 coverage. The recorded M5 matrix includes native applications and an offline
 SuperTux Windows run through portable GE-Proton/DXVK. Input limitations remain
 explicit below; this does not claim general game compatibility or every future
-product control. Historical validation results are retained below.
+product control. A subsequent user-requested legibility pass adds configurable
+glyph strength and readable/classic example presets, described below.
+Historical validation results are retained below.
 
 ## Product experience
 
@@ -516,7 +518,10 @@ GLYPHSHIFT_CONFIG=/tmp/glyphshift.conf ./build/dev/glyphshift -- \
 Edit or atomically replace that file while the application runs. `enabled`
 accepts true/false or 1/0; each cell dimension accepts 2..128 independently;
 `color_mode` accepts source/mono. Missing keys use defaults (enabled, 8×12,
-source color). Invalid values warn once per reload and use defaults. Files
+source color, glyph strength 0.45). `glyph_strength` accepts finite values
+from 0 to 1: 0 preserves source pixels (grayscale in mono mode), 1 renders
+pure glyphs, and intermediate values blend scene detail with glyph rendering.
+Invalid values warn once per reload and use defaults. Files
 must be regular, readable, and at most 4096 bytes. The steady path only checks
 file metadata; parsing/read allocation occurs on changes. There is no CPU
 framebuffer readback, signal handler or global input grab. Changed file values
@@ -587,7 +592,7 @@ Launch either fixture through GlyphShift using the commands above, then:
 
 The same Dear ImGui panel exposes the M3 renderer settings: effect enabled,
 independent cell width/height (2..128 pixels), monochrome/source color, and
-reset to defaults. The panel fits the window and scrolls in small viewports.
+glyph strength (0..1), and reset to defaults. The panel fits the window and scrolls in small viewports.
 The title-bar close button also returns input immediately. Keyboard navigation
 uses Tab, arrows, Space and Enter; Ctrl-clicking a slider permits numeric entry.
 It displays the backend/API version, previous GlyphShift CPU preparation and
@@ -661,6 +666,108 @@ there is no per-frame preset disk write. Invalid files, invalid selection or
 unavailable storage produce a diagnostic and safe defaults without terminating
 the application. The optional live `GLYPHSHIFT_CONFIG` file takes precedence
 initially and when its contents change; presets never overwrite it.
+
+### Configurable legibility (requested after M5)
+
+The M5 monochrome screenshot was a binary glyph-only verification, with all
+scene detail reduced to 100×50 cells at 800×600. It was not a satisfactory
+readability default. The user requested better visual quality with configurable
+style. Both APIs now expose **Glyph strength** in the editor, config file and
+saved per-game presets. The default is 0.45 with source color; cell defaults
+remain 8×12. Strength 1 retains pure glyph rendering, including binary mono.
+Strength 0 uses per-pixel source color or grayscale; F10 still bypasses the
+entire effect and restores the original image regardless of color mode.
+Intermediate strength is an explicit blend of the source pixels and the glyph
+pass, preserving fine silhouettes and text at the cost of a less pure ASCII
+look. No CPU image readback was added to the injected render loop.
+
+Example presets are provided as live-config files:
+
+```bash
+GLYPHSHIFT_CONFIG="$PWD/presets/readable.conf" ./build/dev/glyphshift -- ./game
+GLYPHSHIFT_CONFIG="$PWD/presets/mono-readable.conf" ./build/dev/glyphshift -- ./game
+GLYPHSHIFT_CONFIG="$PWD/presets/classic.conf" ./build/dev/glyphshift -- ./game
+```
+
+`readable` uses source color, 6×10 cells and strength 0.45; `mono-readable`
+uses the same dimensions/strength in grayscale; `classic` uses pure monochrome
+with 8×12 cells and strength 1. These are starting points, not mandatory styles.
+Edit values live or save a named preset through the editor. Older presets
+without glyph_strength use the new default; explicitly set 1 to request pure
+ASCII. Preset loading/saving validates the strength, including rejection of
+NaN/infinity and out-of-range values. Named preset serialization includes it.
+
+The bitmap coverage for `=` and `#` was corrected so the ramp's ink coverage
+strictly increases with brightness. Previously `=` had more ink than `+`, and
+`*`/`#` had identical coverage. A unit test now guards this ordering.
+
+Same-frame comparisons, rendered by the actual shader on the GPU:
+[original](docs/m5-supertux-original.png),
+[previous binary result](docs/m5-supertux-glyph.png),
+[readable color](docs/quality-supertux-readable.png),
+[readable monochrome](docs/quality-supertux-mono.png).
+These last two are fixed-image shader previews of the recorded game capture,
+not new live gameplay captures. To reproduce without launching the game:
+
+```bash
+magick docs/m5-supertux-original.png -depth 8 /tmp/glyphshift-input.ppm
+./build/dev/glyphshift-preview /tmp/glyphshift-input.ppm \
+  presets/readable.conf /tmp/glyphshift-preview.ppm
+magick /tmp/glyphshift-preview.ppm /tmp/glyphshift-preview.png
+```
+
+`glyphshift-preview` is a developer target built with BUILD_TESTING. It uses the
+same embedded GL shader, atlas, ramp and settings parser in an offscreen GLX
+pbuffer, without opening a desktop window. It reads/writes minimal P6 RGB PPM
+(no header comments; dimensions 1..8192), requires a GPU-accessible X11 display,
+and returns an error when unavailable. GPU readback is confined to this tool.
+ImageMagick is optional for converting input/output images. It is not a product
+runtime dependency.
+
+The legibility changes were verified with `cmake --build --preset dev`,
+`ctest --preset dev` (10/10), `cmake --build --preset release` and the Release
+CTest command recorded under M5 (12/12, including GLX and Vulkan graphics).
+The smoke now edits the actual strength widget via numeric entry at 0, 1 and
+0.37, verifies that zero matches the source pixels exactly, that the pure and
+fractional outputs differ, and saves/restores the fractional value through a
+named preset and process restart. All six resize/input/state/failure checks
+remain active. Vulkan uses Khronos core/synchronization validation. Preset
+serialization uses locale-independent shortest-round-trip floats; pure tests
+also verify precision beyond six decimal places and reject invalid strength.
+
+A source-only copy at `/tmp/glyphshift-quality-clean` configured and built the
+Release preset and passed its ten CPU tests without compiler warnings. Its
+preview output was byte-identical to the working preview for the readable
+preset. `magick compare -metric AE` found zero differing pixels between the
+strength-0 color preview and the original PNG. `spirv-val --target-env
+vulkan1.0` accepted all eight glyph/editor SPIR-V modules across Debug/Release;
+format and Git whitespace checks passed. Mesa llvmpipe also passed the extended
+GLX strength/widget/preset smoke with:
+
+```bash
+setpriv --inh-caps=-all -- env __GLX_VENDOR_LIBRARY_NAME=mesa \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+  python3 tests/smoke/run.py --build build/dev --api glx \
+  --output /tmp/glyphshift-quality/mesa-glx
+```
+
+One additional authorized offline SuperTux run checked live switching from
+readable source color to pure mono (exactly two colors), then back to readable.
+It used the Release build with Khronos validation and the same network block:
+
+```bash
+setpriv --inh-caps=-all -- env GS_BUILD=release GS_VALIDATE=1 \
+  /tmp/glyphshift-offline /usr/bin/python3 /tmp/glyphshift-quality/proton-test.py
+```
+
+The game changed to 1920×1022 during that run and refused the subsequent
+requested resize; the temporary driver failed that check and ended the test
+prefix. This run is **not** counted as a complete resize/clean-exit pass.
+Mode/strength switching was observed before that failure, with no Vulkan
+validation diagnostics. Live captures/logs are under
+`/tmp/glyphshift-quality/proton`; the complete resize/input/preset acceptance
+checks are the passing GLX/Vulkan fixtures above. Wine editor/hotkey limitations
+from M5 remain; this quality change does not implement a new input backend.
 
 ### Automated graphics smoke tests (M5)
 

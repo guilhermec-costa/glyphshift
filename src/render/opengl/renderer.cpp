@@ -84,7 +84,7 @@ struct Context {
          ui_font = 0;
   bool indexed_blend = false;
   GLint ui_scale = -1, ui_translate = -1;
-  GLint size = -1, cell = -1, source_color = -1;
+  GLint size = -1, cell = -1, source_color = -1, glyph_strength = -1;
   unsigned clip_count = 0, tf_bindings = 0;
   bool disabled = false, caps_ready = false, viewport_array = false,
        clip_control = false;
@@ -212,6 +212,7 @@ struct Context {
     size = gl.GetUniformLocation(program, "size");
     cell = gl.GetUniformLocation(program, "cell");
     source_color = gl.GetUniformLocation(program, "source_color");
+    glyph_strength = gl.GetUniformLocation(program, "glyph_strength");
   }
   static void texture_parameters(const GlApi& gl) {
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -407,6 +408,7 @@ struct Context {
       gl.Uniform2f(cell, static_cast<float>(settings.cell_width),
                    static_cast<float>(settings.cell_height));
       gl.Uniform1ui(source_color, settings.source_color ? 1 : 0);
+      gl.Uniform1f(glyph_strength, settings.glyph_strength);
       gl.DrawArrays(GL_TRIANGLES, 0, 3);
     }
     if (ui) draw_editor(*ui, width, height);

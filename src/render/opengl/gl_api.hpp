@@ -53,6 +53,7 @@
   X(GetUniformLocation, glGetUniformLocation)           \
   X(Uniform1i, glUniform1i)                             \
   X(Uniform1ui, glUniform1ui)                           \
+  X(Uniform1f, glUniform1f)                             \
   X(Uniform2f, glUniform2f)                             \
   X(Viewport, glViewport)                               \
   X(Scissor, glScissor)                                 \

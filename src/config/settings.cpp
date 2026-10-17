@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <glyphshift/config/settings.hpp>
 #include <mutex>
@@ -96,6 +97,8 @@ class Runtime {
       warning("glyphshift: invalid cell_height; using 12 (range 2..128)\n");
     if (parsed.warnings & invalid_color)
       warning("glyphshift: invalid color_mode; using source (source/mono)\n");
+    if (parsed.warnings & invalid_strength)
+      warning("glyphshift: invalid glyph_strength; using 0.45 (range 0..1)\n");
     if (parsed.warnings & invalid_enabled)
       warning("glyphshift: invalid enabled; using true (true/false/1/0)\n");
     if (parsed.warnings & unknown_setting)
@@ -141,6 +144,16 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
         parsed.value.source_color = false;
       else if (value != "source")
         parsed.warnings |= invalid_color;
+    } else if (key == "glyph_strength") {
+      float strength = defaults.glyph_strength;
+      const auto [parsed_end, error] =
+          std::from_chars(value.data(), value.data() + value.size(), strength);
+      parsed.value.glyph_strength = defaults.glyph_strength;
+      if (error != std::errc{} || parsed_end != value.data() + value.size() ||
+          !std::isfinite(strength) || strength < 0 || strength > 1)
+        parsed.warnings |= invalid_strength;
+      else
+        parsed.value.glyph_strength = strength;
     } else if (key == "enabled") {
       parsed.value.enabled = defaults.enabled;
       if (value == "false" || value == "0")

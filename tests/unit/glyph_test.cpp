@@ -39,6 +39,7 @@ int main() {
   for (unsigned i = 0; i < 10; ++i)
     check(mapped_glyph((static_cast<float>(i) + .5F) / 10, default_ramp) == i,
           "all glyph bins");
+  unsigned previous_density = 0;
   for (unsigned glyph = 0; glyph < glyph_rows.size(); ++glyph) {
     unsigned lit = 0;
     for (unsigned y = 0; y < glyph_size; ++y)
@@ -50,6 +51,9 @@ int main() {
       }
     check(glyph ? lit > 0 : lit == 0,
           "space empty and all other glyphs visible");
+    check(glyph == 0 || lit > previous_density,
+          "ramp ink density strictly increases");
+    previous_density = lit;
   }
   check(parse_settings("").value == Settings{} && !parse_settings("").warnings,
         "defaults");
@@ -73,6 +77,15 @@ int main() {
               invalid_width,
           "invalid numeric syntax");
 
+  check(parse_settings("glyph_strength=0").value.glyph_strength == 0 &&
+            parse_settings("glyph_strength=1").value.glyph_strength == 1 &&
+            parse_settings("glyph_strength=0.37").value.glyph_strength == .37F,
+        "glyph strength accepts endpoints and fractions");
+  for (const char* value : {"nan", "inf", "-0.1", "1.1", "", "0.5x"}) {
+    const auto parsed = parse_settings(std::string("glyph_strength=") + value);
+    check((parsed.warnings & invalid_strength) && parsed.value == Settings{},
+          "invalid strength defaults safely");
+  }
   char path[] = "/tmp/glyphshift-config-test-XXXXXX";
   const int descriptor = mkstemp(path);
   if (descriptor < 0) return 2;
@@ -92,6 +105,8 @@ int main() {
   for (int i = 0; i < 10; ++i)
     check(runtime_settings() == Settings{13, 19, false, false},
           "unchanged file stable");
+  replace("glyph_strength=0.37\n");
+  check(runtime_settings().glyph_strength == .37F, "strength reloads live");
   replace("enabled=true\n");
   check(runtime_settings() == Settings{},
         "atomic file replacement immediately reloaded");

@@ -165,6 +165,9 @@ if(BUILD_TESTING)
     add_test(NAME launcher COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/launcher_test.py"
         "$<TARGET_FILE:glyphshift>" "$<TARGET_FILE:glyphshift-launcher-probe>")
+    add_executable(glyphshift-preview tools/preview.cpp)
+    target_include_directories(glyphshift-preview PRIVATE "${GLYPH_GENERATED}")
+    target_link_libraries(glyphshift-preview PRIVATE glyphshift_core glyphshift_editor OpenGL::GL X11::X11)
     add_library(glyphshift-fault-glx SHARED tests/fixtures/fault_glx.cpp)
     target_link_libraries(glyphshift-fault-glx PRIVATE ${CMAKE_DL_LIBS})
     target_include_directories(glyphshift-fault-glx PRIVATE ${OPENGL_INCLUDE_DIR} ${X11_INCLUDE_DIR})

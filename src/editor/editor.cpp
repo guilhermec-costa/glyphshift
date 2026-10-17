@@ -240,6 +240,11 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
     bool mono = !state.settings.source_color;
     if (ImGui::Checkbox("Monochrome", &mono))
       state.settings.source_color = !mono;
+    ImGui::SetNextItemWidth(-110);
+    ImGui::SliderFloat("Glyph strength", &state.settings.glyph_strength, 0, 1,
+                       "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("0: scene detail  |  1: pure glyphs");
     if (ImGui::Button("Reset to defaults")) state.settings = {};
     ImGui::Separator();
     ImGui::TextWrapped(

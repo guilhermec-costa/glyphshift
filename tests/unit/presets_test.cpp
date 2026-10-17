@@ -23,7 +23,7 @@ int main() {
     Settings actual;
     check(first.selected(error) == "default" && error.empty(),
           "missing default");
-    const Settings expected{21, 19, false, false};
+    const Settings expected{21, 19, false, false, 0.37F};
     check(first.save("night", expected, error) && first.select("night", error),
           "atomic save/select");
     const auto child = fork();
@@ -43,8 +43,16 @@ int main() {
     check(!other.load("night", actual, error) && error.empty(),
           "per-game isolation");
     check(serialize_settings(expected) ==
-              "enabled=false\ncell_width=21\ncell_height=19\ncolor_mode=mono\n",
+              "enabled=false\ncell_width=21\ncell_height=19\ncolor_mode="
+              "mono\nglyph_strength=0.37\n",
           "canonical settings");
+    auto precise = expected;
+    precise.glyph_strength = .123456789F;
+    check(first.save("precise", precise, error) &&
+              first.load("precise", actual, error) && actual == precise,
+          "fractional strength round-trips without precision loss");
+    check(!first.save("bad-strength", Settings{8, 12, true, true, 1.5F}, error),
+          "invalid glyph strength rejected");
     for (const auto name :
          {"", "../escape", "/tmp/escape", ".hidden", "with spaces", "x/y"})
       check(!first.save(name, expected, error), "path names rejected");

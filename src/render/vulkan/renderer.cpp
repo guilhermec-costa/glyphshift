@@ -70,8 +70,9 @@ struct Frame {
 struct Parameters {
   float width, height, cell_width, cell_height;
   uint32_t source_color, ramp_count, output_srgb;
+  float glyph_strength;
 };
-static_assert(sizeof(Parameters) == 28);
+static_assert(sizeof(Parameters) == 32);
 }  // namespace
 
 void initialize_renderer_api(DeviceDispatch& state) {
@@ -351,7 +352,8 @@ class GlyphRenderer {
                                 (format_ == VK_FORMAT_B8G8R8A8_SRGB ||
                                  format_ == VK_FORMAT_R8G8B8A8_SRGB)
                                     ? 1U
-                                    : 0U};
+                                    : 0U,
+                                settings.glyph_strength};
     api_.CmdPushConstants(
         frame.command, layout_,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,

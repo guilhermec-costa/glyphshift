@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
@@ -128,10 +130,17 @@ PresetStore::PresetStore(std::filesystem::path home, std::string id) {
   directory_ = std::move(home) / "glyphshift" / "profiles" / id;
 }
 std::string serialize_settings(const Settings& s) {
+  // Locale-independent shortest round-trip; games may change LC_NUMERIC.
+  std::array<char, 64> strength{};
+  const auto [end, error] = std::to_chars(
+      strength.data(), strength.data() + strength.size(), s.glyph_strength);
+  if (error != std::errc{})
+    throw std::runtime_error("cannot serialize glyph strength");
   return "enabled=" + std::string(s.enabled ? "true" : "false") +
          "\ncell_width=" + std::to_string(s.cell_width) +
          "\ncell_height=" + std::to_string(s.cell_height) +
-         "\ncolor_mode=" + (s.source_color ? "source" : "mono") + "\n";
+         "\ncolor_mode=" + (s.source_color ? "source" : "mono") +
+         "\nglyph_strength=" + std::string(strength.data(), end) + "\n";
 }
 bool PresetStore::load(std::string_view name, Settings& settings,
                        std::string& error) const {
@@ -163,6 +172,11 @@ bool PresetStore::save(std::string_view name, const Settings& settings,
     error =
         "invalid preset name (letters, digits, dot, underscore or hyphen; max "
         "64)";
+    return false;
+  }
+  if (!std::isfinite(settings.glyph_strength) || settings.glyph_strength < 0 ||
+      settings.glyph_strength > 1) {
+    error = "invalid glyph strength";
     return false;
   }
   if (settings.cell_width < 2 || settings.cell_width > 128 ||

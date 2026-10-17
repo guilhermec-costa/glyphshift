@@ -78,6 +78,25 @@ try:
         x.key(window,0xff63);assert image(window,'editor')!=original,'editor not drawn'
         x.key(window,0xff1b);assert image(window,'closed')==original,'Escape did not close only editor'
         x.key(window,ord('a'))
+        # Exercise the strength widget at both ends and save a nondefault value.
+        def strength(value):
+            x.key(window,0xff63)
+            x.send(window,2,0xffe3);time.sleep(.06)
+            x.send(window,6,x=100,y=301,state=4)
+            x.send(window,4,1,100,301,state=4);time.sleep(.06)
+            x.send(window,5,1,100,301,state=4)
+            x.send(window,3,0xffe3,state=4);time.sleep(.12)
+            x.send(window,2,0xffe3);time.sleep(.06)
+            x.send(window,2,ord('a'),state=4);x.send(window,3,ord('a'),state=4)
+            x.send(window,3,0xffe3,state=4);time.sleep(.12)
+            for letter in value:x.key(window,ord(letter))
+            x.key(window,0xff0d);x.key(window,0xff1b)
+        x.key(window,0xffc7)
+        strength('0');assert image(window,'strength-zero')==original,'zero strength did not retain source pixels'
+        strength('1');pure=image(window,'strength-one');assert pure!=original
+        strength('0.37');glyph=image(window,'strength-fraction')
+        assert glyph!=original and glyph!=pure,'fractional strength did not change rendering'
+        x.key(window,0xffc7)
         # Save the disabled effect under a named preset through the real UI.
         x.key(window,0xff63);x.click(window,90,122)
         x.send(window,2,0xffe3);time.sleep(.06);x.send(window,2,ord('a'),state=4);x.send(window,3,ord('a'),state=4);x.send(window,3,0xffe3,state=4);time.sleep(.12)
@@ -86,6 +105,7 @@ try:
         directory=output/'config'/'glyphshift'/'profiles'/profile
         assert (directory/'night.conf').is_file(),'Save preset did not create named file; inspect editor.ppm'
         assert 'enabled=false' in (directory/'night.conf').read_text()
+        assert 'glyph_strength=0.37\n' in (directory/'night.conf').read_text()
         assert (directory/'active').read_text()=='night\n'
         x.key(window,0xff1b);text=finish(process,window,log)
         assert [line for line in text.splitlines() if line.startswith('Fixture input:')]==(['Fixture input: key down 97'] if api=='glx' else ['Fixture input: key up 97']),text
@@ -113,5 +133,5 @@ try:
             x.close(window);assert process.wait(timeout=15)==0,log.read_text()
             text=log.read_text();assert text.count('unsupported Vulkan present batch/pNext')==1,text
             assert 'Vulkan validation:' not in text,text
-    print(f'{api}: launch, editor/input, live toggle, named preset restart, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
+    print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
 finally:x.shutdown()
