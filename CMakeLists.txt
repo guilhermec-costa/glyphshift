@@ -17,17 +17,19 @@ find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 
-add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp)
+add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
+    src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp)
+target_compile_definitions(glyphshift_gl PRIVATE GL_GLEXT_PROTOTYPES)
 set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
-target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core Threads::Threads)
 add_library(glyphshift_vk SHARED
     src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp)
 set_target_properties(glyphshift_vk PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_vk PRIVATE ${Vulkan_INCLUDE_DIRS})
-target_link_libraries(glyphshift_vk PRIVATE Threads::Threads)
+target_link_libraries(glyphshift_vk PRIVATE Threads::Threads glyphshift_core)
 set(vulkan_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/vulkan/exports.map")
 target_link_options(glyphshift_vk PRIVATE "LINKER:--version-script=${vulkan_exports}")
 set_property(TARGET glyphshift_vk APPEND PROPERTY LINK_DEPENDS "${vulkan_exports}")
@@ -58,7 +60,8 @@ if(GLYPHSHIFT_LINK_COMPILE_COMMANDS)
     endif()
 endif()
 
-add_library(glyphshift_core STATIC src/core/fixture.cpp)
+add_library(glyphshift_core STATIC src/core/fixture.cpp src/core/glyph.cpp src/config/settings.cpp)
+set_target_properties(glyphshift_core PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_core PUBLIC include)
 add_library(fixture_window STATIC tests/fixtures/window.cpp)
 target_include_directories(fixture_window PUBLIC tests/fixtures)
@@ -79,6 +82,27 @@ foreach(stage vert frag)
     list(APPEND FIXTURE_SPIRV "${FIXTURE_SHADER_DIR}/gradient.${stage}.spv")
 endforeach()
 add_custom_target(fixture_shaders DEPENDS ${FIXTURE_SPIRV})
+
+set(GLYPH_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${GLYPH_GENERATED}")
+file(READ shaders/glyph/glyph.vert GLYPH_VERTEX)
+file(READ shaders/glyph/glyph.frag GLYPH_FRAGMENT)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    shaders/glyph/glyph.vert shaders/glyph/glyph.frag)
+configure_file(cmake/glyph_shaders.hpp.in "${GLYPH_GENERATED}/glyph_shaders.hpp" @ONLY)
+foreach(stage vert frag)
+    add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_${stage}_spv.hpp"
+        COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/glyph/glyph.${stage}"
+            -o "${GLYPH_GENERATED}/glyph.${stage}.spv"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=${GLYPH_GENERATED}/glyph.${stage}.spv"
+            "-DOUTPUT=${GLYPH_GENERATED}/glyph_${stage}_spv.hpp" "-DNAME=glyph_${stage}_spv"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
+        DEPENDS "shaders/glyph/glyph.${stage}" cmake/embed_spirv.cmake VERBATIM)
+    target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/glyph_${stage}_spv.hpp")
+endforeach()
+target_include_directories(glyphshift_gl PRIVATE "${GLYPH_GENERATED}")
+target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
 add_executable(glyphshift-glx-fixture tests/fixtures/glx.cpp)
 target_link_libraries(glyphshift-glx-fixture PRIVATE fixture_window OpenGL::GL)
@@ -117,6 +141,9 @@ if(BUILD_TESTING)
     target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
     add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
+    add_executable(glyphshift-glyph-tests tests/unit/glyph_test.cpp)
+    target_link_libraries(glyphshift-glyph-tests PRIVATE glyphshift_core Threads::Threads)
+    add_test(NAME glyph-semantics COMMAND glyphshift-glyph-tests)
     add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
     target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
     add_test(NAME core COMMAND glyphshift-core-tests)

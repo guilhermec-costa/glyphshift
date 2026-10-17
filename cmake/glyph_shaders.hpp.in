@@ -1,0 +1,5 @@
+#pragma once
+namespace glyphshift::shaders {
+inline constexpr char vertex[] = R"GLYPHSHIFT(@GLYPH_VERTEX@)GLYPHSHIFT";
+inline constexpr char fragment[] = R"GLYPHSHIFT(@GLYPH_FRAGMENT@)GLYPHSHIFT";
+}

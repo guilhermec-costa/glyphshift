@@ -13,10 +13,10 @@ described here unless a change is explicitly documented.
 
 ## Current implementation
 
-M0 through M2 are implemented: Debug/Release builds, deterministic GLX/Vulkan
-fixtures, unit tests, a launcher, GLX pass-through interposition, and a Vulkan
-pass-through loader layer. Both APIs leave the application image unchanged.
-Glyph rendering, the editor, and product hotkeys belong to later milestones.
+M0 through M2 are complete. M3 is in progress: shared glyph semantics, a
+small built-in atlas, live settings, and the GLX renderer are implemented;
+the Vulkan glyph pass is being added next. The editor and product hotkeys
+remain in M4. Historical M0–M2 validation results are retained below.
 
 ## Product experience
 
@@ -474,6 +474,51 @@ resize the fixture repeatedly, and confirm clean exit and matching
 manifest's library path is relative to its own location, so the launcher,
 libraries and `layers/` directory must stay together. Reconfigure after moving
 the source/build trees, as with the M0 fixture shader paths.
+
+### M3 development (in progress)
+
+GLX now applies the GPU glyph pass by default, using an original built-in 8×8
+bitmap atlas and the shared ramp ` .:-=+*#%@`. Settings are independent from
+both APIs; shaders receive the ramp as lookup-texture data. A four-sample cell
+average uses shared Rec.709 luminance coefficients. The Vulkan renderer is
+still in progress at this point; do not treat M3 as complete yet.
+
+M3 controls use an optional live settings file; the editor and F10 remain M4:
+
+```bash
+cat > /tmp/glyphshift.conf <<'EOF'
+enabled=true
+cell_width=8
+cell_height=12
+color_mode=source
+EOF
+GLYPHSHIFT_CONFIG=/tmp/glyphshift.conf ./build/dev/glyphshift -- \
+  ./build/dev/glyphshift-glx-fixture
+```
+
+Edit or atomically replace that file while the application runs. `enabled`
+accepts true/false or 1/0; each cell dimension accepts 2..128 independently;
+`color_mode` accepts source/mono. Missing keys use defaults (enabled, 8×12,
+source color). Invalid values warn once per reload and use defaults. Files
+must be regular, readable, and at most 4096 bytes. The steady path only checks
+file metadata; parsing/read allocation occurs on changes. There is no CPU
+framebuffer readback, signal handler, input grab, editor or preset persistence.
+
+The GLX pass snapshots/restores all modified state, copies the default back
+buffer into an RGBA8 texture on the GPU, and draws the atlas via a fullscreen
+triangle. Context/drawable resources are separate. Capture textures are reused
+on resize. GL resources are released while the owning context is current,
+before interposed context switches/unbinding or current-context destruction;
+a subsequent activation initializes lazily again. Destruction on another
+thread marks a current context for retirement at its next unbind. Active
+queries or bound transform-feedback buffers conservatively skip the effect.
+`GLYPHSHIFT_FIXTURE_GL_DEBUG=1` enables the fixture's driver debug callback.
+
+Initial verification: eight Debug CTest tests passed, including deterministic
+ramp/luminance/atlas/config tests and live-file replacement. The GLX fixture
+rendered 120 frames and shut down without GL errors or driver debug messages.
+Live source/mono/13×19/off captures were inspected; the disabled 800×600,
+fixed-time-1.25 capture matched the M2 original exactly (RMSE `0 (0)`).
 
 ### Run and check the fixtures directly
 

@@ -6,6 +6,9 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <glyphshift/config/settings.hpp>
+
+#include "renderer.hpp"
 
 namespace {
 using SwapBuffers = void (*)(Display*, GLXDrawable);
@@ -73,6 +76,40 @@ extern "C" __attribute__((visibility("default"))) void glXSwapBuffers(
   }
   const SwapGuard guard;
   const auto& next = dispatch();
+  if (next.swap)
+    glyphshift::opengl::render(display, drawable,
+                               glyphshift::runtime_settings());
   errno = saved_errno;
   if (next.swap) next.swap(display, drawable);
+}
+
+extern "C" __attribute__((visibility("default"))) Bool
+glXMakeCurrent(Display* display, GLXDrawable drawable, GLXContext context) {
+  static const auto next = reinterpret_cast<decltype(&glXMakeCurrent)>(
+      dlsym(RTLD_NEXT, "glXMakeCurrent"));
+  if (!next) return False;
+  const int saved_errno = errno;
+  glyphshift::opengl::before_context_change(context);
+  errno = saved_errno;
+  return next(display, drawable, context);
+}
+extern "C" __attribute__((visibility("default"))) Bool glXMakeContextCurrent(
+    Display* display, GLXDrawable draw, GLXDrawable read, GLXContext context) {
+  static const auto next = reinterpret_cast<decltype(&glXMakeContextCurrent)>(
+      dlsym(RTLD_NEXT, "glXMakeContextCurrent"));
+  if (!next) return False;
+  const int saved_errno = errno;
+  glyphshift::opengl::before_context_change(context);
+  errno = saved_errno;
+  return next(display, draw, read, context);
+}
+extern "C" __attribute__((visibility("default"))) void glXDestroyContext(
+    Display* display, GLXContext context) {
+  static const auto next = reinterpret_cast<decltype(&glXDestroyContext)>(
+      dlsym(RTLD_NEXT, "glXDestroyContext"));
+  if (!next) return;
+  const int saved_errno = errno;
+  glyphshift::opengl::destroy_context(context);
+  errno = saved_errno;
+  next(display, context);
 }

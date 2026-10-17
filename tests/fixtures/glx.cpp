@@ -4,6 +4,7 @@
 #include <GL/glx.h>
 #include <GL/glxext.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -71,6 +72,19 @@ class Renderer {
           "Cannot create/make current an OpenGL 3.3 core context");
     std::cout << "OpenGL " << glGetString(GL_VERSION) << " | "
               << glGetString(GL_RENDERER) << '\n';
+    if (std::getenv("GLYPHSHIFT_FIXTURE_GL_DEBUG")) {
+      auto callback =
+          reinterpret_cast<PFNGLDEBUGMESSAGECALLBACKPROC>(glXGetProcAddressARB(
+              reinterpret_cast<const GLubyte*>("glDebugMessageCallback")));
+      if (callback) {
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        callback(
+            [](GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar* message,
+               const void*) { std::cerr << "GL debug: " << message << '\n'; },
+            nullptr);
+      }
+    }
     // Avoid implicit sRGB conversion: the Vulkan fixture selects UNORM too.
     glDisable(GL_FRAMEBUFFER_SRGB);
     program = glCreateProgram();
