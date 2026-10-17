@@ -1,3 +1,36 @@
+# Google is the base; these overrides favor explicit nesting and readable blocks.
 BasedOnStyle: Google
 Standard: c++20
-ColumnLimit: 80
+
+# Indentation and line wrapping.
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AccessModifierOffset: -4
+NamespaceIndentation: None
+
+# Keep control flow and function bodies on separate lines.
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+
+# When a declaration or call wraps, give each parameter its own line.
+BinPackArguments: false
+BinPackParameters: OnePerLine
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: DontAlign
+
+# Consistent spacing and declaration layout.
+PointerAlignment: Left
+DerivePointerAlignment: false
+SpaceBeforeParens: ControlStatements
+SeparateDefinitionBlocks: Always
+MaxEmptyLinesToKeep: 1
+FixNamespaceComments: true

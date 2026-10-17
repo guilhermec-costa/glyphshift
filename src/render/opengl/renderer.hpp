@@ -2,6 +2,7 @@
 #include <GL/glx.h>
 
 #include <glyphshift/config/settings.hpp>
+
 namespace glyphshift::opengl {
 void render(Display* display, GLXDrawable drawable) noexcept;
 void before_context_change(GLXContext next) noexcept;

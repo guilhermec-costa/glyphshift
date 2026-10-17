@@ -355,8 +355,14 @@ reconfigure/rebuild after relocating a checkout or removing that tree.
 
 ### Code formatting and pre-commit
 
-`.clang-format` uses Google style, C++20, and an 80-column limit. The C++
-sources, including the M0 fixtures, have been formatted with this style.
+`.clang-format` inherits the Google preset and explicitly overrides layout for
+readability: C++20, four-space indentation, a 100-column limit, separate lines
+for control-flow bodies and nonempty functions, and blank lines between
+definitions. Wrapped calls and declarations use one argument/parameter per
+line. Braces stay attached and pointers bind to the type (`Type* value`).
+The project's C++ sources, headers and fixtures use this style; vendored
+`third_party` sources are excluded. The same configuration is enforced by the
+pre-commit hook.
 Use either the Python commands or equivalent CMake targets:
 
 ```bash

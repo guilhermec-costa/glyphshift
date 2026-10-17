@@ -14,7 +14,7 @@ cmake --preset dev
 cmake --build --preset dev
 ```
 
-These examples use the editable `presets/readable.conf` preset. It may have
+The fixture examples use the editable `presets/readable.conf` preset. It may have
 been modified during earlier tests; its current values will be used. To
 experiment without modifying a tracked file, copy it to
 `/tmp/glyphshift-manual.conf` and use that path in `GLYPHSHIFT_CONFIG`.
@@ -99,10 +99,13 @@ the game. The SuperTux test configuration was prepared with networking,
 update checks, and Discord integration disabled. Use only this offline run,
 with no active anti-cheat or online services.
 
+The command below starts with **Illustrated rendering**, 8×12 cells, glyph
+strength 1, and contours over fill, using `presets/illustrated.conf`.
+
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
   env \
-  GLYPHSHIFT_CONFIG="$PWD/presets/readable.conf" \
+  GLYPHSHIFT_CONFIG="$PWD/presets/illustrated.conf" \
   STEAM_COMPAT_DATA_PATH=/tmp/glyphshift-m5-proton-prefix \
   STEAM_COMPAT_CLIENT_INSTALL_PATH=/tmp/glyphshift-m5-steam-empty \
   PROTONFIXES_DISABLE=1 \
@@ -115,6 +118,15 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   --userdir 'Z:\tmp\glyphshift-m5-supertux-user' \
   --window --geometry 800x600 --disable-sound --disable-music
 ```
+
+Close any running SuperTux instance and relaunch with this command to select
+the illustrated config. In **Insert → Illustration**, confirm that
+**Illustrated rendering** and **Contours over fill** are checked. Press
+**F10** to compare against the original scene, preferably inside a level.
+For dark ink on warm paper, change the config path to
+`$PWD/presets/illustrated-ink.conf`; for coarser text and blocks, use
+`$PWD/presets/illustrated-blocks.conf`. To return to the earlier classic
+rendering example, use `$PWD/presets/readable.conf`.
 
 The wrapper blocks IPv4/IPv6 socket creation in the process and its children,
 while allowing Unix/X11 sockets. It does not isolate the filesystem. If the
@@ -151,7 +163,10 @@ glyph_strength=0.45
 | `color_mode=source` / `mono` | Switch between source color and monochrome. |
 | `enabled=false` | Original image, regardless of color mode. |
 
-The supplied presets are [readable](../presets/readable.conf),
+The illustrated starting points are [color](../presets/illustrated.conf),
+[blocks](../presets/illustrated-blocks.conf), and
+[ink](../presets/illustrated-ink.conf). Earlier classic-mode presets are
+[readable](../presets/readable.conf),
 [mono-readable](../presets/mono-readable.conf), and
 [classic](../presets/classic.conf). To start with a different preset, change the
 `GLYPHSHIFT_CONFIG` path before running the command.
