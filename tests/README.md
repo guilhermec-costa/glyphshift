@@ -1,8 +1,9 @@
 # Testing GlyphShift
 
 This guide covers the fixtures, visual adjustments, and SuperTux through Proton.
-The [main README](../README.md) remains the reference for scope, dependencies,
-and validation results.
+The [main README](../README.md) introduces the software and getting started.
+The [implementation reference](../docs/implementation/README.md) records scope,
+architecture, remaining work and validation results.
 
 Run the following commands **from the repository root**, in an X11 session,
 as a regular user and **without sudo**.
@@ -288,7 +289,8 @@ If the Khronos layer is not installed system-wide, insert the same
 
 Observed results (historical runs and the character-selection suite: 11 Debug
 tests, 13 Release tests, Mesa GLX, and Mesa
-Vulkan/Proton limitations) are recorded in the [main README](../README.md).
+Vulkan/Proton limitations) are recorded in the
+[implementation reference](../docs/implementation/README.md).
 This guide documents how to reproduce the tests; creating it does not constitute
 a new run of the graphics tests or the game.
 
@@ -399,5 +401,5 @@ Recorded same-frame comparisons: [original](../docs/illustration-original.png),
 These styled images are GPU previews of the same source frame.
 The [live editor capture](../docs/illustration-live-editor.png) separately shows
 the final mode running through Proton. Full commands/results and the Mesa
-pbuffer limitation are recorded in the main README's illustrated-renderer
-verification section.
+pbuffer limitation are recorded in the implementation reference's
+[illustrated-renderer verification section](../docs/implementation/README.md#illustrated-renderer-verification-and-comparisons).
