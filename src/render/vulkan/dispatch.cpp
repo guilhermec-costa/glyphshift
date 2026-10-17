@@ -58,6 +58,7 @@ void initialize(InstanceDispatch& state) {
   state.member =           \
       reinterpret_cast<PFN_##name>(state.get_proc(state.handle, #name))
   LOAD(destroy, vkDestroyInstance);
+  LOAD(properties, vkGetPhysicalDeviceProperties);
   LOAD(memory_properties, vkGetPhysicalDeviceMemoryProperties);
   LOAD(queue_properties, vkGetPhysicalDeviceQueueFamilyProperties);
   LOAD(surface_capabilities, vkGetPhysicalDeviceSurfaceCapabilitiesKHR);

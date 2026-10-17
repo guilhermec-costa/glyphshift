@@ -2,6 +2,7 @@
 
 #include <X11/keysym.h>
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -28,7 +29,9 @@ void Window::create(XVisualInfo* visual, const char* title) {
   colormap_ = XCreateColormap(display, root, visual->visual, AllocNone);
   XSetWindowAttributes attrs{};
   attrs.colormap = colormap_;
-  attrs.event_mask = StructureNotifyMask | KeyPressMask | ExposureMask;
+  attrs.event_mask = StructureNotifyMask | KeyPressMask | KeyReleaseMask |
+                     ExposureMask | ButtonPressMask | ButtonReleaseMask |
+                     PointerMotionMask | FocusChangeMask;
   handle = XCreateWindow(display, root, 0, 0, width, height, 0, visual->depth,
                          InputOutput, visual->visual, CWColormap | CWEventMask,
                          &attrs);
@@ -36,6 +39,14 @@ void Window::create(XVisualInfo* visual, const char* title) {
   XStoreName(display, handle, title);
   close_ = XInternAtom(display, "WM_DELETE_WINDOW", False);
   XSetWMProtocols(display, handle, &close_, 1);
+  // Automated input checks send events directly; leave desktop keyboard
+  // focus with the user's application during those runs.
+  if (std::getenv("GLYPHSHIFT_FIXTURE_NO_FOCUS")) {
+    XWMHints hints{};
+    hints.flags = InputHint;
+    hints.input = False;
+    XSetWMHints(display, handle, &hints);
+  }
   XMapWindow(display, handle);
   XFlush(display);
 }
@@ -49,6 +60,16 @@ bool Window::poll() {
             XInternAtom(display, "WM_PROTOCOLS", False) &&
         static_cast<Atom>(event.xclient.data.l[0]) == close_)
       return false;
+    if (std::getenv("GLYPHSHIFT_FIXTURE_INPUT_LOG")) {
+      if (event.type == KeyPress || event.type == KeyRelease)
+        std::cerr << "Fixture input: "
+                  << (event.type == KeyPress ? "key down " : "key up ")
+                  << XLookupKeysym(&event.xkey, 0) << '\n';
+      if (event.type == ButtonPress || event.type == ButtonRelease)
+        std::cerr << "Fixture input: "
+                  << (event.type == ButtonPress ? "button down " : "button up ")
+                  << event.xbutton.button << '\n';
+    }
     if (event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_Escape)
       return false;
     if (event.type == ConfigureNotify) {

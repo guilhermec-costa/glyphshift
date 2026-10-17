@@ -1,6 +1,10 @@
+#include <vulkan/vulkan.h>
+
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <glyphshift/config/settings.hpp>
+#include <glyphshift/editor/editor.hpp>
 #include <new>
 
 #include "dispatch.hpp"
@@ -143,6 +147,14 @@ CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* info,
     return VK_ERROR_OUT_OF_HOST_MEMORY;
   }
   state->physical = physical;
+  if (parent->properties) {
+    VkPhysicalDeviceProperties properties{};
+    parent->properties(physical, &properties);
+    std::snprintf(state->version.data(), state->version.size(), "%u.%u.%u",
+                  VK_API_VERSION_MAJOR(properties.apiVersion),
+                  VK_API_VERSION_MINOR(properties.apiVersion),
+                  VK_API_VERSION_PATCH(properties.apiVersion));
+  }
   if (info->queueCreateInfoCount == 1 && info->pQueueCreateInfos) {
     state->single_family = true;
     state->only_family = info->pQueueCreateInfos[0].queueFamilyIndex;
@@ -208,11 +220,52 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceQueue2(VkDevice device,
   record_queue(state, *queue,
                {info->queueFamilyIndex, info->queueIndex, info->flags});
 }
+VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
+    VkInstance instance, const VkXlibSurfaceCreateInfoKHR* info,
+    const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
+  const auto state = find_instance(dispatch_key(instance));
+  if (!state) return VK_ERROR_INITIALIZATION_FAILED;
+  const auto next = reinterpret_cast<PFN_vkCreateXlibSurfaceKHR>(
+      state->get_proc(instance, "vkCreateXlibSurfaceKHR"));
+  if (!next) return VK_ERROR_EXTENSION_NOT_PRESENT;
+  const auto result = next(instance, info, allocator, surface);
+  if (result == VK_SUCCESS) {
+    try {
+      const std::lock_guard lock(state->mutex);
+      state->surfaces.emplace(
+          *surface, std::pair<void*, std::uint64_t>{info->dpy, info->window});
+    } catch (...) {
+      metadata_failure(state->metadata_warning);
+    }
+  }
+  return result;
+}
+VKAPI_ATTR void VKAPI_CALL
+DestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
+                  const VkAllocationCallbacks* allocator) {
+  const auto state = find_instance(dispatch_key(instance));
+  if (!state) return;
+  {
+    const std::lock_guard lock(state->mutex);
+    state->surfaces.erase(surface);
+  }
+  const auto next = reinterpret_cast<PFN_vkDestroySurfaceKHR>(
+      state->get_proc(instance, "vkDestroySurfaceKHR"));
+  if (next) next(instance, surface, allocator);
+}
 void record_swapchain(const std::shared_ptr<DeviceDispatch>& state,
                       const VkSwapchainCreateInfoKHR& info,
                       VkSwapchainKHR swapchain, bool allow_capture = true) {
   try {
     auto metadata = std::make_shared<SwapchainState>();
+    {
+      const std::lock_guard lock(state->instance->mutex);
+      const auto surface = state->instance->surfaces.find(info.surface);
+      if (surface != state->instance->surfaces.end()) {
+        metadata->display = surface->second.first;
+        metadata->window = surface->second.second;
+      }
+    }
     metadata->format = info.imageFormat;
     metadata->extent = info.imageExtent;
     metadata->capture =
@@ -322,7 +375,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(VkQueue queue,
   if (diagnostics_enabled() &&
       !state->presented.test_and_set(std::memory_order_relaxed))
     diagnostic("glyphshift: Vulkan present forwarded\n");
-  return render_present(*state, queue, info, glyphshift::runtime_settings());
+  try {
+    return render_present(*state, queue, info);
+  } catch (const std::exception& error) {
+    editor::report(error.what());
+    if (!state->render_warning.test_and_set())
+      diagnostic(
+          "glyphshift: editor unavailable; forwarding presentation "
+          "unchanged\n");
+    return state->present(queue, info);
+  }
 }
 VKAPI_ATTR VkResult VKAPI_CALL EnumerateInstanceExtensionProperties(
     const char* name, uint32_t* count, VkExtensionProperties*) {
@@ -377,6 +439,8 @@ PFN_vkVoidFunction instance_intercept(const char* name) {
 #define INTERCEPT(function)                   \
   if (std::strcmp(name, "vk" #function) == 0) \
   return reinterpret_cast<PFN_vkVoidFunction>(function)
+  INTERCEPT(CreateXlibSurfaceKHR);
+  INTERCEPT(DestroySurfaceKHR);
   INTERCEPT(DestroyInstance);
   INTERCEPT(EnumeratePhysicalDevices);
   INTERCEPT(EnumeratePhysicalDeviceGroups);

@@ -1,0 +1,4 @@
+{
+  global: _ZN10glyphshift*; _ZNK10glyphshift*;
+  local: *;
+};

@@ -88,5 +88,9 @@ with tempfile.TemporaryDirectory(prefix='glyphshift-launcher-') as directory:
     shutil.copy2(launcher.parent / 'libglyphshift_vk.so', isolated.parent / 'libglyphshift_vk.so')
     missing = subprocess.run([str(isolated), '--', str(probe)], env=env,
                              capture_output=True, text=True)
+    assert missing.returncode == 126 and 'libglyphshift_editor.so' in missing.stderr
+    shutil.copy2(launcher.parent / 'libglyphshift_editor.so', isolated.parent / 'libglyphshift_editor.so')
+    missing = subprocess.run([str(isolated), '--', str(probe)], env=env,
+                             capture_output=True, text=True)
     assert missing.returncode == 126 and 'VK_LAYER_GLYPHSHIFT_overlay.json' in missing.stderr
 print('Launcher: arguments, PATH, environment, exit/signals, privilege refusal and failures passed.')

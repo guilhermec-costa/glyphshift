@@ -1,5 +1,7 @@
 {
   global:
+    XPending; XEventsQueued; XNextEvent; XPeekEvent; XDestroyWindow;
+    XCheckWindowEvent; XCheckMaskEvent; XCheckTypedEvent;
     glXSwapBuffers;
     glXMakeCurrent;
     glXMakeContextCurrent;

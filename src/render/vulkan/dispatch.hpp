@@ -26,6 +26,8 @@ struct InstanceDispatch {
   PFN_vkGetInstanceProcAddr get_proc = nullptr;
   PFN_GetPhysicalDeviceProcAddr get_physical_proc = nullptr;
   PFN_vkDestroyInstance destroy = nullptr;
+  std::unordered_map<VkSurfaceKHR, std::pair<void*, std::uint64_t>> surfaces;
+  PFN_vkGetPhysicalDeviceProperties properties = nullptr;
   PFN_vkGetPhysicalDeviceMemoryProperties memory_properties = nullptr;
   PFN_vkGetPhysicalDeviceQueueFamilyProperties queue_properties = nullptr;
   PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR surface_capabilities = nullptr;
@@ -47,6 +49,8 @@ struct SwapchainState {
   std::mutex mutex;
   std::shared_ptr<GlyphRenderer> renderer;
   bool initializing = false, render_failed = false;
+  void* display = nullptr;
+  std::uint64_t window = 0;
   bool capture = false;
   VkSharingMode sharing = VK_SHARING_MODE_EXCLUSIVE;
   std::array<uint32_t, 32> families{};
@@ -59,6 +63,7 @@ struct SwapchainState {
 struct DeviceDispatch {
   VkDevice handle = VK_NULL_HANDLE;
   VkPhysicalDevice physical = VK_NULL_HANDLE;
+  std::array<char, 48> version{};
   PFN_vkSetDeviceLoaderData set_loader_data = nullptr;
   RenderApi render_api;
   bool single_family = false;

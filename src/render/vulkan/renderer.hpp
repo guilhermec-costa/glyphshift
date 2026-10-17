@@ -57,6 +57,9 @@ struct QueueState;
   X(CmdSetScissor)                        \
   X(CmdBindDescriptorSets)                \
   X(CmdPushConstants)                     \
+  X(CmdBindVertexBuffers)                 \
+  X(CmdBindIndexBuffer)                   \
+  X(CmdDrawIndexed)                       \
   X(CmdDraw)                              \
   X(CreateSemaphore)                      \
   X(DestroySemaphore)                     \
@@ -78,6 +81,6 @@ bool negotiate_capture(DeviceDispatch& state,
                        const VkSwapchainCreateInfoKHR& input,
                        VkSwapchainCreateInfoKHR& output) noexcept;
 VkResult render_present(DeviceDispatch& state, VkQueue queue,
-                        const VkPresentInfoKHR* info, const Settings& settings);
+                        const VkPresentInfoKHR* info);
 void release_renderers(DeviceDispatch& state);
 }  // namespace glyphshift::vulkan

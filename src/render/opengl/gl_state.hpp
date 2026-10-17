@@ -7,13 +7,19 @@ namespace glyphshift::opengl {
 class GlState {
  public:
   GlState(const GlApi& api, unsigned clip_count, unsigned draw_buffers,
-          bool viewport_array, bool clip_control);
+          bool viewport_array, bool clip_control, bool indexed_blend);
   ~GlState();
   GlState(const GlState&) = delete;
   GlState& operator=(const GlState&) = delete;
 
  private:
   const GlApi& gl_;
+  bool indexed_blend_ = false;
+  GLint array_buffer_ = 0;
+  std::array<std::array<GLint, 6>, 32> blend_parameters_{};
+  inline static constexpr std::array<GLenum, 6> blend_names_{
+      GL_BLEND_SRC_RGB,   GL_BLEND_DST_RGB,      GL_BLEND_SRC_ALPHA,
+      GL_BLEND_DST_ALPHA, GL_BLEND_EQUATION_RGB, GL_BLEND_EQUATION_ALPHA};
   GLint program_{}, vao_{}, active_{}, unpack_buffer_{};
   GLint read_fbo_{}, draw_fbo_{}, default_read_{};
   std::array<GLenum, 32> default_draws_{};

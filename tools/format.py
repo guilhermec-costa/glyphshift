@@ -25,7 +25,7 @@ def main():
         names = git('diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z')
     else:
         names = git('ls-files', '--cached', '--others', '--exclude-standard', '-z')
-    files = sorted({os.fsdecode(p) for p in names.split(b'\0') if p and
+    files = sorted({os.fsdecode(p) for p in names.split(b'\0') if p and not pathlib.Path(os.fsdecode(p)).parts[0] == 'third_party' and
                     pathlib.Path(os.fsdecode(p)).suffix in
                     {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx'}})
     if not files:

@@ -1,12 +1,21 @@
 #include "gl_state.hpp"
 namespace glyphshift::opengl {
 GlState::GlState(const GlApi& gl, unsigned clip_count, unsigned draw_buffers,
-                 bool viewport_array, bool clip_control)
+                 bool viewport_array, bool clip_control, bool indexed_blend)
     : gl_(gl),
       draw_buffers_(draw_buffers),
       viewport_array_(viewport_array),
       clip_control_(clip_control),
       clip_count_(clip_count) {
+  indexed_blend_ = indexed_blend;
+  gl.GetIntegerv(GL_ARRAY_BUFFER_BINDING, &array_buffer_);
+  for (unsigned i = 0; i < (indexed_blend_ ? draw_buffers_ : 1); ++i)
+    for (unsigned j = 0; j < blend_names_.size(); ++j) {
+      if (indexed_blend_)
+        gl.GetIntegeri_v(blend_names_[j], i, &blend_parameters_[i][j]);
+      else
+        gl.GetIntegerv(blend_names_[j], &blend_parameters_[i][j]);
+    }
   gl.GetIntegerv(GL_CURRENT_PROGRAM, &program_);
   gl.GetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao_);
   gl.GetIntegerv(GL_ACTIVE_TEXTURE, &active_);
@@ -77,6 +86,23 @@ GlState::~GlState() {
     gl.DrawBuffers(static_cast<GLsizei>(count), default_draws_.data());
   gl.BindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(read_fbo_));
   gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(draw_fbo_));
+  gl.BindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(array_buffer_));
+  for (unsigned i = 0; i < (indexed_blend_ ? draw_buffers_ : 1); ++i) {
+    const auto& p = blend_parameters_[i];
+    if (indexed_blend_) {
+      gl.BlendFuncSeparatei(
+          i, static_cast<GLenum>(p[0]), static_cast<GLenum>(p[1]),
+          static_cast<GLenum>(p[2]), static_cast<GLenum>(p[3]));
+      gl.BlendEquationSeparatei(i, static_cast<GLenum>(p[4]),
+                                static_cast<GLenum>(p[5]));
+    } else {
+      gl.BlendFuncSeparate(static_cast<GLenum>(p[0]), static_cast<GLenum>(p[1]),
+                           static_cast<GLenum>(p[2]),
+                           static_cast<GLenum>(p[3]));
+      gl.BlendEquationSeparate(static_cast<GLenum>(p[4]),
+                               static_cast<GLenum>(p[5]));
+    }
+  }
   gl.UseProgram(static_cast<GLuint>(program_));
   gl.BindVertexArray(static_cast<GLuint>(vao_));
   for (unsigned i = 0; i < textures_.size(); ++i) {

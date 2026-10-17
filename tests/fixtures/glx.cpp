@@ -90,8 +90,11 @@ class Renderer {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         callback(
-            [](GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar* message,
-               const void*) { std::cerr << "GL debug: " << message << '\n'; },
+            [](GLenum, GLenum, GLuint, GLenum severity, GLsizei,
+               const GLchar* message, const void*) {
+              if (severity != GL_DEBUG_SEVERITY_NOTIFICATION)
+                std::cerr << "GL debug: " << message << '\n';
+            },
             nullptr);
       }
     }

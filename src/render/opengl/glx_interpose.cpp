@@ -76,9 +76,7 @@ extern "C" __attribute__((visibility("default"))) void glXSwapBuffers(
   }
   const SwapGuard guard;
   const auto& next = dispatch();
-  if (next.swap)
-    glyphshift::opengl::render(display, drawable,
-                               glyphshift::runtime_settings());
+  if (next.swap) glyphshift::opengl::render(display, drawable);
   errno = saved_errno;
   if (next.swap) next.swap(display, drawable);
 }

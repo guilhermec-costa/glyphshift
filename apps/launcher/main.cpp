@@ -173,6 +173,7 @@ int main(int argc, char** argv) {
     check_target(file.get());
     std::string preload = asset_path("libglyphshift_gl.so");
     (void)asset_path("libglyphshift_vk.so");
+    (void)asset_path("libglyphshift_editor.so");
     const auto manifest = asset_path("layers/VK_LAYER_GLYPHSHIFT_overlay.json");
     const auto directory =
         std::filesystem::path(manifest).parent_path().string();

@@ -1,13 +1,19 @@
 #include "renderer.hpp"
 
+#include <imgui.h>
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <glyphshift/core/glyph.hpp>
+#include <glyphshift/editor/editor.hpp>
 #include <stdexcept>
 #include <string>
 
 #include "dispatch.hpp"
+#include "editor_frag_spv.hpp"
+#include "editor_vert_spv.hpp"
 #include "glyph_frag_spv.hpp"
 #include "glyph_vert_spv.hpp"
 
@@ -46,6 +52,10 @@ struct Texture {
   VkImageView view = VK_NULL_HANDLE;
 };
 struct Frame {
+  VkBuffer ui_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory ui_memory = VK_NULL_HANDLE;
+  void* ui_mapped = nullptr;
+  VkDeviceSize ui_capacity = 0;
   Texture capture;
   VkImage image = VK_NULL_HANDLE;
   VkImageView output_view = VK_NULL_HANDLE;
@@ -120,11 +130,15 @@ class GlyphRenderer {
         api_.DestroyFramebuffer(device, frame.framebuffer, nullptr);
       if (frame.output_view)
         api_.DestroyImageView(device, frame.output_view, nullptr);
+      if (frame.ui_mapped) api_.UnmapMemory(device, frame.ui_memory);
+      if (frame.ui_buffer) api_.DestroyBuffer(device, frame.ui_buffer, nullptr);
+      if (frame.ui_memory) api_.FreeMemory(device, frame.ui_memory, nullptr);
       destroy(frame.capture);
       if (frame.completed)
         api_.DestroySemaphore(device, frame.completed, nullptr);
       if (frame.fence) api_.DestroyFence(device, frame.fence, nullptr);
     }
+    if (ui_pipeline_) api_.DestroyPipeline(device, ui_pipeline_, nullptr);
     if (pipeline_) api_.DestroyPipeline(device, pipeline_, nullptr);
     if (render_pass_) api_.DestroyRenderPass(device, render_pass_, nullptr);
     for (const auto module : modules_)
@@ -133,6 +147,7 @@ class GlyphRenderer {
     if (descriptor_layout_)
       api_.DestroyDescriptorSetLayout(device, descriptor_layout_, nullptr);
     if (sampler_) api_.DestroySampler(device, sampler_, nullptr);
+    destroy(font_);
     destroy(atlas_);
     destroy(ramp_);
     if (staging_) api_.DestroyBuffer(device, staging_, nullptr);
@@ -181,6 +196,10 @@ class GlyphRenderer {
     texture(atlas_, VK_FORMAT_R8_UNORM, {atlas_width, atlas_height});
     texture(ramp_, VK_FORMAT_R8_UINT,
             {static_cast<uint32_t>(default_ramp.size()), 1});
+    const auto font = editor::font();
+    font_extent_ = {static_cast<uint32_t>(font.width),
+                    static_cast<uint32_t>(font.height)};
+    texture(font_, VK_FORMAT_R8_UNORM, font_extent_);
     staging();
     descriptors();
     pipeline();
@@ -217,6 +236,7 @@ class GlyphRenderer {
       check(api_.AllocateCommandBuffers(device_.handle, &allocation,
                                         &frame.command),
             "allocate glyph command buffer");
+      ensure_ui_buffer(frame, 256 * 1024);
       check(device_.set_loader_data(device_.handle, frame.command),
             "initialize layer command-buffer dispatch");
       auto descriptor = info<VkDescriptorSetAllocateInfo>(
@@ -227,12 +247,13 @@ class GlyphRenderer {
       check(api_.AllocateDescriptorSets(device_.handle, &descriptor,
                                         &frame.descriptors),
             "allocate glyph descriptors");
-      const std::array<VkDescriptorImageInfo, 3> bindings{
+      const std::array<VkDescriptorImageInfo, 4> bindings{
           {{sampler_, frame.capture.view,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
            {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-           {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
-      std::array<VkWriteDescriptorSet, 3> writes{};
+           {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+           {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+      std::array<VkWriteDescriptorSet, 4> writes{};
       for (uint32_t binding = 0; binding < writes.size(); ++binding) {
         writes[binding] =
             info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -250,13 +271,15 @@ class GlyphRenderer {
     diagnostic("glyphshift: Vulkan glyph renderer initialized\n");
   }
   VkSemaphore draw(VkQueue queue, uint32_t index,
-                   const VkPresentInfoKHR& present, const Settings& settings) {
+                   const VkPresentInfoKHR& present, const Settings& settings,
+                   const ImDrawData* ui) {
     if (queue != queue_ || index >= frames_.size()) return VK_NULL_HANDLE;
     const std::lock_guard lock(mutex_);
     auto& frame = frames_[index];
     check(api_.WaitForFences(device_.handle, 1, &frame.fence, VK_TRUE,
                              UINT64_MAX),
           "wait for glyph frame");
+    if (ui) upload_ui(frame, *ui);
     check(api_.ResetCommandBuffer(frame.command, 0),
           "reset glyph command buffer");
     auto begin = info<VkCommandBufferBeginInfo>(
@@ -268,6 +291,7 @@ class GlyphRenderer {
       upload(frame.command, atlas_, 0, {atlas_width, atlas_height});
       upload(frame.command, ramp_, default_atlas.size(),
              {static_cast<uint32_t>(default_ramp.size()), 1});
+      upload(frame.command, font_, font_offset_, font_extent_);
     }
     barrier(frame.command, frame.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0,
@@ -292,7 +316,9 @@ class GlyphRenderer {
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     barrier(frame.command, frame.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     auto pass =
@@ -324,9 +350,12 @@ class GlyphRenderer {
                                  format_ == VK_FORMAT_R8G8B8A8_SRGB)
                                     ? 1U
                                     : 0U};
-    api_.CmdPushConstants(frame.command, layout_, VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(parameters), &parameters);
-    api_.CmdDraw(frame.command, 3, 1, 0, 0);
+    api_.CmdPushConstants(
+        frame.command, layout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+        sizeof(parameters), &parameters);
+    if (settings.enabled) api_.CmdDraw(frame.command, 3, 1, 0, 0);
+    if (ui) draw_ui(frame, *ui);
     api_.CmdEndRenderPass(frame.command);
     check(api_.EndCommandBuffer(frame.command), "end glyph command buffer");
     // Storage for wait masks is allocated once with the renderer. Refuse an
@@ -360,7 +389,10 @@ class GlyphRenderer {
   std::mutex mutex_;
   bool uploaded_ = false, submitted_ = false;
   std::vector<Frame> frames_;
-  Texture atlas_, ramp_;
+  Texture atlas_, ramp_, font_;
+  VkExtent2D font_extent_{};
+  static constexpr VkDeviceSize font_offset_ =
+      (default_atlas.size() + default_ramp.size() + 3) & ~VkDeviceSize{3};
   VkBuffer staging_ = VK_NULL_HANDLE;
   VkDeviceMemory staging_memory_ = VK_NULL_HANDLE;
   VkSampler sampler_ = VK_NULL_HANDLE;
@@ -368,9 +400,10 @@ class GlyphRenderer {
   VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkRenderPass render_pass_ = VK_NULL_HANDLE;
+  VkPipeline ui_pipeline_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
   VkCommandPool pool_ = VK_NULL_HANDLE;
-  std::array<VkShaderModule, 2> modules_{};
+  std::array<VkShaderModule, 4> modules_{};
   const std::array<VkPipelineStageFlags, 64> wait_masks_ = [] {
     std::array<VkPipelineStageFlags, 64> values{};
     values.fill(VK_PIPELINE_STAGE_TRANSFER_BIT);
@@ -434,7 +467,10 @@ class GlyphRenderer {
       api_.FreeMemory(device_.handle, texture.memory, nullptr);
   }
   void staging() {
-    const auto bytes = default_atlas.size() + default_ramp.size();
+    const auto font = editor::font();
+    const auto bytes =
+        font_offset_ + static_cast<VkDeviceSize>(font.width) *
+                           static_cast<VkDeviceSize>(font.height);
     auto buffer =
         info<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
     buffer.size = bytes;
@@ -456,10 +492,13 @@ class GlyphRenderer {
     std::memcpy(mapped, default_atlas.data(), default_atlas.size());
     std::memcpy(static_cast<std::uint8_t*>(mapped) + default_atlas.size(),
                 default_ramp.data(), default_ramp.size());
+    std::memcpy(static_cast<std::uint8_t*>(mapped) + font_offset_, font.pixels,
+                static_cast<std::size_t>(font.width) *
+                    static_cast<std::size_t>(font.height));
     api_.UnmapMemory(device_.handle, staging_memory_);
   }
   void descriptors() {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i)
       bindings[i] = {i, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                      VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
@@ -471,7 +510,7 @@ class GlyphRenderer {
                                          &descriptor_layout_),
           "create glyph descriptor layout");
     VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                              static_cast<uint32_t>(frames_.size() * 3)};
+                              static_cast<uint32_t>(frames_.size() * 4)};
     auto pool = info<VkDescriptorPoolCreateInfo>(
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
     pool.maxSets = static_cast<uint32_t>(frames_.size());
@@ -490,8 +529,9 @@ class GlyphRenderer {
           "create glyph sampler");
   }
   void pipeline() {
-    const std::array<std::span<const uint32_t>, 2> code{
-        shaders::glyph_vert_spv, shaders::glyph_frag_spv};
+    const std::array<std::span<const uint32_t>, 4> code{
+        shaders::glyph_vert_spv, shaders::glyph_frag_spv,
+        shaders::editor_vert_spv, shaders::editor_frag_spv};
     for (unsigned i = 0; i < code.size(); ++i) {
       auto module = info<VkShaderModuleCreateInfo>(
           VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
@@ -501,8 +541,9 @@ class GlyphRenderer {
                                     &modules_[i]),
             "create glyph SPIR-V module");
     }
-    const VkPushConstantRange range{VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                    sizeof(Parameters)};
+    const VkPushConstantRange range{
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+        sizeof(Parameters)};
     auto layout = info<VkPipelineLayoutCreateInfo>(
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
     layout.setLayoutCount = 1;
@@ -514,7 +555,7 @@ class GlyphRenderer {
     VkAttachmentDescription color{};
     color.format = format_;
     color.samples = VK_SAMPLE_COUNT_1_BIT;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -543,7 +584,7 @@ class GlyphRenderer {
       stages[i].module = modules_[i];
       stages[i].pName = "main";
     }
-    const auto vertex = info<VkPipelineVertexInputStateCreateInfo>(
+    auto vertex = info<VkPipelineVertexInputStateCreateInfo>(
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
     auto assembly = info<VkPipelineInputAssemblyStateCreateInfo>(
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
@@ -590,6 +631,135 @@ class GlyphRenderer {
     check(api_.CreateGraphicsPipelines(device_.handle, VK_NULL_HANDLE, 1,
                                        &create, nullptr, &pipeline_),
           "create glyph graphics pipeline");
+    stages[0].module = modules_[2];
+    stages[1].module = modules_[3];
+    const VkVertexInputBindingDescription binding{0, sizeof(ImDrawVert),
+                                                  VK_VERTEX_INPUT_RATE_VERTEX};
+    const std::array<VkVertexInputAttributeDescription, 3> attributes{
+        {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, pos)},
+         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, uv)},
+         {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(ImDrawVert, col)}}};
+    vertex.vertexBindingDescriptionCount = 1;
+    vertex.pVertexBindingDescriptions = &binding;
+    vertex.vertexAttributeDescriptionCount =
+        static_cast<uint32_t>(attributes.size());
+    vertex.pVertexAttributeDescriptions = attributes.data();
+    attachment.blendEnable = VK_TRUE;
+    attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    attachment.colorBlendOp = VK_BLEND_OP_ADD;
+    attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    check(api_.CreateGraphicsPipelines(device_.handle, VK_NULL_HANDLE, 1,
+                                       &create, nullptr, &ui_pipeline_),
+          "create editor graphics pipeline");
+  }
+  void ensure_ui_buffer(Frame& frame, VkDeviceSize required) {
+    if (required <= frame.ui_capacity) return;
+    if (required > 16 * 1024 * 1024)
+      throw std::runtime_error("editor geometry limit exceeded");
+    if (frame.ui_mapped) {
+      api_.UnmapMemory(device_.handle, frame.ui_memory);
+      frame.ui_mapped = nullptr;
+    }
+    if (frame.ui_buffer) {
+      api_.DestroyBuffer(device_.handle, frame.ui_buffer, nullptr);
+      frame.ui_buffer = VK_NULL_HANDLE;
+    }
+    if (frame.ui_memory) {
+      api_.FreeMemory(device_.handle, frame.ui_memory, nullptr);
+      frame.ui_memory = VK_NULL_HANDLE;
+    }
+    frame.ui_capacity = std::max(required, frame.ui_capacity * 2);
+    auto buffer =
+        info<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    buffer.size = frame.ui_capacity;
+    buffer.usage =
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    check(api_.CreateBuffer(device_.handle, &buffer, nullptr, &frame.ui_buffer),
+          "create editor geometry buffer");
+    VkMemoryRequirements requirements{};
+    api_.GetBufferMemoryRequirements(device_.handle, frame.ui_buffer,
+                                     &requirements);
+    allocate(requirements,
+             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+             frame.ui_memory);
+    check(api_.BindBufferMemory(device_.handle, frame.ui_buffer,
+                                frame.ui_memory, 0),
+          "bind editor geometry memory");
+    check(api_.MapMemory(device_.handle, frame.ui_memory, 0, frame.ui_capacity,
+                         0, &frame.ui_mapped),
+          "map editor geometry");
+  }
+  void upload_ui(Frame& frame, const ImDrawData& data) {
+    const auto vertices =
+        static_cast<VkDeviceSize>(data.TotalVtxCount) * sizeof(ImDrawVert);
+    const auto indices =
+        static_cast<VkDeviceSize>(data.TotalIdxCount) * sizeof(ImDrawIdx);
+    ensure_ui_buffer(frame, vertices + indices);
+    auto* v = static_cast<unsigned char*>(frame.ui_mapped);
+    auto* i = v + vertices;
+    for (const auto* list : data.CmdLists) {
+      const auto vs =
+          static_cast<std::size_t>(list->VtxBuffer.Size) * sizeof(ImDrawVert);
+      const auto is =
+          static_cast<std::size_t>(list->IdxBuffer.Size) * sizeof(ImDrawIdx);
+      std::memcpy(v, list->VtxBuffer.Data, vs);
+      std::memcpy(i, list->IdxBuffer.Data, is);
+      v += vs;
+      i += is;
+    }
+  }
+  void draw_ui(Frame& frame, const ImDrawData& data) {
+    if (!data.TotalVtxCount || !data.TotalIdxCount) return;
+    const VkDeviceSize offset = 0;
+    api_.CmdBindPipeline(frame.command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                         ui_pipeline_);
+    api_.CmdBindVertexBuffers(frame.command, 0, 1, &frame.ui_buffer, &offset);
+    api_.CmdBindIndexBuffer(
+        frame.command, frame.ui_buffer,
+        static_cast<VkDeviceSize>(data.TotalVtxCount) * sizeof(ImDrawVert),
+        sizeof(ImDrawIdx) == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+    struct Projection {
+      float scale[2], translate[2];
+      uint32_t srgb;
+    } projection{{2.0F / static_cast<float>(extent_.width),
+                  2.0F / static_cast<float>(extent_.height)},
+                 {-1, -1},
+                 (format_ == VK_FORMAT_B8G8R8A8_SRGB ||
+                  format_ == VK_FORMAT_R8G8B8A8_SRGB)
+                     ? 1U
+                     : 0U};
+    api_.CmdPushConstants(
+        frame.command, layout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+        sizeof(projection), &projection);
+    uint32_t first_index = 0;
+    int32_t vertex_offset = 0;
+    for (const auto* list : data.CmdLists) {
+      for (const auto& cmd : list->CmdBuffer) {
+        if (cmd.UserCallback) continue;
+        const int x = std::max(0, static_cast<int>(cmd.ClipRect.x));
+        const int y = std::max(0, static_cast<int>(cmd.ClipRect.y));
+        const int right = std::min(static_cast<int>(extent_.width),
+                                   static_cast<int>(cmd.ClipRect.z));
+        const int bottom = std::min(static_cast<int>(extent_.height),
+                                    static_cast<int>(cmd.ClipRect.w));
+        if (right <= x || bottom <= y) continue;
+        const VkRect2D clip{{x, y},
+                            {static_cast<uint32_t>(right - x),
+                             static_cast<uint32_t>(bottom - y)}};
+        api_.CmdSetScissor(frame.command, 0, 1, &clip);
+        api_.CmdDrawIndexed(
+            frame.command, cmd.ElemCount, 1, first_index + cmd.IdxOffset,
+            vertex_offset + static_cast<int32_t>(cmd.VtxOffset), 0);
+      }
+      first_index += static_cast<uint32_t>(list->IdxBuffer.Size);
+      vertex_offset += list->VtxBuffer.Size;
+    }
   }
   void barrier(VkCommandBuffer command, VkImage image, VkImageLayout old_layout,
                VkImageLayout new_layout, VkAccessFlags source,
@@ -629,10 +799,8 @@ class GlyphRenderer {
 };
 
 VkResult render_present(DeviceDispatch& device, VkQueue queue,
-                        const VkPresentInfoKHR* info,
-                        const Settings& settings) {
-  if (!settings.enabled || !device.render_api.available)
-    return device.present(queue, info);
+                        const VkPresentInfoKHR* info) {
+  if (!device.render_api.available) return device.present(queue, info);
   if (info->swapchainCount != 1 || info->pNext ||
       info->waitSemaphoreCount > 64) {
     warning(device,
@@ -671,6 +839,14 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
             "forwarding unchanged\n");
     return device.present(queue, info);
   }
+  const auto start = std::chrono::steady_clock::now();
+  editor::Frame editor_frame(state->display, state->window, state->extent.width,
+                             state->extent.height, "Vulkan",
+                             device.version.data());
+  if (!editor_frame.settings.enabled && !editor_frame.draw_data) {
+    editor_frame.complete(0);
+    return device.present(queue, info);
+  }
   std::shared_ptr<GlyphRenderer> renderer;
   bool initialize = false, blocked = false;
   {
@@ -681,7 +857,11 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
       state->initializing = initialize = true;
     }
   }
-  if (blocked) return device.present(queue, info);
+  if (blocked) {
+    editor_frame.complete(0);
+    editor::deactivate(state->display, state->window);
+    return device.present(queue, info);
+  }
   try {
     if (initialize) {
       renderer = std::make_shared<GlyphRenderer>(device, info->pSwapchains[0],
@@ -692,7 +872,11 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
       state->initializing = false;
     }
     const auto completed =
-        renderer->draw(queue, info->pImageIndices[0], *info, settings);
+        renderer->draw(queue, info->pImageIndices[0], *info,
+                       editor_frame.settings, editor_frame.draw_data);
+    editor_frame.complete(std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - start)
+                              .count());
     if (!completed) {
       warning(device,
               "glyphshift: unsupported Vulkan queue change/image index; "
@@ -712,7 +896,10 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     }
     diagnostic("glyphshift: Vulkan glyph renderer disabled for swapchain: ");
     diagnostic(error.what());
+    editor::report(error.what());
     diagnostic("\n");
+    editor_frame.complete(0);
+    editor::deactivate(state->display, state->window);
     return device.present(queue, info);
   }
 }

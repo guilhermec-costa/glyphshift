@@ -22,8 +22,9 @@ struct ParsedSettings {
   Settings value;
   std::uint32_t warnings = 0;
 };
-ParsedSettings parse_settings(std::string_view text) noexcept;
+__attribute__((visibility("default"))) ParsedSettings
+parse_settings(std::string_view text) noexcept;
 // GLYPHSHIFT_CONFIG is optional. Stat is allocation-free on the steady path;
 // files are read only after a change, never framebuffer data. No graphics API.
-Settings runtime_settings() noexcept;
+__attribute__((visibility("default"))) Settings runtime_settings() noexcept;
 }  // namespace glyphshift

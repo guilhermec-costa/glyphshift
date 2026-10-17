@@ -13,10 +13,10 @@ described here unless a change is explicitly documented.
 
 ## Current implementation
 
-M0 through M3 are complete. Both backends apply the same built-in glyph atlas
+M0 through M4 are complete. Both backends apply the same built-in glyph atlas
 and ramp, with live cell dimensions, source/monochrome color, and effect toggle.
-The editor and product hotkeys remain in M4. Historical M0–M2 validation
-results are retained below.
+M4 adds the shared Dear ImGui editor and Insert/Escape/F10 controls.
+Historical validation results are retained below.
 
 ## Product experience
 
@@ -269,7 +269,7 @@ Parsing, validation, defaults, and serialization must not depend on OpenGL or
 Vulkan. Invalid values should emit a useful warning and use safe defaults
 instead of terminating the game.
 
-## Development (M0–M2)
+## Development (M0–M4)
 
 ### Dependencies
 
@@ -324,8 +324,12 @@ Warnings are enabled for all C++ targets: `-Wall -Wextra -Wpedantic
 `--help` paths, launcher process tests, and interposer tests without needing a
 display. When `clang-format` is present, it also tests the pre-commit hook. These do not
 claim graphics coverage.
-The two SPIR-V shaders are compiled locally by CMake; there are no downloaded
-build dependencies. Fixture shader files live in the corresponding build tree;
+The fixture, glyph and editor SPIR-V shaders are compiled locally by CMake.
+Dear ImGui v1.91.9b is vendored under `third_party/imgui`, with its MIT license,
+source URL and archive checksum. Configuration/builds require no downloads.
+Vendor sources are kept unmodified, exempt from the project formatting hook
+and Git whitespace checks, and compiled with upstream warning conventions; project sources retain all
+warning flags and formatting checks. Fixture shader files live in the corresponding build tree;
 reconfigure/rebuild after relocating a checkout or removing that tree.
 
 ### Code formatting and pre-commit
@@ -355,7 +359,7 @@ Deleted files are skipped, paths with spaces are supported, and missing
 `clang-format` fails with an installation instruction. Git clones do not
 activate hooks automatically; run the configuration command above locally.
 
-### Launch with GlyphShift (M1–M3)
+### Launch with GlyphShift (M1–M4)
 
 ```bash
 ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
@@ -390,7 +394,8 @@ is returned after a successful exec. No installation or elevated privileges
 are required.
 
 The interposer exports `glXSwapBuffers`, `glXMakeCurrent`,
-`glXMakeContextCurrent`, and `glXDestroyContext`. It resolves the next symbols
+`glXMakeContextCurrent`, and `glXDestroyContext`, plus the Xlib input hooks
+described under M4. It resolves the next symbols
 via `dlsym(RTLD_NEXT, ...)` with thread-safe lazy initialization and forwards
 the original arguments. Context lifecycle hooks release owned resources while
 the context is still current. The M3 pass below runs before the original swap
@@ -408,7 +413,7 @@ obtained directly from driver procedure-address APIs have not been validated.
 The Vulkan layer described below is also enabled for applications launched
 through GlyphShift; GLX applications do not initialize Vulkan as a result.
 
-### Vulkan loader layer (M2–M3)
+### Vulkan loader layer (M2–M4)
 
 The build adds `libglyphshift_vk.so` and
 `build/dev/layers/VK_LAYER_GLYPHSHIFT_overlay.json` (or the Release equivalent).
@@ -416,7 +421,7 @@ This is an explicit development layer, not a system or implicit layer; the
 manifest's `GLOBAL` type means it covers instance and device calls. Nothing
 is installed in the system's Vulkan search directories.
 
-The launcher checks both libraries and the manifest, then enables
+The launcher checks both renderer libraries, `libglyphshift_editor.so` and the manifest, then enables
 `VK_LAYER_GLYPHSHIFT_overlay` through `VK_INSTANCE_LAYERS` for the launched
 process and its descendants. Existing requested layers are preserved. It
 prepends the local manifest directory to an existing `VK_LAYER_PATH` override;
@@ -443,7 +448,8 @@ are retained as CPU metadata. Unknown commands forward to the appropriate
 next procedure-address function, including the physical-device chain; optional
 commands unavailable downstream remain null.
 
-When disabled or outside the supported M3 capture path, presentation forwards
+When both effect and editor are disabled, or outside the supported capture
+path, presentation forwards
 the exact `VkPresentInfoKHR` pointer, wait semaphores,
 image indices, `pNext`, per-swapchain results, and return code. It performs no
 rendering, command submission, GPU wait, image-layout transition, readback,
@@ -488,7 +494,7 @@ average uses shared Rec.709 luminance coefficients. GLSL is shared by both
 backends and embedded into the libraries (SPIR-V for Vulkan); there is no
 runtime glyph shader-file dependency.
 
-M3 controls use an optional live settings file; the editor and F10 remain M4:
+The M3 live settings file remains optional in M4:
 
 ```bash
 cat > /tmp/glyphshift.conf <<'EOF'
@@ -507,7 +513,9 @@ accepts true/false or 1/0; each cell dimension accepts 2..128 independently;
 source color). Invalid values warn once per reload and use defaults. Files
 must be regular, readable, and at most 4096 bytes. The steady path only checks
 file metadata; parsing/read allocation occurs on changes. There is no CPU
-framebuffer readback, signal handler, input grab, editor or preset persistence.
+framebuffer readback, signal handler, global input grab or preset persistence.
+M4 editor changes are session-local; changed file values replace the session
+settings at the next frame. The file is never rewritten by the editor.
 
 The GLX pass snapshots/restores all modified state, copies the default back
 buffer into an RGBA8 texture on the GPU, and draws the atlas via a fullscreen
@@ -549,6 +557,55 @@ and unsupported formats/usage conservatively forward unchanged, with an opt-in
 once-per-device diagnostic. Initialization failures disable that swapchain's
 effect and report the exact failure. These are fixture-scoped M3 capabilities;
 M5 owns broader multi-context/swapchain and application coverage.
+
+### Shared in-game editor (M4)
+
+Launch either fixture through GlyphShift using the commands above, then:
+
+- `Insert` opens/closes the editor.
+- `Escape` closes the editor and is consumed; the application keeps running.
+  With the editor already closed, Escape reaches the fixture and exits it.
+- `F10` toggles the glyph effect with the editor open or closed.
+
+The same Dear ImGui panel exposes the M3 renderer settings: effect enabled,
+independent cell width/height (2..128 pixels), monochrome/source color, and
+reset to defaults. The panel fits the window and scrolls in small viewports.
+The title-bar close button also returns input immediately. Keyboard navigation
+uses Tab, arrows, Space and Enter; Ctrl-clicking a slider permits numeric entry.
+It displays the backend/API version, previous GlyphShift CPU preparation and
+submission time in milliseconds (including per-image fence waits, not GPU
+execution time), active preset
+`Default (session)`, and the latest shader/initialization diagnostic. There is
+no preset saving or additional rendering parameter beyond M3.
+
+`libglyphshift_editor.so` owns the API-independent settings and editor model,
+the shared font atlas and ImGui contexts, serialized across presentation
+threads. This keeps input hooks in the preloaded GLX library and the Vulkan
+layer connected to the same session state, including in Vulkan-only apps.
+All three shared libraries and the launcher must remain together; runtime
+library lookup uses `$ORIGIN`. Each GPU backend uploads the font atlas and
+renders ImGui geometry into its own target after the glyph pass. Vulkan uses
+mapped, coherent per-swapchain-image geometry buffers, written only after that
+image's submission fence completes. GLX additionally restores array-buffer
+bindings and separate/indexed blend factors/equations. Closing the editor with
+the effect disabled skips all GPU rendering work. First use, window/target
+initialization and geometry-capacity growth may allocate; stable frames reuse
+resources. ImGui symbols remain hidden from host applications.
+
+The X11 adapter filters Xlib events for registered presentation windows only.
+GLX identifies the current drawable; Vulkan tracks Xlib surface creation to
+find its display/window. Supported event paths are `XPending`, `XEventsQueued`,
+`XNextEvent`, `XPeekEvent`, `XCheckWindowEvent`, `XCheckMaskEvent` and
+`XCheckTypedEvent`. Open-editor keyboard/pointer presses and matching releases
+are consumed. Releases for keys already held by the application before opening
+remain available to it, preventing stuck host keys. Hotkey repeats are debounced,
+and releases for captured keys/buttons remain suppressed after closing. Focus
+loss closes the editor. There are no root-window hooks or keyboard/pointer
+grabs. Render initialization failures release editor capture and pass through;
+when rendering itself is unavailable the error is logged rather than drawn.
+XCB, XI2/raw input, other Xlib selection APIs and driver-procedure-address
+bypasses are not validated by M4. The first target is the two Xlib fixtures;
+broader application/input compatibility remains M5.
 
 ### Run and check the fixtures directly
 
@@ -900,6 +957,103 @@ These are fixture results on the recorded GPU. Games, Proton, Mesa, other GPUs,
 Wayland and broader multi-context/swapchain cases were not verified. The M4
 editor/hotkeys and M5 integrations were not implemented.
 
+### Verified M4 results
+
+Verified on 2026-10-17 with the Arch/X11/i3/NVIDIA RTX 3060 Ti setup above;
+the resumed session reported kernel `7.2.4-arch1-2`, NVIDIA `615.71.09`,
+OpenGL `3.3.0`, and Vulkan device API `1.4.351`. M3 was committed as `2450123`
+before this separately requested M4. No M5 work was started.
+
+The working checkout and a source-only copy at `/tmp/glyphshift-m4-clean`
+(excluding Git, build artifacts, the compilation database and agent metadata)
+configured and built both presets and passed all nine CTest tests without
+project compiler warnings:
+
+```bash
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+python3 tools/format.py --apply
+python3 tools/format.py --check
+cmake --build --preset dev --target format-check
+git diff --check
+```
+
+The new editor unit test checks real ImGui geometry generation, session
+isolation, hotkey repeat suppression (including traditional X11 autorepeat),
+UI capture and release after closing, forwarding releases for host-held keys,
+focus loss, window retirement, and repeated frames. Existing staged-format,
+launcher, GLX interposition, synthetic Vulkan dispatch, glyph and fixture tests
+remain passing. The launcher test also checks the missing shared editor
+library diagnostic. Both source roots generated their own Debug compilation
+database with 26 translation units; Release left the Debug link intact.
+
+Temporary X11 drivers exercised GLX and Vulkan in Debug and Release at
+`--fixed-time 1.25`. Each API/preset passed real widget changes to width,
+height and monochrome, reset, the effect checkbox, Insert/F10/Escape, and 12
+confirmed resizes through the six M0 dimensions repeated twice. Pointer and
+keyboard edits did not reach the host fixture. After closing, an `a` press/
+release and mouse click reached it; Escape closed the editor first, then a
+second Escape reached the fixture and exited zero. Host-input logging showed
+only those expected events. Disabled images matched direct fixture originals
+exactly, and closing/reopening the editor preserved the scene exactly. GLX
+runs enabled both the hostile-state probe and KHR_debug; Vulkan enabled
+Khronos core/synchronization validation. Final runs emitted no GL errors or
+Vulkan validation warnings/errors, including teardown. The GL callback now
+omits informational notification-severity messages about buffer placement;
+other debug severities remain visible.
+
+After the session interruption removed earlier `/tmp` artifacts, the remaining
+Vulkan Release round was completed with a recreated verification driver:
+
+```bash
+setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m4-final.py release vulkan
+```
+
+It independently captured a direct original, repeated all widget/input/resize
+checks, and additionally entered `21` into the width slider via Ctrl-click and
+keyboard. The result matched a live config containing `cell_width=21` exactly.
+The two libraries' scene output and editor screenshots were inspected. This
+driver keeps the test window on-screen and retries transient X11 captures.
+Earlier capture-tool failures and an interrupted desktop-input run were
+repeated; they are not counted as successful checks.
+
+The resumed validation setup downloaded the same official Arch
+`vulkan-validation-layers-1.4.363.0-1` package from
+`archive.archlinux.org`, extracted it under `/tmp/glyphshift-m4-validation`,
+and pointed its manifest to the extracted library. No system packages were
+installed. The driver supplies `VK_LAYER_PATH` and `VK_LAYER_VALIDATE_SYNC=1`.
+Expected loader announcements remain visible. Capability dropping is only for
+the external test environment, as explained under M1.
+
+The clean Debug build passed the real widget/input checks again for GLX and
+Vulkan SRGB, including numeric entry and exact original/off comparisons:
+
+```bash
+GS_VERIFY_ROOT=/tmp/glyphshift-m4-clean GS_VERIFY_QUICK=1 \
+  setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m4-final.py dev glx
+GS_VERIFY_ROOT=/tmp/glyphshift-m4-clean GS_VERIFY_QUICK=1 GS_VERIFY_SRGB=1 \
+  setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m4-final.py dev vulkan
+```
+
+Quick runs skip the already completed resize matrix. These temporary drivers
+use `GLYPHSHIFT_FIXTURE_NO_FOCUS=1` (an X11 input hint) and
+`GLYPHSHIFT_FIXTURE_INPUT_LOG=1`, sending events only to the fixture without
+taking desktop keyboard focus. Default fixture behavior is unchanged. Current
+captures/logs are under `/tmp/glyphshift-m4-final` and may be removed by a reboot.
+
+`spirv-val --target-env vulkan1.0` accepted both editor shader modules in both
+presets. `nm -D --defined-only build/release/libglyphshift_editor.so` showed
+only the intended GlyphShift APIs, with no ImGui exports. `readelf -d` on
+both renderer libraries confirmed `$ORIGIN` lookup for the shared editor and
+no GL/Vulkan loader link dependency. Games, Proton, other GPUs/drivers,
+XCB/XI2/raw input and broader multi-context/swapchain scenarios remain
+unverified. M4 does not claim the complete MVP or implement M5 presets/smoke
+integration work.
+
 ## Milestones
 
 Implement and validate these in order. Both backends are part of the MVP; a
@@ -1041,5 +1195,5 @@ The M0 implementation and verification above cover:
    confirm clean shutdown.
 5. Record the exact verified setup and build commands here.
 
-M0 through the separately requested M3 are complete. M4 and later milestones
+M0 through the separately requested M4 are complete. M5 and later milestones
 require separate requests; do not start them automatically.
