@@ -1,0 +1,5 @@
+#!/bin/sh
+# Check staged bytes without rewriting the index or unrelated worktree changes.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+exec python3 tools/format.py --staged
