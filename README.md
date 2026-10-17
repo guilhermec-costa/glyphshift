@@ -108,6 +108,10 @@ Use **Save preset** to retain your applied settings.
 
 ## Choose a starting style
 
+Try the [ready-to-use style collection](presets/README.md): Newsprint, Green
+terminal, Blueprint, Amber Braille, Mosaic and Soft color. The gallery compares
+all six on the same scene and explains how to switch them live without restarting.
+
 Change the `GLYPHSHIFT_CONFIG` path in the launch command:
 
 | Preset | Look |

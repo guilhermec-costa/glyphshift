@@ -130,6 +130,30 @@ For dark ink on warm paper, change the config path to
 `$PWD/presets/illustrated-blocks.conf`. To return to the earlier classic
 rendering example, use `$PWD/presets/readable.conf`.
 
+For six additional finished styles, see the [preset gallery](../presets/README.md).
+To compare them without restarting SuperTux, first copy a style to a live file:
+
+```bash
+cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
+```
+
+Set `GLYPHSHIFT_CONFIG=/tmp/glyphshift-style.conf` in the complete launch command
+above and start the game. In a second terminal, run one of these commands at a
+time to switch the running effect:
+
+```bash
+cp presets/art-newsprint.conf /tmp/glyphshift-style.conf
+cp presets/art-green-terminal.conf /tmp/glyphshift-style.conf
+cp presets/art-blueprint.conf /tmp/glyphshift-style.conf
+cp presets/art-amber-braille.conf /tmp/glyphshift-style.conf
+cp presets/art-mosaic.conf /tmp/glyphshift-style.conf
+cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
+```
+
+These copies update only the temporary live config. To keep a style in the
+editor's preset dropdown, load it, name it and click **Save preset**; supplied
+config files are not automatically installed in that dropdown.
+
 The wrapper blocks IPv4/IPv6 socket creation in the process and its children,
 while allowing Unix/X11 sockets. It does not isolate the filesystem. If the
 wrapper is missing, restore the test environment files before running the game;

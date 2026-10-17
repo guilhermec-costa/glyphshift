@@ -59,6 +59,22 @@ Only implement work explicitly requested by the user.
 The original exclusions remain in force: no multiplayer/anti-cheat support,
 anti-cheat evasion, privileged targets or system-wide injection.
 
+## Ready-to-use style collection
+
+Six complete live configs are available in the [preset gallery](../../presets/README.md):
+Newsprint, Green terminal, Blueprint, Amber Braille, Mosaic and Soft color.
+Five use pure glyph output; Soft color deliberately blends original detail at
+strength 0.65. They use existing renderer controls and do not add a milestone,
+backend, installation step or automatic dropdown registration.
+
+Each `presets/art-*.conf` was passed to the current Debug `glyphshift-preview`
+against the same captured SuperTux frame. All six parsed without warnings,
+loaded their glyph atlas without fallback and rendered successfully on the
+existing NVIDIA/X11 setup. The distinct outputs were inspected and saved under
+`docs/presets/`, with a labeled overview. Documentation shell syntax, local
+links and whitespace were checked. No C++ or shader code changed, and no new
+live game or Vulkan run was performed for this preset-only addition.
+
 ## Shape-aware illustration refinement
 
 The user reported that the illustrated preset hid Tux and produced distracting
