@@ -24,6 +24,8 @@ def run(*args, expected=0, environment=env, cwd=None):
     return result
 
 
+for name in ['GLYPHSHIFT_PROFILE','GLYPHSHIFT_PRESET']:
+    env.pop(name,None)
 run('--help')
 run(expected=2)
 run('--', expected=2)
@@ -39,6 +41,13 @@ assert result.stdout.splitlines() == [f'LD_PRELOAD={module}', 'VK_LAYER_PATH=<un
     'VK_INSTANCE_LAYERS=VK_LAYER_GLYPHSHIFT_overlay', 'NO_NEW_PRIVS=1',
     f'ARG={probe}', 'ARG=two words', 'ARG=--', 'ARG=$literal', 'ARG=']
 assert not result.stderr
+selection=run('--profile','game-one','--preset','night','--',probe,'--profile-env')
+assert selection.stdout=='GLYPHSHIFT_PROFILE=game-one\nGLYPHSHIFT_PRESET=night\n'
+auto=run('--',probe,'--profile-env').stdout
+assert auto.startswith('GLYPHSHIFT_PROFILE=') and len(auto.splitlines()[0].split('=')[1])==16
+for option in ['--profile','--preset']:
+    run(option,'../escape','--',probe,expected=2)
+    run(option,expected=2)
 run('--', probe, '--exit', expected=37)
 run('--', probe, '--signal', expected=-signal.SIGTERM)
 assert 'cannot find' in run('--', 'glyphshift-no-such-target-94715', expected=127).stderr

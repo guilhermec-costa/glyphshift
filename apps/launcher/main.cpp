@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <glyphshift/config/presets.hpp>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -143,16 +144,28 @@ std::string asset_path(const char* name) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  constexpr const char* usage =
+      "Usage: glyphshift [--profile ID] [--preset NAME] -- PROGRAM [ARGS...]\n";
   if (argc == 2 && std::string_view(argv[1]) == "--help") {
-    std::cout << "Usage: glyphshift -- PROGRAM [ARGS...]\n"
-                 "Launch a local/offline dynamically linked Linux x86-64 "
-                 "application.\n"
-                 "GLX and Vulkan pass-through. GLYPHSHIFT_LOG=1 enables "
-                 "diagnostics.\n";
+    std::cout << usage
+              << "Launch a local/offline Linux x86-64 application with "
+                 "GLX/Vulkan glyph rendering.\nPresets are per executable (or "
+                 "explicit --profile), under XDG_CONFIG_HOME.\n";
     return 0;
   }
-  if (argc < 3 || std::string_view(argv[1]) != "--" || !*argv[2]) {
-    std::cerr << "Usage: glyphshift -- PROGRAM [ARGS...]\n";
+  int target_arg = 1;
+  std::string profile, preset;
+  while (target_arg < argc && std::string_view(argv[target_arg]) != "--") {
+    const std::string_view option = argv[target_arg++];
+    if ((option != "--profile" && option != "--preset") || target_arg >= argc ||
+        !glyphshift::preset_name_valid(argv[target_arg])) {
+      std::cerr << usage;
+      return 2;
+    }
+    (option == "--profile" ? profile : preset) = argv[target_arg++];
+  }
+  if (target_arg >= argc || ++target_arg >= argc || !*argv[target_arg]) {
+    std::cerr << usage;
     return 2;
   }
   int failure = 126;
@@ -160,7 +173,7 @@ int main(int argc, char** argv) {
     check_launcher_privileges();
     std::string target;
     try {
-      target = find_target(argv[2]);
+      target = find_target(argv[target_arg]);
     } catch (...) {
       if (errno == ENOENT) failure = 127;
       throw;
@@ -171,6 +184,23 @@ int main(int argc, char** argv) {
       throw system_error("open target");
     }
     check_target(file.get());
+    if (profile.empty()) {
+      if (const char* inherited = std::getenv("GLYPHSHIFT_PROFILE");
+          inherited && *inherited)
+        profile = inherited;
+      else
+        profile = glyphshift::profile_id(
+                      std::filesystem::read_symlink("/proc/self/fd/" +
+                                                    std::to_string(file.get()))
+                          .string())
+                      .data();
+    }
+    if (!glyphshift::preset_name_valid(profile))
+      throw std::runtime_error("invalid GLYPHSHIFT_PROFILE");
+    if (setenv("GLYPHSHIFT_PROFILE", profile.c_str(), 1) != 0)
+      throw system_error("set profile identity");
+    if (!preset.empty() && setenv("GLYPHSHIFT_PRESET", preset.c_str(), 1) != 0)
+      throw system_error("set preset selection");
     std::string preload = asset_path("libglyphshift_gl.so");
     (void)asset_path("libglyphshift_vk.so");
     (void)asset_path("libglyphshift_editor.so");
@@ -206,7 +236,7 @@ int main(int argc, char** argv) {
       throw system_error("set no_new_privs");
     // Execute the inspected inode instead of resolving the pathname again.
     // Replacing this wrapper preserves the target's exit status and signals.
-    fexecve(file.get(), argv + 2, environ);
+    fexecve(file.get(), argv + target_arg, environ);
     if (errno == ENOENT) failure = 127;
     throw system_error("execute target");
   } catch (const std::exception& error) {

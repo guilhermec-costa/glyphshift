@@ -16,6 +16,9 @@ void check(bool ok, const char* name) {
 int main() {
   using namespace glyphshift::editor;
   unsetenv("GLYPHSHIFT_CONFIG");
+  unsetenv("GLYPHSHIFT_PRESET");
+  setenv("GLYPHSHIFT_PROFILE", "unit-editor", 1);
+  setenv("XDG_CONFIG_HOME", "/tmp/glyphshift-editor-unit-empty", 1);
   void* display = reinterpret_cast<void*>(1);
   auto frame = [&] { return Frame(display, 42, 800, 600, "Test", "1.0"); };
   {
@@ -88,6 +91,9 @@ int main() {
     check(f.settings.enabled && !f.draw_data, "separate window state");
   });
   other.join();
+  deactivate(display, 42);
+  check(!key(0xff63, 118, true), "failed renderer returns hotkeys to host");
+  key(0xff63, 118, false);
   forget(display, 42);
   {
     auto f = frame();

@@ -25,7 +25,7 @@ set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_options(glyphshift_imgui PRIVATE -w)
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp)
+add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp)
 set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
 set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
@@ -60,6 +60,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/layers")
 configure_file(layers/VK_LAYER_GLYPHSHIFT_overlay.json.in
     "${CMAKE_CURRENT_BINARY_DIR}/layers/VK_LAYER_GLYPHSHIFT_overlay.json" @ONLY)
 add_executable(glyphshift apps/launcher/main.cpp)
+target_include_directories(glyphshift PRIVATE include)
 add_dependencies(glyphshift glyphshift_gl glyphshift_vk)
 
 # Keep the development compilation database at the checkout root for LSPs.
@@ -164,6 +165,9 @@ if(BUILD_TESTING)
     add_test(NAME launcher COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/launcher_test.py"
         "$<TARGET_FILE:glyphshift>" "$<TARGET_FILE:glyphshift-launcher-probe>")
+    add_library(glyphshift-fault-glx SHARED tests/fixtures/fault_glx.cpp)
+    target_link_libraries(glyphshift-fault-glx PRIVATE ${CMAKE_DL_LIBS})
+    target_include_directories(glyphshift-fault-glx PRIVATE ${OPENGL_INCLUDE_DIR} ${X11_INCLUDE_DIR})
     add_library(glyphshift-fake-glx SHARED tests/unit/fake_glx.cpp)
     target_include_directories(glyphshift-fake-glx PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
     target_link_libraries(glyphshift-fake-glx PRIVATE ${CMAKE_DL_LIBS})
@@ -179,6 +183,9 @@ if(BUILD_TESTING)
     target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
     add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
+    add_executable(glyphshift-presets-tests tests/unit/presets_test.cpp)
+    target_link_libraries(glyphshift-presets-tests PRIVATE glyphshift_editor Threads::Threads)
+    add_test(NAME presets COMMAND glyphshift-presets-tests)
     add_executable(glyphshift-editor-tests tests/unit/editor_test.cpp)
     target_include_directories(glyphshift-editor-tests SYSTEM PRIVATE third_party/imgui)
     target_link_libraries(glyphshift-editor-tests PRIVATE glyphshift_editor Threads::Threads)
@@ -201,4 +208,26 @@ if(Python3_Interpreter_FOUND)
     add_custom_target(format-check
         COMMAND "${Python3_EXECUTABLE}" tools/format.py --check
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" VERBATIM)
+endif()
+
+option(GLYPHSHIFT_GPU_SMOKE_TESTS "Enable X11/GPU smoke tests in CTest" OFF)
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+    foreach(api glx vulkan)
+        add_custom_target(smoke-${api}
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py"
+                --build "${CMAKE_BINARY_DIR}" --api ${api}
+            DEPENDS glyphshift glyphshift-${api}-fixture glyphshift-fault-glx
+            USES_TERMINAL VERBATIM)
+        if(GLYPHSHIFT_GPU_SMOKE_TESTS)
+            add_test(NAME smoke-${api} COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api ${api})
+            set_tests_properties(smoke-${api} PROPERTIES LABELS "graphics" RUN_SERIAL TRUE
+                TIMEOUT 180 SKIP_RETURN_CODE 77)
+        endif()
+    endforeach()
+    add_custom_target(smoke
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api glx
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api vulkan
+        DEPENDS glyphshift glyphshift-glx-fixture glyphshift-vulkan-fixture glyphshift-fault-glx
+        USES_TERMINAL VERBATIM)
 endif()

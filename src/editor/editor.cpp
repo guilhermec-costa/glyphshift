@@ -1,9 +1,13 @@
 #include <imgui.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <glyphshift/config/presets.hpp>
 #include <glyphshift/editor/editor.hpp>
 #include <map>
 #include <memory>
@@ -13,7 +17,7 @@ namespace {
 constexpr unsigned insert = 0xff63, escape = 0xff1b, f10 = 0xffc7;
 struct State {
   Settings settings{}, external{};
-  bool ready = false, open = false;
+  bool ready = false, open = false, available = true;
   std::array<bool, 256> captured{}, pressed{};
   std::array<unsigned long, 256> released{};
   std::array<bool, 8> buttons{};
@@ -32,6 +36,84 @@ struct Runtime {
   std::map<std::pair<void*, std::uint64_t>, State> states;
   std::array<char, 512> error{};
   bool font_ready = false;
+  InputAdapter attach = nullptr, detach = nullptr;
+  std::unique_ptr<PresetStore> presets;
+  std::vector<std::string> preset_names;
+  std::string active = "default";
+  Settings saved{};
+  std::array<char, 65> preset_name{};
+  Runtime() {
+    try {
+      presets = std::make_unique<PresetStore>();
+      std::string message;
+      active = presets->selected(message);
+      if (const char* requested = std::getenv("GLYPHSHIFT_PRESET");
+          requested && *requested)
+        active = requested;
+      if (!preset_name_valid(active)) {
+        active = "default";
+        message = "invalid preset selection; using default";
+      }
+      std::string load_error;
+      if (!presets->load(active, saved, load_error) &&
+          (!load_error.empty() || active != "default"))
+        message = load_error.empty() ? "selected preset missing; using defaults"
+                                     : load_error;
+      preset_names = presets->names();
+      std::snprintf(preset_name.data(), preset_name.size(), "%s",
+                    active.c_str());
+      if (!message.empty())
+        std::snprintf(error.data(), error.size(), "%s", message.c_str());
+    } catch (const std::exception& failure) {
+      std::snprintf(error.data(), error.size(), "Presets unavailable: %s",
+                    failure.what());
+      presets.reset();
+    }
+    if (error[0]) {
+      const char prefix[] = "glyphshift: presets: ";
+      const auto a = write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
+      const auto b =
+          write(STDERR_FILENO, error.data(), std::strlen(error.data()));
+      const auto c = write(STDERR_FILENO, "\n", 1);
+      (void)a;
+      (void)b;
+      (void)c;
+    }
+  }
+  void load(const std::string& name) {
+    if (!presets) return;
+    Settings value;
+    std::string message;
+    if (!presets->load(name, value, message) &&
+        (name != "default" || !message.empty())) {
+      std::snprintf(error.data(), error.size(), "%s",
+                    message.empty() ? "preset missing" : message.c_str());
+      return;
+    }
+    active = name;
+    saved = value;
+    for (auto& [key, state] : states) {
+      (void)key;
+      state.settings = value;
+    }
+    std::snprintf(preset_name.data(), preset_name.size(), "%s", active.c_str());
+    if (!presets->select(name, message))
+      std::snprintf(error.data(), error.size(), "%s", message.c_str());
+    else
+      error[0] = 0;
+  }
+  void save(const Settings& settings) {
+    if (!presets) return;
+    std::string message;
+    if (presets->save(preset_name.data(), settings, message) &&
+        presets->select(preset_name.data(), message)) {
+      active = preset_name.data();
+      saved = settings;
+      preset_names = presets->names();
+      error[0] = 0;
+    } else
+      std::snprintf(error.data(), error.size(), "%s", message.c_str());
+  }
   Font font() {
     if (!font_ready) {
       atlas.AddFontDefault();
@@ -113,9 +195,9 @@ void queue(State& state, const Input& event) {
   }
 }
 void controls(State& state, unsigned width, unsigned height, const char* api,
-              const char* version, const char* error) {
+              const char* version, const char* error, Runtime& runtime) {
   const float w = std::min(348.0F, static_cast<float>(width) - 16.0F);
-  const float h = std::min(370.0F, static_cast<float>(height) - 16.0F);
+  const float h = std::min(455.0F, static_cast<float>(height) - 16.0F);
   ImGui::SetNextWindowPos({8, 8}, ImGuiCond_Always);
   ImGui::SetNextWindowSize({std::max(w, 1.0F), std::max(h, 1.0F)},
                            ImGuiCond_Always);
@@ -125,7 +207,24 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
                        ImGuiWindowFlags_NoSavedSettings)) {
     ImGui::Text("%s  |  %s", api, version);
     ImGui::Text("CPU render / submit: %.3f ms", state.milliseconds);
-    ImGui::TextUnformatted("Preset: Default (session)");
+    if (runtime.presets) {
+      ImGui::SetNextItemWidth(-70);
+      if (ImGui::BeginCombo("Preset", runtime.active.c_str())) {
+        for (const auto& name : runtime.preset_names)
+          if (ImGui::Selectable(name.c_str(), name == runtime.active))
+            runtime.load(name);
+        ImGui::EndCombo();
+      }
+      ImGui::SetNextItemWidth(-105);
+      ImGui::InputText("##preset-name", runtime.preset_name.data(),
+                       runtime.preset_name.size());
+      ImGui::SameLine();
+      if (ImGui::Button("Save preset")) runtime.save(state.settings);
+      ImGui::TextUnformatted(state.settings != runtime.saved
+                                 ? "Unsaved changes"
+                                 : "Saved settings");
+    } else
+      ImGui::TextUnformatted("Presets unavailable (session only)");
     ImGui::Separator();
     ImGui::Checkbox("Glyph effect (F10)", &state.settings.enabled);
     int cell_width = static_cast<int>(state.settings.cell_width);
@@ -154,6 +253,16 @@ void controls(State& state, unsigned width, unsigned height, const char* api,
   ImGui::End();
 }
 }  // namespace
+void input_adapter(InputAdapter attach, InputAdapter detach) {
+  auto& r = runtime();
+  const std::lock_guard lock(r.mutex);
+  r.attach = attach;
+  r.detach = detach;
+  for (const auto& [key, state] : r.states) {
+    (void)state;
+    if (attach) attach(key.first, key.second);
+  }
+}
 Font font() {
   auto& r = runtime();
   const std::lock_guard lock(r.mutex);
@@ -165,9 +274,13 @@ Frame::Frame(void* display, std::uint64_t window, unsigned width,
   auto& r = runtime();
   auto& state = r.states[{display, window}];
   state_ = &state;
+  state.available = true;
+  if (r.attach) r.attach(display, window);
   const auto external = runtime_settings();
   if (!state.ready || external != state.external) {
-    state.settings = external;
+    const char* config = std::getenv("GLYPHSHIFT_CONFIG");
+    state.settings =
+        (!state.ready && (!config || !*config)) ? r.saved : external;
     state.external = external;
     state.ready = true;
   }
@@ -230,7 +343,7 @@ Frame::Frame(void* display, std::uint64_t window, unsigned width,
     }
     state.count = 0;
     ImGui::NewFrame();
-    controls(state, width, height, backend, version, r.error.data());
+    controls(state, width, height, backend, version, r.error.data(), r);
     ImGui::Render();
     draw_data = state.open ? ImGui::GetDrawData() : nullptr;
   } else
@@ -252,6 +365,8 @@ void deactivate(void* display, std::uint64_t window) noexcept {
     const std::lock_guard lock(r.mutex);
     const auto found = r.states.find({display, window});
     if (found != r.states.end()) {
+      if (r.detach) r.detach(display, window);
+      found->second.available = false;
       found->second.open = false;
       found->second.count = 0;
     }
@@ -270,6 +385,7 @@ void forget(void* display, std::uint64_t window) noexcept {
   try {
     auto& r = runtime();
     const std::lock_guard lock(r.mutex);
+    if (r.detach) r.detach(display, window);
     r.states.erase({display, window});
   } catch (...) {
   }
@@ -296,6 +412,7 @@ bool input(void* display, std::uint64_t window, const Input& event) noexcept {
         if (state.open) queue(state, event);
         return consume;
       }
+      if (!state.available) return false;
       const bool repeat =
           state.pressed[physical] ||
           (event.time && event.time == state.released[physical]);
@@ -324,7 +441,7 @@ bool input(void* display, std::uint64_t window, const Input& event) noexcept {
       return consume;
     }
     if (event.kind == Kind::button_down) {
-      if (state.open) {
+      if (state.available && state.open) {
         state.buttons[event.code % 8] = true;
         queue(state, event);
         return true;

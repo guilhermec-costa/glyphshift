@@ -1,5 +1,6 @@
 #include "window.hpp"
 
+#include <X11/Xatom.h>
 #include <X11/keysym.h>
 
 #include <cstdlib>
@@ -32,11 +33,25 @@ void Window::create(XVisualInfo* visual, const char* title) {
   attrs.event_mask = StructureNotifyMask | KeyPressMask | KeyReleaseMask |
                      ExposureMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | FocusChangeMask;
+  if (const char* mode = std::getenv("GLYPHSHIFT_FIXTURE_INPUT_MODE"))
+    attrs.event_mask =
+        StructureNotifyMask | ExposureMask |
+        (std::string_view(mode) == "press-only" ? KeyPressMask
+                                                : KeyReleaseMask);
   handle = XCreateWindow(display, root, 0, 0, width, height, 0, visual->depth,
                          InputOutput, visual->visual, CWColormap | CWEventMask,
                          &attrs);
   if (!handle) throw std::runtime_error("XCreateWindow failed");
-  XStoreName(display, handle, title);
+  const char* suffix = std::getenv("GLYPHSHIFT_FIXTURE_TITLE_SUFFIX");
+  const std::string name = std::string(title) + (suffix ? suffix : "");
+  XStoreName(display, handle, name.c_str());
+  if (std::getenv("GLYPHSHIFT_FIXTURE_FLOATING")) {
+    const auto type = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
+    const auto dialog =
+        XInternAtom(display, "_NET_WM_WINDOW_TYPE_DIALOG", False);
+    XChangeProperty(display, handle, type, XA_ATOM, 32, PropModeReplace,
+                    reinterpret_cast<const unsigned char*>(&dialog), 1);
+  }
   close_ = XInternAtom(display, "WM_DELETE_WINDOW", False);
   XSetWMProtocols(display, handle, &close_, 1);
   // Automated input checks send events directly; leave desktop keyboard

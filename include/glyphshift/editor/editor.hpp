@@ -10,6 +10,8 @@ struct Font {
   int width, height;
 };
 GS_EDITOR_API Font font();
+using InputAdapter = void (*)(void*, std::uint64_t);
+GS_EDITOR_API void input_adapter(InputAdapter attach, InputAdapter detach);
 // A frame serializes the shared ImGui context and input queue across APIs.
 class GS_EDITOR_API Frame {
  public:

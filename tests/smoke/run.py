@@ -1,0 +1,117 @@
+"""Opt-in real X11/GPU smoke checks; no network or system installation."""
+import argparse
+import contextlib
+import os
+import pathlib
+import subprocess
+import sys
+import time
+from x11 import X11
+
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--build',type=pathlib.Path,required=True)
+parser.add_argument('--api',choices=['glx','vulkan'],required=True)
+parser.add_argument('--output',type=pathlib.Path)
+args=parser.parse_args();build=args.build.resolve();api=args.api
+if not os.getenv('DISPLAY'):
+    print('SKIP: DISPLAY is not set');sys.exit(77)
+try:x=X11()
+except RuntimeError as error:
+    print('SKIP:',error);sys.exit(77)
+output=(args.output or build/'smoke-evidence'/api).resolve();output.mkdir(parents=True,exist_ok=True)
+env=os.environ.copy()
+for name in ['LD_PRELOAD','GLYPHSHIFT_CONFIG','GLYPHSHIFT_PROFILE','GLYPHSHIFT_PRESET','GLYPHSHIFT_LOG','GLYPHSHIFT_FIXTURE_MULTI','GLYPHSHIFT_FIXTURE_SRGB']:
+    env.pop(name,None)
+env.update(XDG_CONFIG_HOME=str(output/'config'),GLYPHSHIFT_FIXTURE_NO_FOCUS='1',GLYPHSHIFT_FIXTURE_FLOATING='1',GLYPHSHIFT_FIXTURE_GL_DEBUG='1',GLYPHSHIFT_FIXTURE_STATE_CHECK='1',GLYPHSHIFT_FIXTURE_INPUT_LOG='1',VK_LAYER_VALIDATE_SYNC='1')
+env['GLYPHSHIFT_FIXTURE_INPUT_MODE']='press-only' if api=='glx' else 'release-only'
+env['GLYPHSHIFT_FIXTURE_PROC_SWAP']='1'
+profile=f'smoke-{api}-{os.getpid()}'
+sequence=0
+@contextlib.contextmanager
+def launch(label,injected=True,extra=None,bounded=False):
+    global sequence
+    sequence+=1;suffix=f' {os.getpid()}-{sequence}'
+    local=dict(env,GLYPHSHIFT_FIXTURE_TITLE_SUFFIX=suffix)
+    if extra:local.update(extra)
+    command=[str(build/f'glyphshift-{api}-fixture'),'--fixed-time','1.25','--frames','60' if bounded else '9000']
+    if api=='vulkan':command+=['--validation']
+    if injected:command=[str(build/'glyphshift'),'--profile',profile,'--',*command]
+    log=output/f'{label}.log'
+    with log.open('w') as stream:
+        process=subprocess.Popen(command,env=local,stdout=stream,stderr=subprocess.STDOUT)
+        try:
+            windows=[];deadline=time.monotonic()+15
+            title=f'GlyphShift {"GLX" if api=="glx" else "Vulkan"} fixture{suffix}'
+            while time.monotonic()<deadline:
+                windows=x.windows(title)
+                if windows:break
+                if process.poll() is not None:raise RuntimeError(log.read_text())
+                time.sleep(.05)
+            if not windows:raise RuntimeError('fixture did not create a window: '+log.read_text())
+            yield process,windows[0],log
+        finally:
+            if process.poll() is None:process.terminate();process.wait(timeout=10)
+
+def image(window,label):
+    time.sleep(.15)
+    for attempt in range(4):
+        try:picture=x.image(window);break
+        except RuntimeError:
+            if attempt==3:raise
+            time.sleep(.15)
+    w,h,rgb=picture;(output/f'{label}.ppm').write_bytes(f'P6\n{w} {h}\n255\n'.encode()+rgb)
+    return picture
+
+def finish(process,window,log,expected_failure=False):
+    x.close(window)
+    assert process.wait(timeout=15)==0,log.read_text()
+    text=log.read_text()
+    assert 'GL debug:' not in text and 'Vulkan validation:' not in text,text
+    if not expected_failure:assert 'disabled' not in text and 'unsupported' not in text,text
+    return text
+try:
+    with launch('direct',False) as (process,window,log):
+        x.resize(window,800,600);original=image(window,'original');finish(process,window,log)
+    with launch('injected') as (process,window,log):
+        x.resize(window,800,600);glyph=image(window,'glyph');assert glyph!=original,'effect did not transform image'
+        x.key(window,0xffc7);assert image(window,'off')==original,'disabled effect changed source'
+        x.key(window,0xff63);assert image(window,'editor')!=original,'editor not drawn'
+        x.key(window,0xff1b);assert image(window,'closed')==original,'Escape did not close only editor'
+        x.key(window,ord('a'))
+        # Save the disabled effect under a named preset through the real UI.
+        x.key(window,0xff63);x.click(window,90,122)
+        x.send(window,2,0xffe3);time.sleep(.06);x.send(window,2,ord('a'),state=4);x.send(window,3,ord('a'),state=4);x.send(window,3,0xffe3,state=4);time.sleep(.12)
+        for letter in 'night':x.key(window,ord(letter))
+        x.key(window,0xff0d);x.click(window,288,122);image(window,'saved-preset')
+        directory=output/'config'/'glyphshift'/'profiles'/profile
+        assert (directory/'night.conf').is_file(),'Save preset did not create named file; inspect editor.ppm'
+        assert 'enabled=false' in (directory/'night.conf').read_text()
+        assert (directory/'active').read_text()=='night\n'
+        x.key(window,0xff1b);text=finish(process,window,log)
+        assert [line for line in text.splitlines() if line.startswith('Fixture input:')]==(['Fixture input: key down 97'] if api=='glx' else ['Fixture input: key up 97']),text
+    with launch('restart') as (process,window,log):
+        x.resize(window,800,600);assert image(window,'restarted-preset')==original,'preset not retained across restart'
+        x.key(window,0xffc7);assert image(window,'re-enabled')==glyph
+        for index,(w,h) in enumerate([(320,240),(1024,768),(640,480),(1000,300),(300,800),(800,600)]):
+            x.resize(window,w,h);before=image(window,f'resize-{index}-before')
+            x.key(window,0xff63);assert image(window,f'resize-{index}-editor')!=before
+            x.key(window,0xff1b);assert image(window,f'resize-{index}-after')==before
+        finish(process,window,log)
+    # A fresh profile renders both contexts/swapchains, not the saved disabled effect.
+    with launch('multi',extra={'GLYPHSHIFT_FIXTURE_MULTI':'1','GLYPHSHIFT_PRESET':'default'},bounded=True) as (process,window,log):
+        assert process.wait(timeout=30)==0,log.read_text()
+        text=log.read_text();assert ('two contexts' if api=='glx' else 'two swapchains / one device') in text,text
+        assert 'GL debug:' not in text and 'Vulkan validation:' not in text,text
+    if api=='glx':
+        with launch('shader-failure',extra={'LD_PRELOAD':str(build/'libglyphshift-fault-glx.so'),'GLYPHSHIFT_PRESET':'default'}) as (process,window,log):
+            x.resize(window,800,600);assert image(window,'failed-pass-through')==original
+            x.key(window,ord('a'));text=finish(process,window,log,True)
+            assert text.count('GL context disabled:')==1,text
+    if api=='vulkan':
+        with launch('unsupported-present',extra={'GLYPHSHIFT_FIXTURE_EXTENDED_PRESENT':'1','GLYPHSHIFT_PRESET':'default','GLYPHSHIFT_LOG':'1'}) as (process,window,log):
+            x.resize(window,800,600);assert image(window,'unsupported-pass-through')==original
+            x.close(window);assert process.wait(timeout=15)==0,log.read_text()
+            text=log.read_text();assert text.count('unsupported Vulkan present batch/pNext')==1,text
+            assert 'Vulkan validation:' not in text,text
+    print(f'{api}: launch, editor/input, live toggle, named preset restart, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
+finally:x.shutdown()

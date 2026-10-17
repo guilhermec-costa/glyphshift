@@ -17,6 +17,7 @@ class Renderer {
  public:
   fixture::Window window;
   GLXContext context = nullptr;
+  decltype(&glXSwapBuffers) swap = &glXSwapBuffers;
   GLuint program = 0, vao = 0;
   std::unique_ptr<fixture::GlStateProbe> probe;
   ~Renderer() {
@@ -98,6 +99,11 @@ class Renderer {
             nullptr);
       }
     }
+    if (std::getenv("GLYPHSHIFT_FIXTURE_PROC_SWAP")) {
+      swap = reinterpret_cast<decltype(swap)>(glXGetProcAddressARB(
+          reinterpret_cast<const GLubyte*>("glXSwapBuffers")));
+      if (!swap) throw std::runtime_error("swap procedure unavailable");
+    }
     // Avoid implicit sRGB conversion: the Vulkan fixture selects UNORM too.
     glDisable(GL_FRAMEBUFFER_SRGB);
     program = glCreateProgram();
@@ -137,24 +143,27 @@ class Renderer {
       glBindVertexArray(vao);
     }
   }
-  void run(const glyphshift::FixtureOptions& opts) {
+  void draw(std::uint64_t frame, const glyphshift::FixtureOptions& opts) {
     const auto size = glGetUniformLocation(program, "size");
     const auto time = glGetUniformLocation(program, "time");
+    glViewport(0, 0, static_cast<GLsizei>(window.width),
+               static_cast<GLsizei>(window.height));
+    glUniform2f(size, static_cast<float>(window.width),
+                static_cast<float>(window.height));
+    glUniform1f(time, glyphshift::fixture_time(frame, opts));
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    if (const auto error = glGetError(); error != GL_NO_ERROR)
+      throw std::runtime_error("OpenGL error: " + std::to_string(error));
+    if (probe) probe->before();
+    swap(window.display, window.handle);
+    if (probe) probe->after(program, vao);
+  }
+  void run(const glyphshift::FixtureOptions& opts) {
     std::uint64_t frame = 0;
     const auto start = std::chrono::steady_clock::now();
     while ((!opts.frames || frame < opts.frames) && window.poll()) {
       if (!window.width || !window.height) continue;
-      glViewport(0, 0, static_cast<GLsizei>(window.width),
-                 static_cast<GLsizei>(window.height));
-      glUniform2f(size, static_cast<float>(window.width),
-                  static_cast<float>(window.height));
-      glUniform1f(time, glyphshift::fixture_time(frame, opts));
-      glDrawArrays(GL_TRIANGLES, 0, 3);
-      if (const auto error = glGetError(); error != GL_NO_ERROR)
-        throw std::runtime_error("OpenGL error: " + std::to_string(error));
-      if (probe) probe->before();
-      glXSwapBuffers(window.display, window.handle);
-      if (probe) probe->after(program, vao);
+      draw(frame, opts);
       fixture::pace(start, ++frame);
     }
     glFinish();
@@ -166,9 +175,29 @@ int main(int argc, char** argv) {
   try {
     const auto opts = fixture::options(argc, argv, false);
     if (opts.help) return 0;
-    Renderer renderer;
-    renderer.init();
-    renderer.run(opts);
+    if (std::getenv("GLYPHSHIFT_FIXTURE_MULTI")) {
+      Renderer first, second;
+      first.init();
+      second.init();
+      std::uint64_t frame = 0;
+      const auto start = std::chrono::steady_clock::now();
+      while ((!opts.frames || frame < opts.frames) && first.window.poll() &&
+             second.window.poll()) {
+        for (auto* renderer : {&first, &second}) {
+          if (!glXMakeCurrent(renderer->window.display, renderer->window.handle,
+                              renderer->context))
+            throw std::runtime_error("multi-context activation failed");
+          renderer->draw(frame, opts);
+        }
+        fixture::pace(start, ++frame);
+      }
+      std::cout << "GLX fixture: two contexts clean shutdown after " << frame
+                << " frames\n";
+    } else {
+      Renderer renderer;
+      renderer.init();
+      renderer.run(opts);
+    }
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "GLX fixture: " << error.what() << '\n';

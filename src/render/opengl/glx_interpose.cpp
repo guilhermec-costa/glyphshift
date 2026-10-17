@@ -111,3 +111,32 @@ extern "C" __attribute__((visibility("default"))) void glXDestroyContext(
   errno = saved_errno;
   next(display, context);
 }
+
+namespace {
+__GLXextFuncPtr procedure(const GLubyte* name, const char* entry) {
+  using Get = __GLXextFuncPtr (*)(const GLubyte*);
+  const auto next = reinterpret_cast<Get>(dlsym(RTLD_NEXT, entry));
+  if (!name || !next) return nullptr;
+  const auto original = next(name);
+  if (!original) return nullptr;
+#define PROC(function)                                                  \
+  if (std::strcmp(reinterpret_cast<const char*>(name), #function) == 0) \
+  return reinterpret_cast<__GLXextFuncPtr>(&function)
+  PROC(glXGetProcAddress);
+  PROC(glXGetProcAddressARB);
+  PROC(glXSwapBuffers);
+  PROC(glXMakeCurrent);
+  PROC(glXMakeContextCurrent);
+  PROC(glXDestroyContext);
+#undef PROC
+  return original;
+}
+}  // namespace
+extern "C" __attribute__((visibility("default"))) __GLXextFuncPtr
+glXGetProcAddressARB(const GLubyte* name) {
+  return procedure(name, "glXGetProcAddressARB");
+}
+extern "C" __attribute__((visibility("default"))) __GLXextFuncPtr
+glXGetProcAddress(const GLubyte* name) {
+  return procedure(name, "glXGetProcAddress");
+}

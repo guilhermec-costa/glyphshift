@@ -16,7 +16,10 @@ described here unless a change is explicitly documented.
 M0 through M4 are complete. Both backends apply the same built-in glyph atlas
 and ramp, with live cell dimensions, source/monochrome color, and effect toggle.
 M4 adds the shared Dear ImGui editor and Insert/Escape/F10 controls.
-Historical validation results are retained below.
+M5 adds per-game named presets, automated graphics smoke tests and robustness
+coverage. M5 remains **in progress**: native application results are recorded
+below, but the required offline Proton game has not run pending execution
+authorization. Historical validation results are retained below.
 
 ## Product experience
 
@@ -269,7 +272,7 @@ Parsing, validation, defaults, and serialization must not depend on OpenGL or
 Vulkan. Invalid values should emit a useful warning and use safe defaults
 instead of terminating the game.
 
-## Development (M0–M4)
+## Development (M0–M5)
 
 ### Dependencies
 
@@ -359,7 +362,7 @@ Deleted files are skipped, paths with spaces are supported, and missing
 `clang-format` fails with an installation instruction. Git clones do not
 activate hooks automatically; run the configuration command above locally.
 
-### Launch with GlyphShift (M1–M4)
+### Launch with GlyphShift (M1–M5)
 
 ```bash
 ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
@@ -394,7 +397,8 @@ is returned after a successful exec. No installation or elevated privileges
 are required.
 
 The interposer exports `glXSwapBuffers`, `glXMakeCurrent`,
-`glXMakeContextCurrent`, and `glXDestroyContext`, plus the Xlib input hooks
+`glXMakeContextCurrent`, `glXDestroyContext`, `glXGetProcAddress` and
+`glXGetProcAddressARB`, plus the Xlib input hooks
 described under M4. It resolves the next symbols
 via `dlsym(RTLD_NEXT, ...)` with thread-safe lazy initialization and forwards
 the original arguments. Context lifecycle hooks release owned resources while
@@ -408,12 +412,13 @@ calling a null pointer; there is no alternative original presentation function
 to forward to in that failure case. Initial symbol resolution/logging preserves
 `errno`, and the downstream function's resulting `errno` is retained.
 
-M1 covers the dynamically linked GLX swap symbol. Graphics entry points
-obtained directly from driver procedure-address APIs have not been validated.
+M1 covers the dynamically linked GLX swap symbol. M5 also routes known GLX
+hooks returned by `glXGetProcAddress`/`ARB` through GlyphShift and forwards all
+other procedure lookups. Its GLX smoke obtains the swap function this way.
 The Vulkan layer described below is also enabled for applications launched
 through GlyphShift; GLX applications do not initialize Vulkan as a result.
 
-### Vulkan loader layer (M2–M4)
+### Vulkan loader layer (M2–M5)
 
 The build adds `libglyphshift_vk.so` and
 `build/dev/layers/VK_LAYER_GLYPHSHIFT_overlay.json` (or the Release equivalent).
@@ -494,7 +499,7 @@ average uses shared Rec.709 luminance coefficients. GLSL is shared by both
 backends and embedded into the libraries (SPIR-V for Vulkan); there is no
 runtime glyph shader-file dependency.
 
-The M3 live settings file remains optional in M4:
+The M3 live settings file remains optional:
 
 ```bash
 cat > /tmp/glyphshift.conf <<'EOF'
@@ -513,9 +518,9 @@ accepts true/false or 1/0; each cell dimension accepts 2..128 independently;
 source color). Invalid values warn once per reload and use defaults. Files
 must be regular, readable, and at most 4096 bytes. The steady path only checks
 file metadata; parsing/read allocation occurs on changes. There is no CPU
-framebuffer readback, signal handler, global input grab or preset persistence.
-M4 editor changes are session-local; changed file values replace the session
-settings at the next frame. The file is never rewritten by the editor.
+framebuffer readback, signal handler or global input grab. Changed file values
+replace the session settings at the next frame. The file is never rewritten
+by the editor. M5 persistence uses separate named preset files described below.
 
 The GLX pass snapshots/restores all modified state, copies the default back
 buffer into an RGBA8 texture on the GPU, and draws the atlas via a fullscreen
@@ -574,9 +579,9 @@ The title-bar close button also returns input immediately. Keyboard navigation
 uses Tab, arrows, Space and Enter; Ctrl-clicking a slider permits numeric entry.
 It displays the backend/API version, previous GlyphShift CPU preparation and
 submission time in milliseconds (including per-image fence waits, not GPU
-execution time), active preset
-`Default (session)`, and the latest shader/initialization diagnostic. There is
-no preset saving or additional rendering parameter beyond M3.
+execution time), active preset, and the latest shader/initialization diagnostic.
+M5 adds preset selection, a name field and explicit Save preset action, without
+adding rendering parameters beyond M3.
 
 `libglyphshift_editor.so` owns the API-independent settings and editor model,
 the shared font atlas and ImGui contexts, serialized across presentation
@@ -603,9 +608,83 @@ and releases for captured keys/buttons remain suppressed after closing. Focus
 loss closes the editor. There are no root-window hooks or keyboard/pointer
 grabs. Render initialization failures release editor capture and pass through;
 when rendering itself is unavailable the error is logged rather than drawn.
-XCB, XI2/raw input, other Xlib selection APIs and driver-procedure-address
-bypasses are not validated by M4. The first target is the two Xlib fixtures;
-broader application/input compatibility remains M5.
+M5 supplements missing key, pointer and focus event masks on registered
+windows, retains application mask changes through `XSelectInput`, and suppresses
+extra events the application did not request. It restores original masks when
+rendering becomes unavailable and retires metadata on window/display teardown.
+XCB, XI2/raw input, other Xlib selection APIs and functions fetched privately
+through `dlsym(libX11_handle, ...)` remain unsupported. The latter bypass is
+observed in the native vkcube result below.
+
+### Named per-game presets (M5)
+
+```bash
+./build/dev/glyphshift --profile my-offline-game -- ./game
+./build/dev/glyphshift --profile my-offline-game --preset night -- ./game
+```
+
+Without `--profile`, the launcher derives a stable 16-digit ID from the resolved
+executable path; moving the executable changes that ID. An explicit profile is
+recommended when a common runtime executable launches different games.
+`GLYPHSHIFT_PROFILE` also supplies a profile when the option is absent. The
+launcher sets it only in its child environment. `--preset` (or
+`GLYPHSHIFT_PRESET`) overrides the initial preset for that launch; selection or
+saving through the editor updates the remembered selection.
+
+Preset files live under
+`$XDG_CONFIG_HOME/glyphshift/profiles/PROFILE/NAME.conf`, falling back to
+`$HOME/.config/glyphshift/profiles/PROFILE/NAME.conf` when XDG_CONFIG_HOME is
+unset, empty or relative. An `active` file remembers the selected name. Profile
+and preset names accept 1–64 ASCII letters, digits, dots, underscores and
+hyphens, and cannot start with a dot. No path components are accepted.
+The built-in `default` needs no file; saving a preset named `default` overrides
+it for that profile.
+
+Insert opens the editor. Choose an existing preset to load and remember it,
+or edit the name and press Save preset to save the current settings and
+selection. Unsaved widget/hotkey changes remain session-local. Saves use
+same-directory temporary files, fsync and atomic rename, with mode 0600;
+there is no per-frame preset disk write. Invalid files, invalid selection or
+unavailable storage produce a diagnostic and safe defaults without terminating
+the application. The optional live `GLYPHSHIFT_CONFIG` file takes precedence
+initially and when its contents change; presets never overwrite it.
+
+### Automated graphics smoke tests (M5)
+
+From an accessible X11 session with the Khronos validation layer available:
+
+```bash
+cmake --build --preset dev --target smoke
+# Or run one API:
+cmake --build --preset dev --target smoke-glx
+cmake --build --preset dev --target smoke-vulkan
+
+# Include the graphics checks in CTest (off by default):
+cmake --preset release -DGLYPHSHIFT_GPU_SMOKE_TESTS=ON
+cmake --build --preset release
+ctest --preset release
+```
+
+The Python drivers use standard-library ctypes and Xlib, without image-tool or
+Python-package dependencies. Captures require a visible, unobscured 32-bit
+little-endian RGB X11 visual and a window manager that accepts floating window
+resizes. Optional i3 integration moves only the test window to the current
+workspace, without requesting keyboard focus. Tests send input directly to
+the fixture rather than using desktop input grabs. Missing DISPLAY or an
+inaccessible display returns skip code 77; graphics/validation failures fail
+the test rather than being reported as successful coverage.
+
+Each API checks launch, transformed/original images, editor capture and host
+input restoration, real UI preset saving and process restart, six confirmed
+resizes and clean exit. GLX additionally checks procedure-address swaps, two
+contexts and a test-only shader-compilation failure that must preserve the
+original image with one diagnostic. Vulkan checks two simultaneous swapchains
+on one device and unsupported incremental-present pNext forwarding unchanged,
+with Khronos core/synchronization validation. Fixture event selection is
+intentionally press-only for GLX and release-only for Vulkan to exercise missing
+input masks. Logs and PPM captures are saved in `build/PRESET/smoke-evidence`.
+The aggregate smoke target runs GLX and Vulkan sequentially. CTest marks both
+RUN_SERIAL to avoid capture conflicts.
 
 ### Run and check the fixtures directly
 
@@ -1054,6 +1133,100 @@ XCB/XI2/raw input and broader multi-context/swapchain scenarios remain
 unverified. M4 does not claim the complete MVP or implement M5 presets/smoke
 integration work.
 
+### M5 implementation and verification status
+
+Verified on 2026-10-17 in the existing Arch/X11/i3 environment, after M4 commit
+`b86a575`. The NVIDIA GPU is RTX 3060 Ti, driver 615.71.09. No system packages,
+Steam installation, system-wide injection or later milestone were added.
+
+The checkout configured/built Debug and Release; Debug passed all ten CPU
+CTest tests. Release enabled graphics CTests and passed all twelve tests,
+including both smoke suites with Khronos core/synchronization validation:
+
+```bash
+cmake --build --preset dev
+ctest --preset dev
+cmake --preset release -DGLYPHSHIFT_GPU_SMOKE_TESTS=ON
+cmake --build --preset release
+setpriv --inh-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 ctest --preset release
+```
+
+Capability dropping and execution outside the agent sandbox are specific to
+this verification environment, as described under M1. They are not product
+requirements. A source-only copy at `/tmp/glyphshift-m5-clean`, excluding builds,
+Git/agent metadata and the root database, separately configured/built both
+presets and passed ten CPU tests per preset. Preset unit tests include a forked
+reader after saving, per-game isolation, malformed/oversized content, invalid
+names, symlink rejection and atomic replacement. The pre-commit and existing
+launcher/interposition/dispatch/editor/semantics tests remain passing.
+Both clean builds emitted no compiler warnings. `python3 tools/format.py
+--check`, `cmake --build --preset dev --target format-check` and
+`git diff --check` passed. `spirv-val --target-env vulkan1.0` accepted all
+twelve generated SPIR-V modules across the two presets. `nm -D --defined-only`
+confirmed the intended GLX/Xlib exports and Vulkan negotiation-only export;
+`readelf -d` confirmed `$ORIGIN` editor lookup without GL/Vulkan loader linkage.
+The root LSP database link still targets Debug and now contains 29 translation
+units; Release configuration preserved it.
+
+| Environment/application | Observed result |
+| --- | --- |
+| NVIDIA, GLX and Vulkan fixtures | Both Release smoke suites passed: UI/input, saved preset restart, six resizes, simultaneous contexts/swapchains and safe failure forwarding. No GL debug or Vulkan validation errors. |
+| Mesa 26.2.2, llvmpipe (LLVM 22.1.8), GLX | Full Debug GLX smoke passed with OpenGL 4.6, including state probes and shader-failure pass-through. Software rendering, not an AMD/Intel hardware claim. |
+| Mesa 26.2.2, lavapipe, Vulkan | Attempted; direct fixture without GlyphShift fails with X11 BadDrawable on this NVIDIA X server. Also fails with software WSI requested. Layer coverage on Mesa Vulkan is not established. |
+| Native glxgears, mesa-utils 9.0.0-7, NVIDIA OpenGL 4.6 | Glyph image, editor open/close, repeated F10, three resizes and clean Escape exit passed. This exposed and fixed missing KeyRelease selection. |
+| Native vkcube, vulkan-tools 1.4.363.0-1, NVIDIA Vulkan | Glyph image, live config disable/re-enable, three resizes and clean WM_DELETE_WINDOW exit passed with validation enabled, without validation errors. Editor hotkeys did not work: this binary privately resolves Xlib symbols and bypasses the input hooks. Full vkcube/editor compatibility is not claimed. |
+| Offline Windows game through Proton | **Not run.** User has no Proton/Steam installation. Portable SuperTux 0.7.0 Windows64 and GE-Proton11-9 were prepared in /tmp; automatic approval review rejected their execution pending explicit authorization. |
+
+Mesa checks executed with:
+
+```bash
+setpriv --inh-caps=-all -- env __GLX_VENDOR_LIBRARY_NAME=mesa \
+  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+  python3 tests/smoke/run.py --build build/dev --api glx \
+  --output /tmp/glyphshift-m5-mesa-glx
+setpriv --inh-caps=-all -- env \
+  LD_LIBRARY_PATH=/tmp/glyphshift-m5-apps/root/usr/lib \
+  VK_DRIVER_FILES=/tmp/glyphshift-m5-apps/root/usr/share/vulkan/icd.d/lvp_icd.json \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  python3 tests/smoke/run.py --build build/dev --api vulkan \
+  --output /tmp/glyphshift-m5-mesa-vulkan
+```
+
+The Vulkan attempt failed before injection in its direct-reference phase.
+A direct `glyphshift-vulkan-fixture --validation --frames 30` with the same Mesa
+paths plus `LIBGL_DRI3_DISABLE=1 MESA_VK_WSI_DEBUG=sw` reproduced BadDrawable.
+Temporary Arch packages were extracted into /tmp, including matching
+`vulkan-swrast 26.2.2-1` and `libdisplay-info 0.3.0-1`; nothing was installed.
+An initial lavapipe 26.2.4 package needed unavailable LLVM 23 and was replaced
+with the matching version before testing.
+
+The temporary native application driver was executed as:
+
+```bash
+setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m5-native.py
+NATIVE_API=vulkan setpriv --inh-caps=-all -- python3 /tmp/glyphshift-m5-native.py
+```
+
+It launches the native binaries from `/tmp/glyphshift-m5-apps/root/usr/bin`
+through the Debug launcher, using explicit `native-glxgears`/`native-vkcube`
+profiles and a monochrome live config. Two-color glyph captures become
+multicolor when disabled; resizing returns to two-color glyph output. Evidence
+is under `/tmp/glyphshift-m5-native`. Initial vkcube hotkey attempts failed and
+are recorded as a limitation, not a successful editor check. Downloaded older
+vkcube packages were inspected but were not counted as application validations.
+Temporary logs/captures are not durable and may disappear after reboot.
+
+The proposed Proton run uses a prefix under /tmp and blocks IPv4/IPv6 sockets,
+but still needs access to the user's filesystem and X11 session. Automatic
+approval review rejected running that downloaded Windows executable through
+Proton for precisely that reason; no game executable has run. **M5 and the MVP
+are not marked complete** until an authorized confirmed-offline Proton game is
+actually tested and its results documented. Other games, DXVK/VKD3D paths,
+other hardware, Wayland, XCB/XI2/raw input and general compatibility remain
+unverified.
+
 ## Milestones
 
 Implement and validate these in order. Both backends are part of the MVP; a
@@ -1195,5 +1368,6 @@ The M0 implementation and verification above cover:
    confirm clean shutdown.
 5. Record the exact verified setup and build commands here.
 
-M0 through the separately requested M4 are complete. M5 and later milestones
-require separate requests; do not start them automatically.
+M0 through M4 are complete. The separately requested M5 is implemented but
+awaits the offline Proton validation described above. Do not start the later
+broader-Linux-support work automatically.

@@ -1,7 +1,9 @@
 {
   global:
+    XSelectInput; XCloseDisplay;
     XPending; XEventsQueued; XNextEvent; XPeekEvent; XDestroyWindow;
     XCheckWindowEvent; XCheckMaskEvent; XCheckTypedEvent;
+    glXGetProcAddress; glXGetProcAddressARB;
     glXSwapBuffers;
     glXMakeCurrent;
     glXMakeContextCurrent;

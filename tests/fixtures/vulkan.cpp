@@ -47,6 +47,7 @@ struct Frame {
 class Renderer {
  public:
   fixture::Window window;
+  bool borrowed = false;
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -80,7 +81,7 @@ class Renderer {
       for (const auto shader : shaders)
         if (shader) vkDestroyShaderModule(device, shader, nullptr);
       if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
-      vkDestroyDevice(device, nullptr);
+      if (!borrowed) vkDestroyDevice(device, nullptr);
     }
     if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
     if (messenger) {
@@ -91,9 +92,9 @@ class Renderer {
     // Close X11 before unloading the ICD: NVIDIA registers Xlib close
     // callbacks whose code must still be loaded when XCloseDisplay runs.
     window.close();
-    if (instance) vkDestroyInstance(instance, nullptr);
+    if (instance && !borrowed) vkDestroyInstance(instance, nullptr);
   }
-  void init(bool validation) {
+  void init(bool validation, const Renderer* shared = nullptr) {
     XVisualInfo visual_template{};
     visual_template.visualid = XVisualIDFromVisual(
         DefaultVisual(window.display, DefaultScreen(window.display)));
@@ -105,53 +106,65 @@ class Renderer {
       throw std::runtime_error("Cannot get X11 visual");
     window.create(visual.get(), "GlyphShift Vulkan fixture");
     const char* layer = "VK_LAYER_KHRONOS_validation";
-    std::vector<const char*> extensions{VK_KHR_SURFACE_EXTENSION_NAME,
-                                        VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
-    auto debug = info<VkDebugUtilsMessengerCreateInfoEXT>(
-        VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
-    debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    debug.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    debug.pfnUserCallback = diagnostic;
-    if (validation) {
-      std::uint32_t n = 0;
-      vk_check(vkEnumerateInstanceLayerProperties(&n, nullptr),
-               "enumerate layers");
-      std::vector<VkLayerProperties> layers(n);
-      vk_check(vkEnumerateInstanceLayerProperties(&n, layers.data()),
-               "enumerate layers");
-      if (std::none_of(layers.begin(), layers.end(), [&](const auto& p) {
-            return std::strcmp(p.layerName, layer) == 0;
-          }))
-        throw std::runtime_error(
-            "--validation requires VK_LAYER_KHRONOS_validation; install Vulkan "
-            "validation layers");
-      extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-    auto application =
-        info<VkApplicationInfo>(VK_STRUCTURE_TYPE_APPLICATION_INFO);
-    application.pApplicationName = "GlyphShift M0 fixture";
-    application.apiVersion = VK_API_VERSION_1_0;
-    auto create =
-        info<VkInstanceCreateInfo>(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
-    create.pApplicationInfo = &application;
-    create.enabledExtensionCount =
-        static_cast<std::uint32_t>(extensions.size());
-    create.ppEnabledExtensionNames = extensions.data();
-    if (validation) {
-      create.enabledLayerCount = 1;
-      create.ppEnabledLayerNames = &layer;
-      create.pNext = &debug;
-    }
-    vk_check(vkCreateInstance(&create, nullptr, &instance), "create instance");
-    if (validation) {
-      auto make = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-      if (!make) throw std::runtime_error("VK_EXT_debug_utils is unavailable");
-      vk_check(make(instance, &debug, nullptr, &messenger),
-               "create debug messenger");
+    if (shared) {
+      borrowed = true;
+      instance = shared->instance;
+      physical = shared->physical;
+      device = shared->device;
+      queue = shared->queue;
+      family = shared->family;
+    } else {
+      std::vector<const char*> extensions{VK_KHR_SURFACE_EXTENSION_NAME,
+                                          VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
+      auto debug = info<VkDebugUtilsMessengerCreateInfoEXT>(
+          VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+      debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                              VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+      debug.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                          VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                          VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+      debug.pfnUserCallback = diagnostic;
+      if (validation) {
+        std::uint32_t n = 0;
+        vk_check(vkEnumerateInstanceLayerProperties(&n, nullptr),
+                 "enumerate layers");
+        std::vector<VkLayerProperties> layers(n);
+        vk_check(vkEnumerateInstanceLayerProperties(&n, layers.data()),
+                 "enumerate layers");
+        if (std::none_of(layers.begin(), layers.end(), [&](const auto& p) {
+              return std::strcmp(p.layerName, layer) == 0;
+            }))
+          throw std::runtime_error(
+              "--validation requires VK_LAYER_KHRONOS_validation; install "
+              "Vulkan "
+              "validation layers");
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+      }
+      auto application =
+          info<VkApplicationInfo>(VK_STRUCTURE_TYPE_APPLICATION_INFO);
+      application.pApplicationName = "GlyphShift M0 fixture";
+      application.apiVersion = VK_API_VERSION_1_0;
+      auto create =
+          info<VkInstanceCreateInfo>(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+      create.pApplicationInfo = &application;
+      create.enabledExtensionCount =
+          static_cast<std::uint32_t>(extensions.size());
+      create.ppEnabledExtensionNames = extensions.data();
+      if (validation) {
+        create.enabledLayerCount = 1;
+        create.ppEnabledLayerNames = &layer;
+        create.pNext = &debug;
+      }
+      vk_check(vkCreateInstance(&create, nullptr, &instance),
+               "create instance");
+      if (validation) {
+        auto make = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+            vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+        if (!make)
+          throw std::runtime_error("VK_EXT_debug_utils is unavailable");
+        vk_check(make(instance, &debug, nullptr, &messenger),
+                 "create debug messenger");
+      }
     }
     auto surface_info = info<VkXlibSurfaceCreateInfoKHR>(
         VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR);
@@ -159,7 +172,16 @@ class Renderer {
     surface_info.window = window.handle;
     vk_check(vkCreateXlibSurfaceKHR(instance, &surface_info, nullptr, &surface),
              "create Xlib surface");
-    select_device();
+    if (!shared)
+      select_device();
+    else {
+      VkBool32 supported = VK_FALSE;
+      vk_check(vkGetPhysicalDeviceSurfaceSupportKHR(physical, family, surface,
+                                                    &supported),
+               "check second surface");
+      if (!supported)
+        throw std::runtime_error("queue cannot present second surface");
+    }
     auto command_pool = info<VkCommandPoolCreateInfo>(
         VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
     command_pool.queueFamilyIndex = family;
@@ -260,13 +282,33 @@ class Renderer {
     queue_info.queueFamilyIndex = family;
     queue_info.queueCount = 1;
     queue_info.pQueuePriorities = &priority;
-    const char* extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    const std::array<const char*, 2> extensions{
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME};
+    const bool extended =
+        std::getenv("GLYPHSHIFT_FIXTURE_EXTENDED_PRESENT") != nullptr;
+    if (extended) {
+      uint32_t count = 0;
+      vk_check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count,
+                                                    nullptr),
+               "enumerate incremental present");
+      std::vector<VkExtensionProperties> supported(count);
+      vk_check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count,
+                                                    supported.data()),
+               "enumerate incremental present");
+      if (std::none_of(supported.begin(), supported.end(), [](const auto& e) {
+            return std::strcmp(e.extensionName,
+                               VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME) == 0;
+          }))
+        throw std::runtime_error(
+            "incremental present unavailable for fallback test");
+    }
     auto create =
         info<VkDeviceCreateInfo>(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
     create.queueCreateInfoCount = 1;
     create.pQueueCreateInfos = &queue_info;
-    create.enabledExtensionCount = 1;
-    create.ppEnabledExtensionNames = &extension;
+    create.enabledExtensionCount = extended ? 2U : 1U;
+    create.ppEnabledExtensionNames = extensions.data();
     vk_check(vkCreateDevice(physical, &create, nullptr, &device),
              "create device");
     vkGetDeviceQueue(device, family, 0, &queue);
@@ -539,6 +581,13 @@ class Renderer {
     present.swapchainCount = 1;
     present.pSwapchains = &swapchain;
     present.pImageIndices = &index;
+    VkPresentRegionKHR region{};
+    auto regions =
+        info<VkPresentRegionsKHR>(VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR);
+    regions.swapchainCount = 1;
+    regions.pRegions = &region;
+    if (std::getenv("GLYPHSHIFT_FIXTURE_EXTENDED_PRESENT"))
+      present.pNext = &regions;
     const auto result = vkQueuePresentKHR(queue, &present);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR ||
         acquired == VK_SUBOPTIMAL_KHR) {
@@ -579,7 +628,29 @@ int main(int argc, char** argv) {
     {
       Renderer renderer;
       renderer.init(opts.validation);
-      renderer.run(opts);
+      if (std::getenv("GLYPHSHIFT_FIXTURE_MULTI")) {
+        Renderer second;
+        second.init(false, &renderer);
+        const auto start = std::chrono::steady_clock::now();
+        std::uint64_t frame = 0;
+        while ((!opts.frames || frame < opts.frames) &&
+               renderer.window.poll() && second.window.poll()) {
+          for (auto* target : {&renderer, &second}) {
+            if (target->window.resized || !target->swapchain)
+              target->recreate();
+            if (target->swapchain)
+              target->draw(target->frames[frame % target->frames.size()],
+                           glyphshift::fixture_time(frame, opts));
+          }
+          fixture::pace(start, ++frame);
+        }
+        vk_check(vkDeviceWaitIdle(renderer.device),
+                 "wait for multiple swapchains");
+        std::cout << "Vulkan fixture: two swapchains / one device clean "
+                     "shutdown after "
+                  << frame << " frames\n";
+      } else
+        renderer.run(opts);
     }
     if (validation_errors) {
       std::cerr << validation_errors << " Vulkan validation errors\n";

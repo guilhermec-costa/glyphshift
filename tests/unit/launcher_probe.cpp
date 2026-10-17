@@ -11,6 +11,13 @@ int main(int argc, char** argv) {
     return 99;
   }
   if (argc == 2 && std::string_view(argv[1]) == "--exit") return 37;
+  if (argc == 2 && std::string_view(argv[1]) == "--profile-env") {
+    for (const char* name : {"GLYPHSHIFT_PROFILE", "GLYPHSHIFT_PRESET"}) {
+      const char* value = std::getenv(name);
+      std::cout << name << '=' << (value ? value : "") << '\n';
+    }
+    return 0;
+  }
   const char* preload = std::getenv("LD_PRELOAD");
   std::cout << "LD_PRELOAD=" << (preload ? preload : "") << '\n';
   for (const char* name :

@@ -801,12 +801,24 @@ class GlyphRenderer {
 VkResult render_present(DeviceDispatch& device, VkQueue queue,
                         const VkPresentInfoKHR* info) {
   if (!device.render_api.available) return device.present(queue, info);
+  auto forward = [&] {
+    for (uint32_t i = 0; i < info->swapchainCount; ++i) {
+      std::shared_ptr<SwapchainState> state;
+      {
+        const std::lock_guard lock(device.mutex);
+        const auto found = device.swapchains.find(info->pSwapchains[i]);
+        if (found != device.swapchains.end()) state = found->second;
+      }
+      if (state) editor::deactivate(state->display, state->window);
+    }
+    return device.present(queue, info);
+  };
   if (info->swapchainCount != 1 || info->pNext ||
       info->waitSemaphoreCount > 64) {
     warning(device,
             "glyphshift: unsupported Vulkan present batch/pNext; forwarding "
             "unchanged\n");
-    return device.present(queue, info);
+    return forward();
   }
   std::shared_ptr<SwapchainState> state;
   QueueState queue_state;
@@ -824,7 +836,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     warning(device,
             "glyphshift: unsupported Vulkan capture usage/format; forwarding "
             "unchanged\n");
-    return device.present(queue, info);
+    return forward();
   }
   const bool ownership =
       state->sharing == VK_SHARING_MODE_CONCURRENT
@@ -837,7 +849,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     warning(device,
             "glyphshift: unsupported Vulkan queue ownership/protection; "
             "forwarding unchanged\n");
-    return device.present(queue, info);
+    return forward();
   }
   const auto start = std::chrono::steady_clock::now();
   editor::Frame editor_frame(state->display, state->window, state->extent.width,
@@ -860,7 +872,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
   if (blocked) {
     editor_frame.complete(0);
     editor::deactivate(state->display, state->window);
-    return device.present(queue, info);
+    return forward();
   }
   try {
     if (initialize) {
@@ -881,7 +893,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
       warning(device,
               "glyphshift: unsupported Vulkan queue change/image index; "
               "forwarding unchanged\n");
-      return device.present(queue, info);
+      return forward();
     }
     VkPresentInfoKHR presentation = *info;
     presentation.waitSemaphoreCount = 1;
@@ -900,7 +912,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue,
     diagnostic("\n");
     editor_frame.complete(0);
     editor::deactivate(state->display, state->window);
-    return device.present(queue, info);
+    return forward();
   }
 }
 void release_renderers(DeviceDispatch& state) {

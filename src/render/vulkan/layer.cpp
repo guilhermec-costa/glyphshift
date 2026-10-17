@@ -229,6 +229,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
       state->get_proc(instance, "vkCreateXlibSurfaceKHR"));
   if (!next) return VK_ERROR_EXTENSION_NOT_PRESENT;
   const auto result = next(instance, info, allocator, surface);
+  if (result == VK_SUCCESS && diagnostics_enabled()) {
+    char message[96];
+    std::snprintf(message, sizeof(message),
+                  "glyphshift: Vulkan Xlib window 0x%lx\n", info->window);
+    diagnostic(message);
+  }
   if (result == VK_SUCCESS) {
     try {
       const std::lock_guard lock(state->mutex);
