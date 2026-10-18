@@ -117,8 +117,8 @@ def main():
                         control.click(100, 151 + (position-1)*23)
                     time.sleep(.35)
                     assert (profile_dir / 'active').read_text() == expected + '\n', (expected, (profile_dir / 'active').read_text())
-                names = ['art-comic', 'art-sepia', 'art-newsprint', 'art-chalk', 'art-blueprint', 'art-midnight',
-                         'art-crt', 'art-digital-rain']
+                names = ['art-comic', 'art-sepia', 'art-newsprint', 'art-chalk', 'art-ink-edges', 'art-blueprint',
+                         'art-midnight', 'art-crt', 'art-digital-rain']
                 seen = []
                 for index, name in enumerate(names, 1):
                     choose(index, name)

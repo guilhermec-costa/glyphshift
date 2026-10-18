@@ -5,6 +5,7 @@
 #include "comic.hpp"
 #include "crt.hpp"
 #include "digital_rain.hpp"
+#include "ink_edges.hpp"
 #include "midnight.hpp"
 #include "newsprint.hpp"
 #include "sepia.hpp"
@@ -12,7 +13,7 @@
 namespace glyphshift {
 std::span<const BuiltinPreset> builtin_presets() noexcept {
     // Light-paper styles first, then dark-paper styles.
-    static constexpr std::array<BuiltinPreset, 8> styles{{
+    static constexpr std::array<BuiltinPreset, 9> styles{{
         {"art-comic",
             "Comic",
             "Bold scene-colored inks over a vivid watercolor wash.",
@@ -26,6 +27,10 @@ std::span<const BuiltinPreset> builtin_presets() noexcept {
             "Black ink, letter shading and ASCII outlines on warm white paper.",
             included::newsprint},
         {"art-chalk", "Chalk", "Chalk drawing on a dark green board.", included::chalk},
+        {"art-ink-edges",
+            "Ink & Edges",
+            "Crisp white letters and line art on black; made for dark games.",
+            included::ink_edges},
         {"art-blueprint",
             "Blueprint",
             "Cyan outlines on navy paper; no surface fill.",

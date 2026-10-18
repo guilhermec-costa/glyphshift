@@ -518,11 +518,30 @@ modules passed `spirv-val`. DoG, crisp and static-stability smoke captures were
 identical between GLX and Vulkan. Focused editor tests and SuperTux were not
 run for this step.
 
+## Ink & Edges (art direction, phase 5, step 3)
+
+A style in the spirit of the reference: crisp white letters on black, the
+reference's `.:coPO?@` ramp preceded by empty levels for negative space, DoG
+contours that replace the fill (`contour_overlay=false`), no shape matching,
+stability 0.8. No dark game was available on this machine, so it was
+calibrated on [a darkened copy](../presets/dark-scene.png) of the SuperTux frame
+(`magick ... -modulate 45,55,100 -gamma 0.75` and a blurred elliptical vignette).
+That is a synthetic stand-in, not a validation in a dark game.
+
+With the bright-scene DoG defaults (threshold 0.025) almost no contour fired:
+absolute contrasts are smaller in a dark scene. Exposure 2.2, DoG threshold
+0.008 and 15% votes gave lit letter fields, black negative space and clean
+outlines; exposure 2.6 blew highlights into `█` blocks. On the original bright
+frame this exposure overexposes, so the style is documented as made for dark
+games, with Exposure as the control to lower. An automatic exposure from the
+frame's average would remove that dependence and remains an idea, not
+implemented.
+
 ## Ready-to-use style collection
 
-Eight embedded styles are listed under **Insert → Preset → Included styles**,
-light paper first: Comic, Sepia, Newsprint, Chalk, Blueprint, Midnight, CRT and
-Digital rain. All render at strength 1 and redraw the whole scene with the
+Nine embedded styles are listed under **Insert → Preset → Included styles**,
+light paper first: Comic, Sepia, Newsprint, Chalk, then dark: Ink & Edges,
+Blueprint, Midnight, CRT and Digital rain. All render at strength 1 and redraw the whole scene with the
 phase 1–4 controls; see the [preset gallery](../../presets/README.md).
 
 History: six styles (Newsprint, Green terminal, Blueprint, Amber Braille,
