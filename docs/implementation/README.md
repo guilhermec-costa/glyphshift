@@ -654,10 +654,12 @@ persistence, invalid values and parameter slots 24/25); the Debug smoke
 target passed on GLX (hostile-state probe and GL debug output) and Vulkan
 (core and synchronization validation); Release 17/17 with no `Vulkan
 validation` line; all glyph SPIR-V modules, including `glyph.meter.spv`,
-passed `spirv-val`. Not measured: the meter pass's GPU time (576 texel reads
-in one fragment per frame). Not run for this step: the focused XTest editor
-tests (the new slider was not exercised through real input) and a live dark
-game.
+passed `spirv-val`. With the user's permission, the focused
+`editor_apps.py --presets` test passed on the Release GLX fixture, selecting
+all nine included styles (Ink & Edges with automatic exposure among them)
+through the editor, with distinct live images and saved copies. Not measured:
+the meter pass's GPU time (576 texel reads in one fragment per frame). Not
+verified: the new slider through real input, and a live dark game.
 
 ## SDL applications (native SuperTux)
 
