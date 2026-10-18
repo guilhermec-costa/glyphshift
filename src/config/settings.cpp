@@ -277,14 +277,17 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
                     : key == "dog_threshold" ? .2F
                                              : 1))
                 parsed.warnings |= invalid_art;
-        } else if (key == "saturation" || key == "glow" || key == "stability") {
+        } else if (key == "saturation" || key == "glow" || key == "stability" ||
+                   key == "auto_exposure") {
             const bool unit = key != "saturation";
-            float& target = key == "glow"        ? parsed.value.art.glow
-                            : key == "stability" ? parsed.value.art.stability
-                                                 : parsed.value.art.saturation;
-            target = key == "glow"        ? defaults.art.glow
-                     : key == "stability" ? defaults.art.stability
-                                          : defaults.art.saturation;
+            float& target = key == "glow"            ? parsed.value.art.glow
+                            : key == "stability"     ? parsed.value.art.stability
+                            : key == "auto_exposure" ? parsed.value.art.auto_exposure
+                                                     : parsed.value.art.saturation;
+            target = key == "glow"            ? defaults.art.glow
+                     : key == "stability"     ? defaults.art.stability
+                     : key == "auto_exposure" ? defaults.art.auto_exposure
+                                              : defaults.art.saturation;
             if (!number(value, target, 0, unit ? 1 : 2))
                 parsed.warnings |= invalid_art;
         } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching" ||
@@ -383,6 +386,7 @@ bool valid_art(const ArtSettings& a) noexcept {
              a.scene_paper,
              a.glow,
              a.stability,
+             a.auto_exposure,
              a.foreground[0],
              a.foreground[1],
              a.foreground[2],

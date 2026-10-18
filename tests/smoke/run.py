@@ -179,6 +179,11 @@ try:
         assert image(window,'illustrated-crisp')!=illustrated,'crisp glyphs did not change image'
         characters(art+'glow=0.8\n')
         assert image(window,'illustrated-glow')!=illustrated,'glow did not change image'
+        # Metering pass: the fixture's mean is not the exposure key, so full
+        # automatic exposure changes the image; a static scene stays put.
+        characters(art+'auto_exposure=1\n');metered=image(window,'illustrated-auto-exposure')
+        assert metered!=illustrated,'automatic exposure did not change image'
+        assert image(window,'illustrated-auto-exposure-again')==metered,'automatic exposure drifted on a static scene'
         characters(art+'saturation=0\n')
         assert image(window,'illustrated-saturation')!=illustrated,'saturation did not change image'
         characters(art+'scene_paper=0.6\n');tiled=image(window,'illustrated-paper-tiles')
@@ -216,6 +221,7 @@ try:
     if api=='glx':
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('temporal.py')),'--build',str(build),'--output',str(output/'temporal')],check=True)
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('exposure.py')),'--build',str(build),'--output',str(output/'exposure')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay.py')),'--build',str(build),'--output',str(output/'overlay')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay_tray.py')),'--build',str(build),'--output',str(output/'overlay-tray')],check=True)
     print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')

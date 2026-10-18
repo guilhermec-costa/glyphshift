@@ -7,6 +7,20 @@ float tone_luminance(float value, float exposure, float contrast, float gamma) n
     return std::pow(std::clamp((value * exposure - .5F) * contrast + .5F, 0.0F, 1.0F), 1 / gamma);
 }
 
+float auto_exposure_factor(float mean, float strength) noexcept {
+    return std::clamp(std::pow(exposure_key / std::max(mean, exposure_floor), strength), .5F, 4.0F);
+}
+
+float exposure_adaptation(float seconds) noexcept {
+    return seconds > 0 ? 1 - std::exp(-seconds / exposure_adaptation_seconds) : 0;
+}
+
+float adapt_luminance(float previous, float measured, float rate) noexcept {
+    const float a = std::log(std::max(previous, exposure_floor));
+    const float b = std::log(std::max(measured, exposure_floor));
+    return std::exp(a + (b - a) * std::clamp(rate, 0.0F, 1.0F));
+}
+
 int contour_glyph(std::span<const float, 9> v, float strength, float threshold) noexcept {
     const float gx = (-v[0] + v[2] - 2 * v[3] + 2 * v[5] - v[6] + v[8]) / 4;
     const float gy = (-v[0] - 2 * v[1] - v[2] + v[6] + 2 * v[7] + v[8]) / 4;

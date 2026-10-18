@@ -43,6 +43,8 @@ version of the effect running in the game through Proton.*
   adjustable stroke weight.
 - **Live art direction:** independent cell dimensions, source color or
   monochrome, ink and paper colors, exposure, contrast, gamma and contour controls.
+- **Automatic exposure:** follows the scene's brightness, lifting dark games
+  toward a readable mid tone and easing in over a moment when the scene changes.
 - **Adjustable intensity:** blend scene detail with glyphs or use strength 1
   for a drawing composed entirely of glyphs.
 - **Per-game presets:** name, save and switch styles from the overlay.

@@ -497,6 +497,16 @@ void controls(State& state,
                 ImGui::SetTooltip(
                     "Keeps each cell's previous glyph while it still fits, so motion and "
                     "noise do not make glyphs flicker.");
+            ImGui::SliderFloat("Auto exposure",
+                &art.auto_exposure,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Follows the scene's brightness: dark games are brightened toward a "
+                    "mid tone, bright ones toned down slightly. Exposure still applies.");
             ImGui::InputText("Contour glyphs", state.draft.edges.data(), state.draft.edges.size());
             ImGui::InputText("Shape glyphs", state.draft.shapes.data(), state.draft.shapes.size());
             if (ImGui::IsItemHovered())

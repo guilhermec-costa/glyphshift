@@ -27,6 +27,8 @@ struct ArtSettings {
     float saturation = 1.0F, glow = 0.0F;
     // Temporal hysteresis for illustrated glyph choices (0 off .. 1 strongest).
     float stability = 0.0F;
+    // Exposure follows the scene's metered brightness (0 off .. 1 fully).
+    float auto_exposure = 0.0F;
     std::array<float, 3> foreground{1, 1, 1}, background{0, 0, 0};
     bool operator==(const ArtSettings&) const = default;
 };
@@ -50,6 +52,8 @@ struct Settings {
 // exists. Entries after the last used one are zero.
 inline constexpr std::size_t art_vectors = 8;
 inline constexpr std::size_t art_stability = 19;
+// Renderers set the metering's adaptation rate for the frame (1: start fresh).
+inline constexpr std::size_t art_auto_exposure = 24, art_adaptation = 25;
 using ArtParameters = std::array<float, 4 * art_vectors>;
 
 inline ArtParameters art_parameters(const Settings& s) {
@@ -77,7 +81,10 @@ inline ArtParameters art_parameters(const Settings& s) {
         a.stability,
         a.dog_sigma,
         a.dog_threshold,
-        a.edge_votes};
+        a.edge_votes,
+        0,
+        a.auto_exposure,
+        1};
 }
 
 enum SettingWarning : std::uint32_t {

@@ -188,8 +188,9 @@ std::string serialize_settings(const Settings& s) {
            "\ndog_threshold=" + decimal(s.art.dog_threshold) +
            "\nedge_votes=" + decimal(s.art.edge_votes) +
            "\nsaturation=" + decimal(s.art.saturation) + "\nglow=" + decimal(s.art.glow) +
-           "\nstability=" + decimal(s.art.stability) + "\nforeground=" + rgb(s.art.foreground) +
-           "\nbackground=" + rgb(s.art.background) + "\n";
+           "\nstability=" + decimal(s.art.stability) +
+           "\nauto_exposure=" + decimal(s.art.auto_exposure) +
+           "\nforeground=" + rgb(s.art.foreground) + "\nbackground=" + rgb(s.art.background) + "\n";
 }
 
 bool PresetStore::load(std::string_view name, Settings& settings, std::string& error) const {

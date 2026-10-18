@@ -44,6 +44,23 @@ int main() {
         check(contour_glyph(std::array<float, 9>{}, 1, 0) == -1, "flat cells have no contour");
         check(tone_luminance(0, 1, 1, 1) == 0 && tone_luminance(1, 1, 1, 1) == 1, "tone endpoints");
         check(std::abs(tone_luminance(.25F, 1, 1, 2) - .5F) < .000001F, "gamma response");
+        // Automatic exposure: a dark scene is raised toward the key, a bright
+        // one lowered, both within 0.5..4; strength 0 leaves exposure alone.
+        check(std::abs(auto_exposure_factor(.1F, 1) - 4) < .0001F, "dark scene raised to the key");
+        check(std::abs(auto_exposure_factor(.2F, .5F) - std::sqrt(2.0F)) < .0001F,
+            "strength is an exponent");
+        check(auto_exposure_factor(.001F, 1) == 4 && auto_exposure_factor(1, 1) == .5F,
+            "exposure factor limits");
+        check(std::abs(auto_exposure_factor(.8F, 1) - .5F) < .0001F, "bright scene lowered");
+        check(auto_exposure_factor(.05F, 0) == 1, "strength zero is neutral");
+        check(exposure_adaptation(0) == 0 && exposure_adaptation(100) > .9999F &&
+                  std::abs(exposure_adaptation(exposure_adaptation_seconds) -
+                           (1 - std::exp(-1.0F))) < .0001F,
+            "exponential adaptation over time");
+        check(std::abs(adapt_luminance(.1F, .4F, .5F) - .2F) < .0001F,
+            "adaptation is geometric (log domain)");
+        check(std::abs(adapt_luminance(.1F, .4F, 1) - .4F) < .00001F,
+            "full adaptation reaches the measurement");
         const auto parsed = parse_settings(
             "render_style=illustrated\nfill_enabled=false\ncontour_overlay="
             "false\ntone_exposure=1.4\ntone_"
@@ -51,13 +68,15 @@ int main() {
             "2\nforeground=0.2,0.3,0.4\nbackground=1,0.9,0.8\n"
             "shape_matching=true\nshape_threshold=0.17\nscene_paper=0.65\n"
             "saturation=1.6\nglow=0.3\npaper_wash=true\nstability=0.7\ncrisp_glyphs=true\n"
-            "edge_detector=dog\ndog_sigma=1.4\ndog_threshold=0.03\nedge_votes=0.25\n");
+            "edge_detector=dog\ndog_sigma=1.4\ndog_threshold=0.03\nedge_votes=0.25\n"
+            "auto_exposure=0.6\n");
         check(!parsed.warnings && parsed.value.art.illustrated && !parsed.value.art.fill &&
                   !parsed.value.art.contour_overlay && parsed.value.art.saturation == 1.6F &&
                   parsed.value.art.glow == .3F && parsed.value.art.paper_wash &&
                   parsed.value.art.stability == .7F && parsed.value.art.crisp &&
                   parsed.value.art.dog_edges && parsed.value.art.dog_sigma == 1.4F &&
-                  parsed.value.art.dog_threshold == .03F && parsed.value.art.edge_votes == .25F,
+                  parsed.value.art.dog_threshold == .03F && parsed.value.art.edge_votes == .25F &&
+                  parsed.value.art.auto_exposure == .6F,
             "illustration config");
         check(art_parameters(parsed.value)[16] == 1.6F && art_parameters(parsed.value)[17] == .3F &&
                   art_parameters(parsed.value)[18] == 7 &&
@@ -67,12 +86,15 @@ int main() {
                   art_parameters(parsed.value)[art_stability] == .7F,
             "saturation, glow and paper wash reach the shared shader parameters");
         {
-            // Eight vec4s; entries after the last used slot (22) stay zero.
+            // Eight vec4s: slot 24 auto exposure, 25 the renderer's adaptation
+            // rate (1 until it sets one); 23 and 26 onward unused and zero.
             const auto values = art_parameters(parsed.value);
             check(values.size() == 4 * art_vectors && art_vectors == 8,
                 "art parameters fill eight vec4s");
-            bool zero = true;
-            for (std::size_t i = 23; i < values.size(); ++i)
+            check(values[art_auto_exposure] == .6F && values[art_adaptation] == 1,
+                "auto exposure reaches the shader parameters");
+            bool zero = values[23] == 0;
+            for (std::size_t i = 26; i < values.size(); ++i)
                 zero &= values[i] == 0;
             check(zero, "unused art parameter slots are zero");
         }
@@ -93,6 +115,9 @@ int main() {
                  "saturation=2.5",
                  "saturation=nan",
                  "glow=1.5",
+                 "auto_exposure=1.5",
+                 "auto_exposure=-0.1",
+                 "auto_exposure=nan",
                  "glow=-0.1",
                  "paper_wash=bad",
                  "crisp_glyphs=maybe",

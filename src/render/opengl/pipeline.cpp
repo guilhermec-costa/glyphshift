@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <glyphshift/core/glyph.hpp>
 #include <glyphshift/editor/editor.hpp>
 #include <stdexcept>
 
@@ -73,7 +74,7 @@ GLuint link(const char* vertex, const char* fragment) {
 // recompiles it, with a performance warning, when first drawn into a different
 // kind. Link the per-cell pass while a temporary integer FBO like its real
 // target is bound. Callers that must preserve bindings wrap this in GlState.
-GLuint link_offscreen(const char* fragment) {
+GLuint link_offscreen(const char* fragment, bool floating = false) {
     const auto& gl = api();
     GLuint target = 0, framebuffer = 0;
     gl.GenTextures(1, &target);
@@ -85,15 +86,18 @@ GLuint link_offscreen(const char* fragment) {
         gl.ActiveTexture(GL_TEXTURE3);
         gl.BindTexture(GL_TEXTURE_2D, target);
         texture_parameters(gl);
-        gl.TexImage2D(GL_TEXTURE_2D,
-            0,
-            GL_RGBA32UI,
-            1,
-            1,
-            0,
-            GL_RGBA_INTEGER,
-            GL_UNSIGNED_INT,
-            nullptr);
+        if (floating)
+            gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R32F, 1, 1, 0, GL_RED, GL_FLOAT, nullptr);
+        else
+            gl.TexImage2D(GL_TEXTURE_2D,
+                0,
+                GL_RGBA32UI,
+                1,
+                1,
+                0,
+                GL_RGBA_INTEGER,
+                GL_UNSIGNED_INT,
+                nullptr);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
         gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
             GL_COLOR_ATTACHMENT0,
@@ -126,6 +130,7 @@ struct Pipeline::Program {
         gl.Uniform1i(gl.GetUniformLocation(id, "atlas_image"), 1);
         gl.Uniform1i(gl.GetUniformLocation(id, "ramp_image"), 2);
         gl.Uniform1i(gl.GetUniformLocation(id, "cell_image"), 3);
+        gl.Uniform1i(gl.GetUniformLocation(id, "meter_image"), 4);
         size = gl.GetUniformLocation(id, "size");
         cell = gl.GetUniformLocation(id, "cell");
         source_color = gl.GetUniformLocation(id, "source_color");
@@ -165,6 +170,12 @@ void Target::release() {
     for (auto& grid : cells)
         if (grid)
             gl.DeleteTextures(1, &grid);
+    for (auto& framebuffer : meter_framebuffers)
+        if (framebuffer)
+            gl.DeleteFramebuffers(1, &framebuffer);
+    for (auto& meter : meters)
+        if (meter)
+            gl.DeleteTextures(1, &meter);
     *this = {};
 }
 
@@ -174,6 +185,7 @@ Pipeline::Pipeline(Caps caps) : caps_(caps) {
         throw std::runtime_error("OpenGL entry points unavailable");
     compose_ = std::make_unique<Program>(link(shaders::vertex, shaders::fragment));
     analysis_ = std::make_unique<Program>(link_offscreen(shaders::analysis));
+    meter_ = std::make_unique<Program>(link_offscreen(shaders::meter, true));
     gl.GenVertexArrays(1, &vao_);
     gl.GenTextures(1, &atlas_);
     gl.GenTextures(1, &ramp_);
@@ -230,7 +242,7 @@ void Pipeline::update_atlas(const CharacterSelection& selection) {
         GL_UNSIGNED_BYTE,
         data->ramp.data());
     count_ = data->count;
-    for (const auto* program : {compose_.get(), analysis_.get()}) {
+    for (const auto* program : {compose_.get(), analysis_.get(), meter_.get()}) {
         gl.UseProgram(program->id);
         gl.Uniform1ui(program->ramp_count, count_);
     }
@@ -283,6 +295,42 @@ void Pipeline::prepare(Target& target, unsigned columns, unsigned rows) {
     target.rows = rows;
 }
 
+void Pipeline::prepare_meter(Target& target) {
+    if (target.meters[0])
+        return;
+    const auto& gl = api();
+    gl.GenTextures(2, target.meters.data());
+    gl.GenFramebuffers(2, target.meter_framebuffers.data());
+    if (!target.meters[0] || !target.meters[1] || !target.meter_framebuffers[0] ||
+        !target.meter_framebuffers[1])
+        throw std::runtime_error("GL exposure meter allocation failed");
+    gl.ActiveTexture(GL_TEXTURE4);
+    for (unsigned i = 0; i < 2; ++i) {
+        gl.BindTexture(GL_TEXTURE_2D, target.meters[i]);
+        texture_parameters(gl);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R32F, 1, 1, 0, GL_RED, GL_FLOAT, nullptr);
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, target.meter_framebuffers[i]);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            target.meters[i],
+            0);
+        if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw std::runtime_error("OpenGL exposure meter framebuffer incomplete");
+    }
+    target.metered = false;
+}
+
+// Share of the way toward this frame's measurement: 1 without a previous value.
+float Pipeline::adaptation(Target& target) {
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = frame_interval_ > 0
+                               ? frame_interval_
+                               : std::chrono::duration<double>(now - target.meter_time).count();
+    target.meter_time = now;
+    return target.metered ? exposure_adaptation(static_cast<float>(seconds)) : 1.0F;
+}
+
 void Pipeline::viewport(unsigned width, unsigned height) const {
     const auto& gl = api();
     if (caps_.viewport_array)
@@ -319,14 +367,34 @@ void Pipeline::draw(Target& target,
     auto values = art_parameters(settings);
     if (!history)
         values[art_stability] = 0;
+    const bool metering = illustrated && settings.art.auto_exposure > 0;
+    if (metering) {
+        prepare_meter(target);
+        values[art_adaptation] = adaptation(target);
+    }
     // During analysis, unit 3 holds the previous grid; composition then reads
-    // the grid just written.
-    const GLuint units[] = {source, atlas_, ramp_, target.cells[target.current ^ 1U]};
-    for (unsigned i = 0; i < 4; ++i) {
+    // the grid just written. Unit 4 holds the meter's previous value, then the
+    // value it wrote for analysis.
+    const GLuint units[] = {source,
+        atlas_,
+        ramp_,
+        target.cells[target.current ^ 1U],
+        target.meters[target.current ^ 1U]};
+    for (unsigned i = 0; i < 5; ++i) {
         gl.ActiveTexture(GL_TEXTURE0 + i);
         gl.BindTexture(GL_TEXTURE_2D, units[i]);
         gl.BindSampler(i, 0);
     }
+    if (metering) {
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, target.meter_framebuffers[target.current]);
+        gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
+        viewport(1, 1);
+        meter_->use(width, height, top_down, settings, values);
+        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+        gl.BindTexture(GL_TEXTURE_2D, target.meters[target.current]);
+    }
+    target.metered = metering;
+    gl.ActiveTexture(GL_TEXTURE3);
     if (illustrated) {
         // Integer target: host blend state cannot alter packed cell data.
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, target.framebuffers[target.current]);

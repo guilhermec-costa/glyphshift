@@ -22,6 +22,15 @@ layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
 layout(set=0, binding=2) uniform usampler2D ramp_image;
 layout(set=0, binding=4) uniform usampler2D cell_image;
+// Metered scene luminance (1x1): binding 6 the previous adapted value, which
+// the meter reads; binding 7 this frame's, which analysis reads.
+layout(set=0, binding=6) uniform sampler2D meter_previous;
+layout(set=0, binding=7) uniform sampler2D meter_current;
+#ifdef METER
+#define METER_IMAGE meter_previous
+#else
+#define METER_IMAGE meter_current
+#endif
 #define SIZE params.size
 #define CELL params.cell
 #define SOURCE_COLOR params.source_color
@@ -34,6 +43,10 @@ uniform sampler2D source_image;
 uniform sampler2D atlas_image;
 uniform usampler2D ramp_image;
 uniform usampler2D cell_image;
+// The renderer binds the previous adapted value for the meter and this
+// frame's for analysis.
+uniform sampler2D meter_image;
+#define METER_IMAGE meter_image
 // GL only: 1 when the source texture stores rows top-down (window captures);
 // 0, the default, for a captured GL back buffer, which is bottom-up.
 uniform uint source_top_down;
@@ -51,7 +64,7 @@ uniform vec4 art[8];
 #define GLYPH_STRENGTH glyph_strength
 #define ART art
 #endif
-#ifdef ANALYSIS
+#if defined(ANALYSIS) && !defined(METER)
 layout(location=0) out uvec4 cell_data;
 #else
 layout(location=0) out vec4 color;
@@ -74,7 +87,20 @@ uint pack_rgb(vec3 rgb) {
 vec3 unpack_rgb(uint v) {
     return vec3(float(v & 1023u), float((v >> 10) & 1023u), float((v >> 20) & 1023u)) / 1023.0;
 }
-#ifdef ANALYSIS
+#ifdef METER
+// Automatic exposure meter, one fragment: the geometric mean of the scene's
+// luminance over a 32x18 sample grid, adapted in the log domain toward the
+// previous value by ART[6].y (1: no previous value). Mirrors
+// glyphshift::adapt_luminance; the floor matches exposure_floor.
+void main() {
+    float sum = 0.0;
+    for (int y=0;y<18;++y) for (int x=0;x<32;++x)
+        sum += log(max(luma(sample_source((vec2(x,y) + .5) * SIZE / vec2(32,18))), 1.0/255.0));
+    float measured = sum / 576.0;
+    float previous = log(max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0));
+    color = vec4(exp(ART[6].y >= 1.0 ? measured : mix(previous, measured, ART[6].y)));
+}
+#elif defined(ANALYSIS)
 // Largest mean squared descriptor error accepted for a shape glyph (mirrors
 // glyphshift::shape_fit). Clean outlines fit a character closely; tiled
 // texture does not, so it keeps the calm tonal ramp instead of turning into
@@ -229,7 +255,12 @@ void main() {
             edge = true;
         }
     }
-    float tone = clamp((luma(average)*ART[0].x-.5)*ART[0].y+.5,0.0,1.0);
+    // Automatic exposure (glyphshift::auto_exposure_factor): toward a mid key.
+    float exposure = ART[0].x;
+    if (ART[6].x > 0.0)
+        exposure *= clamp(pow(.4 / max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0),
+                              ART[6].x), .5, 4.0);
+    float tone = clamp((luma(average)*exposure-.5)*ART[0].y+.5,0.0,1.0);
     tone = pow(tone,1.0/ART[0].z);
     int ramp_row = ART[2].w >= 0.0 ? 3 : 1;
     uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ramp_row),0).r;

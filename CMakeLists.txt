@@ -83,7 +83,8 @@ set_target_properties(glyphshift_gl_pipeline PROPERTIES POSITION_INDEPENDENT_COD
 target_compile_definitions(glyphshift_gl_pipeline PUBLIC GL_GLEXT_PROTOTYPES)
 target_include_directories(glyphshift_gl_pipeline SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_gl_pipeline PUBLIC ${OPENGL_INCLUDE_DIR})
-target_link_libraries(glyphshift_gl_pipeline PUBLIC ${CMAKE_DL_LIBS} glyphshift_editor)
+target_link_libraries(glyphshift_gl_pipeline PUBLIC ${CMAKE_DL_LIBS} glyphshift_core
+    glyphshift_editor)
 
 # The injected OpenGL module (Linux): GLX and Xlib interposition (X11 window
 # system) around the renderer's InjectedRenderer.
@@ -179,6 +180,9 @@ file(READ shaders/glyph/glyph.frag GLYPH_FRAGMENT)
 # The per-cell analysis pass is the same source with ANALYSIS defined.
 string(REPLACE "#version 330 core\n" "#version 330 core\n#define ANALYSIS\n" GLYPH_ANALYSIS
     "${GLYPH_FRAGMENT}")
+# The automatic exposure meter is the same source with METER defined.
+string(REPLACE "#version 330 core\n" "#version 330 core\n#define METER\n" GLYPH_METER
+    "${GLYPH_FRAGMENT}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     shaders/glyph/glyph.vert shaders/glyph/glyph.frag)
 file(READ shaders/editor/editor.vert EDITOR_VERTEX)
@@ -206,6 +210,15 @@ add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_analysis_spv.hpp"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
     DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
 target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_analysis_spv.hpp")
+add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_meter_spv.hpp"
+    COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 -DMETER
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/glyph/glyph.frag"
+        -o "${GLYPH_GENERATED}/glyph.meter.spv"
+    COMMAND "${CMAKE_COMMAND}" "-DINPUT=${GLYPH_GENERATED}/glyph.meter.spv"
+        "-DOUTPUT=${GLYPH_GENERATED}/glyph_meter_spv.hpp" "-DNAME=glyph_meter_spv"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
+    DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
+target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_meter_spv.hpp")
 foreach(stage vert frag)
     add_custom_command(OUTPUT "${GLYPH_GENERATED}/editor_${stage}_spv.hpp"
         COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0

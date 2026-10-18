@@ -3,6 +3,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <glyphshift/config/characters.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <vector>
@@ -82,8 +83,15 @@ private:
     void staging();
     void descriptors(unsigned targets);
     void pipelines();
-    void analysis_pipeline(VkGraphicsPipelineCreateInfo create,
-        VkPipelineShaderStageCreateInfo& fragment);
+    // A one-subpass pass rendering `module` into an image of `format`, which
+    // ends shader-readable; ordered after earlier fragment reads.
+    void offscreen_pipeline(VkGraphicsPipelineCreateInfo create,
+        VkPipelineShaderStageCreateInfo& fragment,
+        VkFormat format,
+        VkShaderModule module,
+        VkRenderPass& pass_output,
+        VkPipeline& pipeline_output);
+    float adaptation();
     void art_buffer(Target& target);
     void ensure_ui_buffer(Target& target, VkDeviceSize required);
     void upload_ui(Target& target, const ImDrawData& data);
@@ -112,6 +120,15 @@ private:
     std::array<Texture, 2> cells_;
     VkExtent2D font_extent_{}, cell_extent_{};
     static constexpr VkFormat cell_format = VK_FORMAT_R32G32B32A32_UINT;
+    static constexpr VkFormat meter_format = VK_FORMAT_R32_SFLOAT;
+    // Automatic exposure: 1x1 adapted luminances alternating with the grids,
+    // whether the other one holds last frame's value, and its time.
+    std::array<Texture, 2> meters_;
+    std::array<VkFramebuffer, 2> meter_framebuffers_{};
+    VkRenderPass meter_pass_ = VK_NULL_HANDLE;
+    VkPipeline meter_pipeline_ = VK_NULL_HANDLE;
+    bool metered_ = false;
+    std::chrono::steady_clock::time_point meter_time_{};
     static constexpr VkDeviceSize font_offset_ =
         (integral_bytes + 256 * ramp_height + 3) & ~VkDeviceSize{3};
     VkBuffer staging_ = VK_NULL_HANDLE;
@@ -124,6 +141,6 @@ private:
     std::array<VkFramebuffer, 2> cell_framebuffers_{};
     VkPipeline ui_pipeline_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE, analysis_pipeline_ = VK_NULL_HANDLE;
-    std::array<VkShaderModule, 5> modules_{};
+    std::array<VkShaderModule, 6> modules_{};
 };
 }  // namespace glyphshift::vulkan

@@ -606,6 +606,59 @@ byte-identical, and the 8 with the editor open differ only within the panel's
 "CPU render / submit" time text (rows 65–72). GL previews of Comic, Ink &
 Edges, `illustrated.conf` and `classic.conf` are byte-identical.
 
+**Step 2, automatic exposure (2026-10-18).** A new live setting,
+`auto_exposure` (0..1, default 0; editor **Illustration → Auto exposure**,
+below every control the focused tests click), persisted in presets and
+validated like the other unit-range controls. It applies to illustrated
+rendering, where exposure applies:
+
+- A meter pass (`glyph.frag` built with `METER`) runs before analysis when the
+  setting is above zero, as one fragment into a 1×1 R32F image: the geometric
+  mean of the scene's luminance over a 32×18 sample grid, floored at 1/255,
+  adapted toward the previous value in the log domain. The adaptation rate is
+  `1 - exp(-dt / 0.35 s)`, and 1 on the first metered frame (no previous
+  value), so a style starts correctly exposed. Two meter images alternate
+  with the cell grids; nothing is read back to the CPU.
+- Analysis multiplies the user's exposure by
+  `clamp((0.4 / mean) ^ auto_exposure, 0.5, 4)`. The key 0.4, limits and
+  adaptation are mirrored by `auto_exposure_factor`, `exposure_adaptation` and
+  `adapt_luminance` in the core and unit-tested.
+- GL: per-target meter textures and framebuffers on texture unit 4, which
+  `GlState` now also preserves; the meter program is linked with a float
+  target bound (the NVIDIA recompile issue of phase 2). Vulkan: two shared
+  meter images with their own render pass and pipeline, descriptor bindings 6
+  (the previous value, read by the meter) and 7 (this frame's, read by
+  analysis); set s pairs grid s with meters s and s^1.
+- `glyphshift-preview` renders sequences at a fixed 1/60 s
+  (`Pipeline::set_frame_interval`), so adaptation is reproducible.
+- Ink & Edges now uses exposure 0.92 with `auto_exposure=1`. The metered dark
+  stand-in gives a factor of 2.39, matching the hand-tuned 2.2 (its gallery
+  image changed in 0.01% of pixels and was regenerated; the overview was not),
+  while the bright SuperTux frame gets 0.56 instead of blowing out to white.
+
+New oracle `tests/smoke/exposure.py` (run by the GLX smoke, generated
+monochrome scene): `auto_exposure=0` is byte-identical to a config without the
+key; a static scene does not drift over 30 frames and its first metered frame
+equals a fresh render; the same scene at half brightness differs in 100% of
+cells with fixed exposure and 0% with full automatic exposure; after a cut
+from the dark to the bright scene the first frame differs in 100% of cells
+from the adapted image and, two seconds later at 60 fps, in 0% (about 1%
+after 1.8 s; this gradient puts every cell near a tone boundary, the worst
+case). Replacing the shader's use of the meter with a no-op made the oracle
+fail. Both API smokes now require `auto_exposure=1` to change the live
+fixture image and to stay unchanged on a static scene; the GLX and Vulkan
+captures were byte-identical.
+
+Verification: Debug 15/15 (unit tests for the exposure functions, parsing,
+persistence, invalid values and parameter slots 24/25); the Debug smoke
+target passed on GLX (hostile-state probe and GL debug output) and Vulkan
+(core and synchronization validation); Release 17/17 with no `Vulkan
+validation` line; all glyph SPIR-V modules, including `glyph.meter.spv`,
+passed `spirv-val`. Not measured: the meter pass's GPU time (576 texel reads
+in one fragment per frame). Not run for this step: the focused XTest editor
+tests (the new slider was not exercised through real input) and a live dark
+game.
+
 ## SDL applications (native SuperTux)
 
 Launching Arch's native SuperTux 0.7.0 (`sdl2-compat` 2.32.72 over SDL 3.4.16,
@@ -663,9 +716,10 @@ absolute contrasts are smaller in a dark scene. Exposure 2.2, DoG threshold
 0.008 and 15% votes gave lit letter fields, black negative space and clean
 outlines; exposure 2.6 blew highlights into `█` blocks. On the original bright
 frame this exposure overexposes, so the style is documented as made for dark
-games, with Exposure as the control to lower. An automatic exposure from the
-frame's average would remove that dependence and remains an idea, not
-implemented.
+games, with Exposure as the control to lower. Since
+[automatic exposure](#art-in-motion-roadmap-item-4) (art in motion, step 2) the
+style uses exposure 0.92 with `auto_exposure=1` instead, which gives the dark
+stand-in the same look and keeps bright scenes readable.
 
 ## Ready-to-use style collection
 

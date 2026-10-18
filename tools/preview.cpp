@@ -95,7 +95,8 @@ void write_ppm(const char* path,
 // Developer-only, real GPU preview on fixed images. Readback belongs here,
 // never in the injected render loop. PPM input is deliberately minimal.
 // Additional INPUT/OUTPUT pairs render as consecutive frames, so temporal
-// stability sees the previous frame's cells exactly as the renderers do.
+// stability sees the previous frame's cells exactly as the renderers do, and
+// automatic exposure adapts as at 60 frames per second.
 // Rendering uses the same glyph pipeline as the injected renderer and overlay.
 int main(int argc, char** argv) {
     if (argc < 4 || argc % 2) {
@@ -115,6 +116,9 @@ int main(int argc, char** argv) {
         const Context context(width, height);
         glyphshift::opengl::load_api(glyphshift::display::x11::glx_proc);
         glyphshift::opengl::Pipeline pipeline(glyphshift::opengl::Caps{});
+        // Frames of a sequence are 1/60 s apart, so exposure adaptation is
+        // reproducible.
+        pipeline.set_frame_interval(1.0 / 60);
         glyphshift::opengl::Target target;
         GLuint source = 0, output = 0, framebuffer = 0;
         glGenTextures(1, &source);

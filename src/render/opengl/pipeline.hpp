@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <chrono>
 #include <glyphshift/config/characters.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <memory>
@@ -24,6 +25,11 @@ struct Target {
     unsigned columns = 0, rows = 0, current = 0;
     bool history = false;
     Settings previous{};
+    // Automatic exposure: two 1x1 adapted luminances alternating with the
+    // grids, whether the other one holds last frame's value, and its time.
+    std::array<GLuint, 2> meters{}, meter_framebuffers{};
+    bool metered = false;
+    std::chrono::steady_clock::time_point meter_time{};
 
     // Deletes the grids; call with the owning context current.
     void release();
@@ -51,6 +57,12 @@ public:
         const Settings& settings,
         GLuint output);
 
+    // Frame interval used for exposure adaptation; 0 (the default) measures
+    // real time. The preview sets it for reproducible frame sequences.
+    void set_frame_interval(double seconds) noexcept {
+        frame_interval_ = seconds;
+    }
+
     // Draws editor geometry over `output` with alpha blending.
     void draw_editor(const ImDrawData& data, unsigned width, unsigned height, GLuint output);
 
@@ -61,7 +73,8 @@ public:
 private:
     struct Program;
     Caps caps_;
-    std::unique_ptr<Program> compose_, analysis_;
+    std::unique_ptr<Program> compose_, analysis_, meter_;
+    double frame_interval_ = 0;
     GLuint vao_ = 0, atlas_ = 0, ramp_ = 0;
     GLuint ui_program_ = 0, ui_vao_ = 0, ui_vertices_ = 0, ui_indices_ = 0, ui_font_ = 0;
     GLint ui_scale_ = -1, ui_translate_ = -1;
@@ -71,6 +84,8 @@ private:
 
     void update_atlas(const CharacterSelection& selection);
     void prepare(Target& target, unsigned columns, unsigned rows);
+    void prepare_meter(Target& target);
+    float adaptation(Target& target);
     void viewport(unsigned width, unsigned height) const;
     void bind_output(GLuint output) const;
 };

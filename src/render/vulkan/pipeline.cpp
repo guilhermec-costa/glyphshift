@@ -12,6 +12,7 @@
 #include "editor_vert_spv.hpp"
 #include "glyph_analysis_spv.hpp"
 #include "glyph_frag_spv.hpp"
+#include "glyph_meter_spv.hpp"
 #include "glyph_vert_spv.hpp"
 
 namespace glyphshift::vulkan {
@@ -60,6 +61,8 @@ Pipeline::Pipeline(const Resources& resources,
             VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
         if ((resources_.features(cell_format) & cell_features) != cell_features)
             throw std::runtime_error("glyph cell format cannot be rendered and sampled");
+        if ((resources_.features(meter_format) & cell_features) != cell_features)
+            throw std::runtime_error("exposure meter format cannot be rendered and sampled");
         resources_.texture(atlas_, VK_FORMAT_R32_SFLOAT, {integral_width, integral_height});
         resources_.texture(ramp_, VK_FORMAT_R8_UINT, {256, ramp_height});
         const auto font = editor::font();
@@ -73,9 +76,27 @@ Pipeline::Pipeline(const Resources& resources,
                 cell_format,
                 cell_extent_,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        for (auto& meter : meters_)
+            resources_.texture(meter,
+                meter_format,
+                {1, 1},
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         staging();
         descriptors(targets);
         pipelines();
+        for (unsigned i = 0; i < 2; ++i) {
+            auto meter_framebuffer =
+                info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+            meter_framebuffer.renderPass = meter_pass_;
+            meter_framebuffer.attachmentCount = 1;
+            meter_framebuffer.pAttachments = &meters_[i].view;
+            meter_framebuffer.width = meter_framebuffer.height = meter_framebuffer.layers = 1;
+            check(api_.CreateFramebuffer(device_,
+                      &meter_framebuffer,
+                      nullptr,
+                      &meter_framebuffers_[i]),
+                "create exposure meter framebuffer");
+        }
         for (unsigned i = 0; i < 2; ++i) {
             auto cell_framebuffer =
                 info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
@@ -134,17 +155,18 @@ void Pipeline::release() noexcept {
             api_.FreeMemory(device_, target.art_memory, nullptr);
     }
     targets_.clear();
-    for (auto* pipeline : {&ui_pipeline_, &pipeline_, &analysis_pipeline_}) {
+    for (auto* pipeline : {&ui_pipeline_, &pipeline_, &analysis_pipeline_, &meter_pipeline_}) {
         if (*pipeline)
             api_.DestroyPipeline(device_, *pipeline, nullptr);
         *pipeline = VK_NULL_HANDLE;
     }
-    for (auto& framebuffer : cell_framebuffers_) {
-        if (framebuffer)
-            api_.DestroyFramebuffer(device_, framebuffer, nullptr);
-        framebuffer = VK_NULL_HANDLE;
-    }
-    for (auto* pass : {&analysis_pass_, &render_pass_}) {
+    for (auto* framebuffers : {&cell_framebuffers_, &meter_framebuffers_})
+        for (auto& framebuffer : *framebuffers) {
+            if (framebuffer)
+                api_.DestroyFramebuffer(device_, framebuffer, nullptr);
+            framebuffer = VK_NULL_HANDLE;
+        }
+    for (auto* pass : {&analysis_pass_, &meter_pass_, &render_pass_}) {
         if (*pass)
             api_.DestroyRenderPass(device_, *pass, nullptr);
         *pass = VK_NULL_HANDLE;
@@ -166,6 +188,8 @@ void Pipeline::release() noexcept {
     resources_.destroy(font_);
     resources_.destroy(cells_[0]);
     resources_.destroy(cells_[1]);
+    resources_.destroy(meters_[0]);
+    resources_.destroy(meters_[1]);
     resources_.destroy(atlas_);
     resources_.destroy(ramp_);
     if (staging_)
@@ -191,14 +215,19 @@ void Pipeline::set_target(unsigned index, VkImageView source, VkImageView output
     check(api_.CreateFramebuffer(device_, &framebuffer, nullptr, &target.framebuffer),
         "create glyph framebuffer");
     for (unsigned set = 0; set < 2; ++set) {
-        const std::array<VkDescriptorImageInfo, 5> bindings{
+        // Set s is bound while grid s holds the previous frame: the meter then
+        // reads meters[s] and writes meters[s ^ 1], which analysis reads.
+        const std::array<VkDescriptorImageInfo, 8> bindings{
             {{sampler_, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {sampler_, cells_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+                {sampler_, cells_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {},
+                {sampler_, meters_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {sampler_, meters_[set ^ 1U].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
         const VkDescriptorBufferInfo art{target.art_buffer, 0, art_bytes};
-        std::array<VkWriteDescriptorSet, 6> writes{};
+        std::array<VkWriteDescriptorSet, 8> writes{};
         for (uint32_t binding = 0; binding < writes.size(); ++binding) {
             writes[binding] = info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
             writes[binding].dstSet = target.descriptors[set];
@@ -233,9 +262,9 @@ void Pipeline::record(VkCommandBuffer command,
         upload(command, font_, font_offset_, font_extent_);
         // Analysis statically reads the previous grid even when history is
         // unused, so both grids start in the layout its descriptor declares.
-        for (const auto& cells : cells_)
+        for (const auto* image : {&cells_[0], &cells_[1], &meters_[0], &meters_[1]})
             resources_.barrier(command,
-                cells.image,
+                image->image,
                 VK_IMAGE_LAYOUT_UNDEFINED,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 0,
@@ -267,6 +296,11 @@ void Pipeline::record(VkCommandBuffer command,
     auto art = art_parameters(settings);
     if (!history)
         art[art_stability] = 0;
+    const bool metering =
+        settings.enabled && settings.art.illustrated && settings.art.auto_exposure > 0;
+    if (metering)
+        art[art_adaptation] = adaptation();
+    metered_ = metering;
     std::memcpy(target.art_mapped, art.data(), art_bytes);
     api_.CmdPushConstants(command,
         layout_,
@@ -285,6 +319,20 @@ void Pipeline::record(VkCommandBuffer command,
             &target.descriptors[current_ ^ 1U],
             0,
             nullptr);
+        if (metering) {
+            auto meter = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
+            meter.renderPass = meter_pass_;
+            meter.framebuffer = meter_framebuffers_[current_];
+            meter.renderArea.extent = {1, 1};
+            api_.CmdBeginRenderPass(command, &meter, VK_SUBPASS_CONTENTS_INLINE);
+            api_.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, meter_pipeline_);
+            const VkViewport one{0, 0, 1, 1, 0, 1};
+            const VkRect2D pixel{{0, 0}, {1, 1}};
+            api_.CmdSetViewport(command, 0, 1, &one);
+            api_.CmdSetScissor(command, 0, 1, &pixel);
+            api_.CmdDraw(command, 3, 1, 0, 0);
+            api_.CmdEndRenderPass(command);
+        }
         auto analysis = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
         analysis.renderPass = analysis_pass_;
         analysis.framebuffer = cell_framebuffers_[current_];
@@ -362,8 +410,9 @@ void Pipeline::staging() {
 }
 
 void Pipeline::descriptors(unsigned targets) {
-    // Bindings 0..4: source, atlas, ramp, editor font and cell grid; 5: art.
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+    // Bindings 0..4: source, atlas, ramp, editor font and cell grid; 5: art;
+    // 6 and 7: exposure meters (the previous adapted value, then this frame's).
+    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i)
         bindings[i] = {i,
             i == 5 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -377,7 +426,7 @@ void Pipeline::descriptors(unsigned targets) {
     check(api_.CreateDescriptorSetLayout(device_, &layout, nullptr, &descriptor_layout_),
         "create glyph descriptor layout");
     const std::array<VkDescriptorPoolSize, 2> sizes{
-        {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(targets * 2 * 5)},
+        {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(targets * 2 * 7)},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(targets * 2)}}};
     auto pool = info<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
     pool.maxSets = static_cast<uint32_t>(targets * 2);
@@ -394,11 +443,12 @@ void Pipeline::descriptors(unsigned targets) {
 }
 
 void Pipeline::pipelines() {
-    const std::array<std::span<const uint32_t>, 5> code{shaders::glyph_vert_spv,
+    const std::array<std::span<const uint32_t>, 6> code{shaders::glyph_vert_spv,
         shaders::glyph_frag_spv,
         shaders::editor_vert_spv,
         shaders::editor_frag_spv,
-        shaders::glyph_analysis_spv};
+        shaders::glyph_analysis_spv,
+        shaders::glyph_meter_spv};
     for (unsigned i = 0; i < code.size(); ++i) {
         auto module = info<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
         module.codeSize = code[i].size_bytes();
@@ -489,7 +539,13 @@ void Pipeline::pipelines() {
     create.renderPass = render_pass_;
     check(api_.CreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &create, nullptr, &pipeline_),
         "create glyph graphics pipeline");
-    analysis_pipeline(create, stages[1]);
+    offscreen_pipeline(create,
+        stages[1],
+        cell_format,
+        modules_[4],
+        analysis_pass_,
+        analysis_pipeline_);
+    offscreen_pipeline(create, stages[1], meter_format, modules_[5], meter_pass_, meter_pipeline_);
     stages[0].module = modules_[2];
     stages[1].module = modules_[3];
     const VkVertexInputBindingDescription binding{0,
@@ -517,10 +573,14 @@ void Pipeline::pipelines() {
 // Per-cell analysis: one integer attachment, rewritten every target. The
 // dependencies order it after the previous frame's composition reads and
 // make its writes visible to this frame's composition.
-void Pipeline::analysis_pipeline(VkGraphicsPipelineCreateInfo create,
-    VkPipelineShaderStageCreateInfo& fragment) {
+void Pipeline::offscreen_pipeline(VkGraphicsPipelineCreateInfo create,
+    VkPipelineShaderStageCreateInfo& fragment,
+    VkFormat format,
+    VkShaderModule module,
+    VkRenderPass& pass_output,
+    VkPipeline& pipeline_output) {
     VkAttachmentDescription attachment{};
-    attachment.format = cell_format;
+    attachment.format = format;
     attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -555,19 +615,27 @@ void Pipeline::analysis_pipeline(VkGraphicsPipelineCreateInfo create,
     pass.pSubpasses = &subpass;
     pass.dependencyCount = static_cast<uint32_t>(dependencies.size());
     pass.pDependencies = dependencies.data();
-    check(api_.CreateRenderPass(device_, &pass, nullptr, &analysis_pass_),
-        "create glyph analysis render pass");
+    check(api_.CreateRenderPass(device_, &pass, nullptr, &pass_output),
+        "create glyph offscreen render pass");
     const auto compose = fragment.module;
-    fragment.module = modules_[4];
-    create.renderPass = analysis_pass_;
+    fragment.module = module;
+    create.renderPass = pass_output;
     check(api_.CreateGraphicsPipelines(device_,
               VK_NULL_HANDLE,
               1,
               &create,
               nullptr,
-              &analysis_pipeline_),
-        "create glyph analysis pipeline");
+              &pipeline_output),
+        "create glyph offscreen pipeline");
     fragment.module = compose;
+}
+
+// Share of the way toward this frame's measurement: 1 without a previous value.
+float Pipeline::adaptation() {
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = std::chrono::duration<float>(now - meter_time_).count();
+    meter_time_ = now;
+    return metered_ ? exposure_adaptation(seconds) : 1.0F;
 }
 
 // Host-visible and coherent, written while recording each frame: the

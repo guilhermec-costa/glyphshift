@@ -33,6 +33,17 @@ inline constexpr auto default_atlas = [] {
     return pixels;
 }();
 float tone_luminance(float value, float exposure, float contrast, float gamma) noexcept;
+// Automatic exposure, mirrored by the shader. The meter reports the scene's
+// geometric-mean luminance; the exposure factor moves it toward exposure_key
+// with the given strength (0..1), limited to 0.5..4.
+inline constexpr float exposure_key = .4F, exposure_floor = 1.0F / 255;
+inline constexpr float exposure_adaptation_seconds = .35F;
+float auto_exposure_factor(float mean, float strength) noexcept;
+// Share of the way from the adapted to the measured luminance after
+// `seconds` (exponential; 1 when there is no previous value).
+float exposure_adaptation(float seconds) noexcept;
+// Adapts in the logarithmic domain, as brightness is perceived.
+float adapt_luminance(float previous, float measured, float rate) noexcept;
 // Row-major 3x3 luminance neighborhood. -1 means fill, 0..3 are | - / \\.
 int contour_glyph(std::span<const float, 9> levels, float strength, float threshold) noexcept;
 // Row-major 5x5 luminance lattice at quarter-cell steps, spanning the cell and

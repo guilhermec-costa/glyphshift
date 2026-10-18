@@ -14,7 +14,7 @@ dark-paper styles.
 | [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 7×11 | [Image](../docs/presets/art-sepia.png) |
 | [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 8×12 | [Image](../docs/presets/art-newsprint.png) |
 | [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 8×12 | [Image](../docs/presets/art-chalk.png) |
-| [art-ink-edges.conf](art-ink-edges.conf) | Crisp white letters and line art on black; made for dark games. | 8×12 | [Image](../docs/presets/art-ink-edges.png) |
+| [art-ink-edges.conf](art-ink-edges.conf) | Crisp white letters and line art on black; automatic exposure for dark and bright games. | 8×12 | [Image](../docs/presets/art-ink-edges.png) |
 | [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | [Image](../docs/presets/art-blueprint.png) |
 | [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 7×11 | [Image](../docs/presets/art-midnight.png) |
 | [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 7×12 | [Image](../docs/presets/art-crt.png) |
@@ -25,8 +25,8 @@ dark-paper styles.
 These are GPU previews of the same [captured frame](../docs/illustration-original.png),
 not live gameplay tests. Ink & Edges is shown on a [darkened version](../docs/presets/dark-scene.png)
 of that frame (brightness, saturation and gamma reduced, plus a vignette), a
-synthetic stand-in for a dark game: its high exposure overexposes bright scenes,
-so lower **Exposure** for bright games. Dark-paper styles (Chalk, Blueprint, Midnight, CRT,
+synthetic stand-in for a dark game. Its **Auto exposure** lifts such scenes and
+tones bright ones down, so the same style works on both. Dark-paper styles (Chalk, Blueprint, Midnight, CRT,
 Digital rain) use low exposure or sparse ramps so a bright scene does not fill
 the screen with characters; raise **Exposure** for darker games.
 
