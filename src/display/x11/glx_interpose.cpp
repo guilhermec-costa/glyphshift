@@ -8,7 +8,7 @@
 #include <cstring>
 #include <glyphshift/config/settings.hpp>
 
-#include "renderer.hpp"
+#include "glx_renderer.hpp"
 
 namespace {
 using SwapBuffers = void (*)(Display*, GLXDrawable);
@@ -85,7 +85,7 @@ extern "C" __attribute__((visibility("default"))) void glXSwapBuffers(Display* d
     const SwapGuard guard;
     const auto& next = dispatch();
     if (next.swap && !toolkit_presenting)
-        glyphshift::opengl::render(display, drawable);
+        glyphshift::display::x11::render(display, drawable);
     errno = saved_errno;
     if (next.swap)
         next.swap(display, drawable);
@@ -114,7 +114,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_GL_SwapWindow(void* wi
     }();
     (void)announced;
     toolkit_presenting = true;
-    glyphshift::opengl::render_current();
+    glyphshift::display::x11::render_current();
     errno = saved_errno;
     const int result = next(window);
     toolkit_presenting = false;
@@ -177,7 +177,7 @@ extern "C" __attribute__((visibility("default"))) int SDL_RenderPresent(void* re
     (void)announced;
     toolkit_presenting = true;
     next.flush(renderer);
-    glyphshift::opengl::render_current();
+    glyphshift::display::x11::render_current();
     errno = saved_errno;
     const int result = next.present(renderer);
     toolkit_presenting = false;
@@ -192,7 +192,7 @@ extern "C" __attribute__((visibility("default"))) Bool glXMakeCurrent(Display* d
     if (!next)
         return False;
     const int saved_errno = errno;
-    glyphshift::opengl::before_context_change(context);
+    glyphshift::display::x11::before_context_change(context);
     errno = saved_errno;
     return next(display, drawable, context);
 }
@@ -206,7 +206,7 @@ extern "C" __attribute__((visibility("default"))) Bool glXMakeContextCurrent(Dis
     if (!next)
         return False;
     const int saved_errno = errno;
-    glyphshift::opengl::before_context_change(context);
+    glyphshift::display::x11::before_context_change(context);
     errno = saved_errno;
     return next(display, draw, read, context);
 }
@@ -218,7 +218,7 @@ extern "C" __attribute__((visibility("default"))) void glXDestroyContext(Display
     if (!next)
         return;
     const int saved_errno = errno;
-    glyphshift::opengl::destroy_context(context);
+    glyphshift::display::x11::destroy_context(context);
     errno = saved_errno;
     next(display, context);
 }

@@ -1,7 +1,6 @@
 #pragma once
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include <GL/glx.h>
 
 #define GLYPHSHIFT_GL_FUNCTIONS(X)                        \
     X(GenBuffers, glGenBuffers)                           \
@@ -93,14 +92,14 @@ struct GlApi {
     bool available = false;
 };
 
+// Resolves one GL entry point by name. The window system that owns the
+// context supplies it (GLX here; EGL or WGL elsewhere).
+using ProcLoader = void (*(*)(const char* name))();
+
+// Loads the table through `loader` on the first call; later calls return the
+// same table. The renderer never links a GL library.
+const GlApi& load_api(ProcLoader loader);
+
+// The table load_api() filled; before that, unavailable with null entries.
 const GlApi& api();
-
-struct GlxApi {
-    decltype(&glXGetCurrentContext) context = nullptr;
-    decltype(&glXGetCurrentDrawable) drawable = nullptr;
-    decltype(&glXGetCurrentDisplay) display = nullptr;
-    decltype(&glXQueryDrawable) query = nullptr;
-};
-
-const GlxApi& glx();
 }  // namespace glyphshift::opengl

@@ -1029,9 +1029,9 @@ removed incrementally, each step verified by the existing tests:
    Linux `platform::Fonts`. FreeType rasterization stays in core.
 3. Done: `src/config/presets.cpp` resolved `XDG_CONFIG_HOME`/`HOME`; it now
    uses the Linux `platform::Paths`.
-4. The OpenGL renderer library resolves GLX entry points (`gl_api.cpp`) and the
-   injected renderer is bound to GLX. GL function loading stays in the
-   renderer; GLX context handling moves to the X11 adapter.
+4. Done: the OpenGL renderer library resolved GLX entry points (`gl_api.cpp`)
+   and the injected renderer was bound to GLX. GL function loading stays in
+   the renderer; GLX context handling moved to the X11 adapter.
 5. `apps/overlay/main.cpp` contains Composite, GLX pixmap binding and overlay
    window code inline. They become the X11 `display::Capture` and
    `display::Overlay`; `tracker.cpp` is already separate. `daemon.cpp` splits
@@ -1111,6 +1111,33 @@ Verification: Debug 15/15 (the preset test now checks the default store's
 directory with an absolute `XDG_CONFIG_HOME`, a relative one falling back to
 `HOME/.config`, the profile from `GLYPHSHIFT_PROFILE` and from the executable,
 and refusal without either variable); Release 17/17.
+
+**Step 4, GLX (2026-10-18).** `src/render/opengl/` contains no GLX, X11 or
+`dlfcn` code:
+
+- The GL table is filled by `opengl::load_api(loader)` with the loader of the
+  window system that owns the context; `api()` returns it afterwards. GLX's
+  loader is `display::x11::glx_proc` (`src/display/x11/glx_loader.hpp`,
+  `glXGetProcAddressARB` through `RTLD_NEXT` as before); the overlay and
+  `glyphshift-preview` call `load_api` before creating the pipeline.
+- `opengl::InjectedRenderer` (`injected.{hpp,cpp}`, in the
+  `glyphshift_gl_pipeline` library with `GlState`) holds the GL part of the
+  injected renderer: capability probe, busy checks, back-buffer capture,
+  pipeline and editor drawing under state preservation, keyed by an opaque
+  drawable id.
+- `src/display/x11/glx_renderer.{hpp,cpp}` holds the GLX part: current
+  context/drawable queries, the per-`GLXContext` registry with its
+  bound/retired lifecycle, the editor frame and error handling. The GLX/SDL
+  interposition moved to `src/display/x11/glx_interpose.cpp` and the injected
+  module's export list to `src/display/x11/glx_exports.map`.
+
+Verification: Debug 15/15; Release 17/17 (the GLX smoke's procedure-address
+swaps, two contexts, hostile-state probes, GL debug output and shader-failure
+pass-through included). The exported symbols of all three libraries are
+unchanged, and `libglyphshift_gl.so` still links no GL library. Previews of
+Comic, Ink & Edges, `illustrated-ink.conf` and `classic.conf` were
+byte-identical to the previous build. Native SuperTux through the launcher
+was not rerun; its SDL hooks are covered by the interposer unit test.
 
 Code added since this list was written already follows the rules: the X11
 window-system layer exists as `src/display/x11/` (the tray, static library

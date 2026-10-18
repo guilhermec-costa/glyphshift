@@ -29,7 +29,7 @@ struct Target {
     void release();
 };
 
-// The glyph pipeline shared by every GL path: the injected GLX renderer, the
+// The glyph pipeline shared by every GL path: the injected renderer, the
 // capture overlay and the preview tool. It uses the run-time GL table, owns
 // programs, the glyph atlas and editor resources, and leaves GL state changed;
 // callers that must preserve host state wrap it (GlState).

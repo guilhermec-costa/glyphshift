@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "../src/display/x11/glx_loader.hpp"
 #include "../src/render/opengl/pipeline.hpp"
 
 namespace {
@@ -112,6 +113,7 @@ int main(int argc, char** argv) {
         require(!parsed.warnings, "Invalid settings");
         const auto& settings = parsed.value;
         const Context context(width, height);
+        glyphshift::opengl::load_api(glyphshift::display::x11::glx_proc);
         glyphshift::opengl::Pipeline pipeline(glyphshift::opengl::Caps{});
         glyphshift::opengl::Target target;
         GLuint source = 0, output = 0, framebuffer = 0;

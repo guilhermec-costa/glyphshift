@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "../../src/display/x11/editor_input.hpp"
+#include "../../src/display/x11/glx_loader.hpp"
 #include "../../src/render/opengl/gpu_timer.hpp"
 #include "../../src/render/opengl/pipeline.hpp"
 #include "daemon.hpp"
@@ -181,6 +182,7 @@ public:
 
         create_window(screen, target);
         create_context(screen);
+        glyphshift::opengl::load_api(glyphshift::display::x11::glx_proc);
         pipeline_ = std::make_unique<glyphshift::opengl::Pipeline>(glyphshift::opengl::Caps{});
         if (glyphshift::opengl::GpuTimer::requested())
             timer_ = std::make_unique<glyphshift::opengl::GpuTimer>("overlay");

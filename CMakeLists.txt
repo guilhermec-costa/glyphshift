@@ -73,9 +73,11 @@ target_include_directories(glyphshift_x11_input PRIVATE ${X11_INCLUDE_DIR})
 target_link_libraries(glyphshift_x11_input PUBLIC glyphshift_editor PRIVATE PkgConfig::XCB_INPUT)
 
 # Glyph pipeline shared by every GL path: the injected renderer, the capture
-# overlay and the preview tool. GL is resolved at run time (no libGL link).
+# overlay and the preview tool. GL is resolved at run time (no libGL link),
+# through the loader of the window system that owns the context.
 add_library(glyphshift_gl_pipeline STATIC src/render/opengl/gl_api.cpp
-    src/render/opengl/pipeline.cpp src/render/opengl/gpu_timer.cpp)
+    src/render/opengl/pipeline.cpp src/render/opengl/gpu_timer.cpp
+    src/render/opengl/gl_state.cpp src/render/opengl/injected.cpp)
 set_target_properties(glyphshift_gl_pipeline PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_definitions(glyphshift_gl_pipeline PUBLIC GL_GLEXT_PROTOTYPES)
@@ -83,9 +85,10 @@ target_include_directories(glyphshift_gl_pipeline SYSTEM PRIVATE third_party/img
 target_include_directories(glyphshift_gl_pipeline PUBLIC ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl_pipeline PUBLIC ${CMAKE_DL_LIBS} glyphshift_editor)
 
-add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
-    src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp
-    src/display/x11/xlib_interpose.cpp)
+# The injected OpenGL module (Linux): GLX and Xlib interposition (X11 window
+# system) around the renderer's InjectedRenderer.
+add_library(glyphshift_gl SHARED src/display/x11/glx_interpose.cpp
+    src/display/x11/glx_renderer.cpp src/display/x11/xlib_interpose.cpp)
 target_compile_definitions(glyphshift_gl PRIVATE GL_GLEXT_PROTOTYPES)
 set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
@@ -93,7 +96,7 @@ target_include_directories(glyphshift_gl SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core glyphshift_editor
     glyphshift_gl_pipeline glyphshift_x11_input Threads::Threads)
-set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/opengl/exports.map")
+set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/display/x11/glx_exports.map")
 target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
 set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
 add_library(glyphshift_vk SHARED
