@@ -363,6 +363,21 @@ void controls(State& state,
             }
             if (state.character_error[0])
                 ImGui::TextWrapped("%s", state.character_error.data());
+            // Rebuilding the atlas is a selection change, so commit on release
+            // rather than on every dragged frame.
+            ImGui::SetNextItemWidth(150);
+            ImGui::SliderFloat("Glyph weight",
+                &state.draft.weight,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                state.settings.glyphs.weight = state.draft.weight;
+                state.draft_base.weight = state.draft.weight;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Thicker strokes for font characters; applies on release.");
         }
         if (ImGui::Button("Reset to defaults"))
             state.settings = {};

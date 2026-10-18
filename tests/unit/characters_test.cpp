@@ -21,6 +21,20 @@ std::uint64_t ink(const glyphshift::CharacterAtlas& atlas, unsigned g) {
                                 (g % 16) * 16 + x];
     return sum;
 }
+
+// Ink-weighted mean row of a 16x24 tile; 0 is the top of the cell.
+float ink_row(const glyphshift::CharacterAtlas& atlas, unsigned g) {
+    float sum = 0, weighted = 0;
+    for (unsigned y = 0; y < 24; ++y)
+        for (unsigned x = 0; x < 16; ++x) {
+            const float value =
+                atlas.pixels[((g / 16) * 24 + y) * glyphshift::character_atlas_width +
+                             (g % 16) * 16 + x];
+            sum += value;
+            weighted += value * static_cast<float>(y);
+        }
+    return sum > 0 ? weighted / sum : -1;
+}
 }  // namespace
 
 int main() {
@@ -77,8 +91,25 @@ int main() {
         atlas = build_character_atlas(selection);
         check(atlas.count == 95 && !atlas.diagnostic[0],
             "complete printable ASCII from system font");
+        // ASCII tiles are indexed by codepoint - 32.
+        const auto row = [&](const CharacterAtlas& a, char code) {
+            return ink_row(a, static_cast<unsigned>(code - 32));
+        };
+        check(row(atlas, '_') > row(atlas, '-') + 3 && row(atlas, '.') > row(atlas, '-') + 3,
+            "underscore and period sit on the baseline, below the hyphen");
+        check(row(atlas, '\'') < row(atlas, '-') - 3 && row(atlas, '`') < row(atlas, '.') - 6,
+            "apostrophe and grave stay near the top of the cell");
+        check(row(atlas, ',') > row(atlas, '-') && row(atlas, '=') > row(atlas, '^'),
+            "punctuation keeps its typographic position");
+        selection.weight = 1;
+        const auto heavy = build_character_atlas(selection);
+        check(!heavy.diagnostic[0] && ink(heavy, '@' - 32) > ink(atlas, '@' - 32) * 5 / 4 &&
+                  ink(heavy, 0) == 0,
+            "glyph weight thickens font strokes without inking space");
+        selection.weight = 0;
         selection.set = 6;
         std::strcpy(selection.text.data(), " 01ABCé#\\\"");
+        selection.weight = .35F;
         const auto serialized = serialize_settings(Settings{8, 12, true, true, .45F, selection});
         const auto parsed = parse_settings(serialized);
         check(!parsed.warnings && parsed.value.glyphs == selection,
@@ -101,7 +132,10 @@ int main() {
                  "characters=\"unterminated",
                  "glyph_font=relative.ttf",
                  "glyph_order=bad",
-                 "glyph_reverse=bad"}) {
+                 "glyph_reverse=bad",
+                 "glyph_weight=1.5",
+                 "glyph_weight=-0.1",
+                 "glyph_weight=nan"}) {
             const auto bad = parse_settings(value);
             check((bad.warnings & invalid_characters) && bad.value.glyphs == CharacterSelection{},
                 "invalid selection safely defaults");

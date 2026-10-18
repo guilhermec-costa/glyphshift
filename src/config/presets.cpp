@@ -176,6 +176,7 @@ std::string serialize_settings(const Settings& s) {
            "\nglyph_font=" + quoted(s.glyphs.font.data()) +
            "\nglyph_order=" + (s.glyphs.density_order ? "density" : "manual") +
            "\nglyph_reverse=" + (s.glyphs.reverse ? "true" : "false") +
+           "\nglyph_weight=" + decimal(s.glyphs.weight) +
            "\nedge_characters=" + quoted(s.glyphs.edges.data()) +
            "\nrender_style=" + (s.art.illustrated ? "illustrated" : "classic") +
            "\ntone_exposure=" + decimal(s.art.exposure) +

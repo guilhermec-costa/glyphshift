@@ -1,6 +1,8 @@
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_ADVANCES_H
+#include FT_OUTLINE_H
 
 #include <algorithm>
 #include <cmath>
@@ -55,7 +57,8 @@ bool decode_characters(std::string_view text, Codepoints& output) noexcept {
 
 bool valid_characters(const CharacterSelection& selection) noexcept {
     if (selection.set >= character_sets.size() || selection.text.back() || selection.font.back() ||
-        selection.edges.back())
+        selection.edges.back() || !std::isfinite(selection.weight) || selection.weight < 0 ||
+        selection.weight > 1)
         return false;
     Codepoints points;
     if (selection.text[0] || selection.set == 6)
@@ -161,26 +164,49 @@ std::string default_font() {
         FcConfigDestroy);
     if (!config)
         throw std::runtime_error("cannot initialize font discovery");
-    std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> pattern(FcPatternCreate(),
-        FcPatternDestroy);
-    if (!pattern)
-        throw std::runtime_error("cannot allocate font query");
-    FcPatternAddString(pattern.get(), FC_FAMILY, reinterpret_cast<const FcChar8*>("monospace"));
-    FcConfigSubstitute(config.get(), pattern.get(), FcMatchPattern);
-    FcDefaultSubstitute(pattern.get());
-    FcResult result;
-    std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> match(
-        FcFontMatch(config.get(), pattern.get(), &result),
-        FcPatternDestroy);
-    FcChar8* path = nullptr;
-    if (!match || FcPatternGetString(match.get(), FC_FILE, 0, &path) != FcResultMatch)
-        throw std::runtime_error("no monospace font found");
-    return reinterpret_cast<const char*>(path);
+    // The generic monospace alias often resolves to thin Courier clones whose
+    // hairlines vanish at cell scale. Prefer sturdy, distinct-punctuation
+    // families in bold, then fall back to whatever monospace is installed.
+    constexpr const char* families[] = {"DejaVu Sans Mono",
+        "Hack",
+        "Liberation Mono",
+        "Noto Sans Mono",
+        "Cascadia Mono",
+        "JetBrains Mono",
+        "Source Code Pro",
+        "monospace"};
+    for (const char* family : families) {
+        std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> pattern(FcPatternCreate(),
+            FcPatternDestroy);
+        if (!pattern)
+            throw std::runtime_error("cannot allocate font query");
+        FcPatternAddString(pattern.get(), FC_FAMILY, reinterpret_cast<const FcChar8*>(family));
+        FcPatternAddInteger(pattern.get(), FC_WEIGHT, FC_WEIGHT_BOLD);
+        FcConfigSubstitute(config.get(), pattern.get(), FcMatchPattern);
+        FcDefaultSubstitute(pattern.get());
+        FcResult result;
+        std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> match(
+            FcFontMatch(config.get(), pattern.get(), &result),
+            FcPatternDestroy);
+        FcChar8* path = nullptr;
+        FcChar8* found = nullptr;
+        if (!match || FcPatternGetString(match.get(), FC_FILE, 0, &path) != FcResultMatch)
+            continue;
+        const bool generic = std::strcmp(family, "monospace") == 0;
+        if (generic ||
+            (FcPatternGetString(match.get(), FC_FAMILY, 0, &found) == FcResultMatch &&
+                FcStrCmpIgnoreCase(found, reinterpret_cast<const FcChar8*>(family)) == 0))
+            return reinterpret_cast<const char*>(path);
+    }
+    throw std::runtime_error("no monospace font found");
 }
 
 struct Font {
     FT_Library library = nullptr;
     FT_Face face = nullptr;
+    // Shared tile metrics in pixels: every glyph sits on one baseline, so
+    // `_`, `-`, `.` and `'` keep their position inside the cell.
+    float advance = 16, baseline = 18;
 
     ~Font() {
         if (face)
@@ -207,21 +233,74 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
                 const std::string path = selection.font[0] ? selection.font.data() : default_font();
                 if (FT_Init_FreeType(&font.library) ||
                     FT_New_Face(font.library, path.c_str(), 0, &font.face) ||
-                    FT_Select_Charmap(font.face, FT_ENCODING_UNICODE) ||
-                    FT_Set_Pixel_Sizes(font.face, 0, 20))
+                    FT_Select_Charmap(font.face, FT_ENCODING_UNICODE))
+                    throw std::runtime_error("cannot load Unicode font; using classic");
+                FT_Fixed advance = 0;
+                const auto* face = font.face;
+                const auto line = static_cast<float>(face->ascender - face->descender);
+                if (FT_IS_SCALABLE(face) && line > 0 &&
+                    !FT_Get_Advance(font.face,
+                        FT_Get_Char_Index(font.face, '0'),
+                        FT_LOAD_NO_SCALE,
+                        &advance) &&
+                    advance > 0) {
+                    // Fill the 16x24 tile: the em scale where either the
+                    // monospace advance or the ascender..descender line fits.
+                    const float units = static_cast<float>(face->units_per_EM);
+                    const float pixels =
+                        std::min(16 * units / static_cast<float>(advance), 24 * units / line);
+                    if (FT_Set_Char_Size(font.face, 0, std::lround(pixels * 64), 72, 72))
+                        throw std::runtime_error("cannot scale font; using classic");
+                    font.advance = static_cast<float>(advance) * pixels / units;
+                    const float ascender = static_cast<float>(face->ascender) * pixels / units;
+                    font.baseline = (24 - line * pixels / units) / 2 + ascender;
+                } else if (FT_Set_Pixel_Sizes(font.face, 0, 20))
                     throw std::runtime_error("cannot load Unicode font; using classic");
             }
             if (!FT_Get_Char_Index(font.face, code) ||
-                FT_Load_Char(font.face, code, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL)) {
+                FT_Load_Char(font.face, code, FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_LIGHT)) {
                 char message[128];
                 std::snprintf(message, sizeof(message), "font has no U+%04X; using classic", code);
                 throw std::runtime_error(message);
             }
-            const auto& bitmap = font.face->glyph->bitmap;
+            auto* slot = font.face->glyph;
+            if (slot->format == FT_GLYPH_FORMAT_OUTLINE && selection.weight > 0) {
+                // Up to two extra tile pixels: one pixel at the common 8x12 cell.
+                const auto strength = static_cast<FT_Pos>(std::lround(selection.weight * 2 * 64));
+                FT_Outline_EmboldenXY(&slot->outline, strength, strength);
+                FT_Outline_Translate(&slot->outline, -strength / 2, -strength / 2);
+            }
+            if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))
+                throw std::runtime_error("cannot rasterize font glyph; using classic");
+            const auto& bitmap = slot->bitmap;
             if (!bitmap.width || !bitmap.rows)
                 return;
             if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
                 throw std::runtime_error("font needs grayscale outlines; using classic");
+            const auto pitch =
+                static_cast<unsigned>(bitmap.pitch >= 0 ? bitmap.pitch : -bitmap.pitch);
+            if (bitmap.width <= 16 && bitmap.rows <= 24) {
+                // Baseline placement, nudged inside the tile only when a
+                // glyph's ink overhangs the cell.
+                const int left = std::clamp(
+                    static_cast<int>(std::lround((16 - font.advance) / 2)) + slot->bitmap_left,
+                    0,
+                    16 - static_cast<int>(bitmap.width));
+                const int top =
+                    std::clamp(static_cast<int>(std::lround(font.baseline)) - slot->bitmap_top,
+                        0,
+                        24 - static_cast<int>(bitmap.rows));
+                for (unsigned y = 0; y < bitmap.rows; ++y)
+                    for (unsigned x = 0; x < bitmap.width; ++x)
+                        pixel(atlas,
+                            g,
+                            static_cast<unsigned>(left) + x,
+                            static_cast<unsigned>(top) + y,
+                            bitmap
+                                .buffer[(bitmap.pitch >= 0 ? y : bitmap.rows - 1 - y) * pitch + x]);
+                return;
+            }
+            // Wider-than-cell glyphs (for example CJK) are scaled to fit.
             const float scale = std::min({1.0F,
                 14.0F / static_cast<float>(bitmap.width),
                 22.0F / static_cast<float>(bitmap.rows)});
@@ -236,8 +315,6 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
                     const unsigned sx = std::min(bitmap.width - 1,
                         static_cast<unsigned>(static_cast<float>(x) / scale));
                     const auto row = bitmap.pitch >= 0 ? sy : bitmap.rows - 1 - sy;
-                    const auto pitch =
-                        static_cast<unsigned>(bitmap.pitch >= 0 ? bitmap.pitch : -bitmap.pitch);
                     pixel(atlas,
                         g,
                         (16 - width) / 2 + x,

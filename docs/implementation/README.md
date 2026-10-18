@@ -28,8 +28,16 @@ Only implement work explicitly requested by the user.
 
 ### Rendering and editor controls
 
+- [ ] Art direction phase 2: split the illustrated pass into a cell-resolution
+  analysis pass (true cell averages, shape matching against every selected
+  glyph, a calm tonal ramp for flat areas) and a cheap glyph composition pass,
+  on GLX, Vulkan and the preview tool. See
+  [typographic glyph atlas](#typographic-glyph-atlas-art-direction-phase-1).
+- [ ] Art direction phase 3: automatic ink/paper polarity per cell, saturation,
+  optional phosphor glow and recalibrated included styles.
 - [ ] Add configurable temporal glyph stability/hysteresis. The current
   illustrated renderer filters spatially and has no previous-frame glyph state.
+  The phase 2 cell texture is intended to carry the previous frame's choice.
 - [ ] Add explicit aspect correction beyond independent cell dimensions.
 - [ ] Add saturation control; exposure, contrast and gamma already exist.
 - [ ] Validate visual quality and motion across longer gameplay sessions and
@@ -59,13 +67,84 @@ Only implement work explicitly requested by the user.
 The original exclusions remain in force: no multiplayer/anti-cheat support,
 anti-cheat evasion, privileged targets or system-wide injection.
 
+## Typographic glyph atlas (art direction, phase 1)
+
+The user reported that full-glyph output read as visual noise rather than
+ASCII art. Inspection of the atlas found two causes independent of the shader:
+
+- Font glyphs were centered by their own bounding box, so `.`, `_`, `-`, `,`,
+  `` ` `` and `'` all landed in the middle of the cell. `_` and `-` were
+  identical, and characters could not express a floor, ceiling or outline side.
+- The generic `monospace` alias resolved to Nimbus Mono PS (a thin Courier
+  clone) at a fixed 20 px. Its 1 px strokes became half-intensity hairlines at
+  8×12 cells.
+
+Font glyphs now share one set of tile metrics. The face is scaled so the
+monospace advance of `0` fits the 16-pixel tile width, or its ascender..descender
+line fits the 24-pixel height, whichever is smaller. Every glyph is placed on
+that common baseline and centered by advance, not by its ink. Ink that
+overhangs the tile is nudged inside; only glyphs larger than the tile (for
+example wide CJK) keep the earlier scale-to-fit placement. Non-scalable faces
+keep the 20-pixel size with baseline placement.
+
+With an empty `glyph_font`, discovery now asks Fontconfig for a bold face of
+DejaVu Sans Mono, Hack, Liberation Mono, Noto Sans Mono, Cascadia Mono,
+JetBrains Mono or Source Code Pro, in that order. A candidate is accepted only
+when the match reports that family. Otherwise the system `monospace` alias is
+used in bold. An explicit `glyph_font` path is unaffected.
+
+A new `glyph_weight` setting (0..1, default 0) thickens outline font glyphs by
+up to two tile pixels, about one pixel at an 8×12 cell. It belongs to the
+character selection, so changing it rebuilds the atlas like other character
+changes and never per frame. The editor's **Characters and font → Glyph weight**
+slider commits on release instead of rebuilding while dragging. The slider sits
+after **Apply characters**, so existing editor test coordinates are unchanged.
+The setting is parsed, validated and serialized in named presets. Procedural
+blocks, Braille and the built-in classic bitmap ignore it.
+
+No shader, backend, lookup-texture layout or GPU resource changed. Coverage
+calibration, density ordering and shape lookups are recomputed from the new
+masks as before, so saved presets with font sets now render with the new
+glyphs. The [preset gallery](../../presets/README.md) images were regenerated
+with `glyphshift-preview` from the same captured frame.
+
+### Phase 1 verification
+
+Verified on 2026-10-17 on the existing Arch/X11/i3/NVIDIA RTX 3060 Ti setup.
+With no DejaVu installed, discovery selected Hack Bold; the atlas was dumped
+and inspected. Debug built without compiler warnings and passed all 12 CPU
+tests. The character test now checks that `_` and `.` sit below `-`, `'` and
+`` ` `` sit near the top, punctuation keeps its order, and weight 1 adds
+over 25% ink to `@` without inking space. Invalid weights are rejected.
+Preset tests round-trip a nondefault weight. The Debug graphics smoke passed on
+GLX (including the analytic area/silhouette oracle) and Vulkan with Khronos
+core/synchronization validation (72 seconds). The focused editor/XTest tests
+and SuperTux were not run for this change; the new slider was not exercised
+through real input.
+
+```bash
+cmake --build --preset dev
+setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset dev
+setpriv --inh-caps=-all --ambient-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 cmake --build --preset dev --target smoke
+python3 tools/format.py --check
+git diff --check
+```
+
+A scratch two-pass prototype, outside the repository, rendered the same
+SuperTux frame with per-cell shape matching over this atlas. Silhouettes and
+outlines became oriented characters (`|`, `_`, `^`, `T`) instead of a pixel
+mosaic. That result motivates phase 2; it is not a shipped renderer.
+
 ## Ready-to-use style collection
 
 Six complete live configs are available in the [preset gallery](../../presets/README.md):
 Newsprint, Green terminal, Blueprint, Amber Braille, Mosaic and Soft color.
 Five use pure glyph output; Soft color deliberately blends original detail at
 strength 0.65. They use existing renderer controls and do not add a milestone,
-backend, installation step or automatic dropdown registration.
+backend or installation step. A later change embeds them at build time and lists
+them under **Insert → Preset → Included styles**.
 
 Each `presets/art-*.conf` was passed to the current Debug `glyphshift-preview`
 against the same captured SuperTux frame. All six parsed without warnings,
@@ -1028,7 +1107,9 @@ fallback. Named presets serialize the selection, text, font path, ordering and
 reverse flag, including correct quoting.
 
 With an empty glyph_font, the classic set retains its original bitmap; other
-text glyphs use the system monospace face discovered through Fontconfig.
+text glyphs use a bold monospace face discovered through Fontconfig (see the
+[typographic atlas](#typographic-glyph-atlas-art-direction-phase-1) for the
+family preference and baseline placement).
 A nonempty glyph_font must be an absolute path to a local Unicode TTF/OTF
 font; paths containing spaces or `#` should be quoted. Blocks U+2580..U+259F
 and Braille are generated internally, including when used in a custom sequence,

@@ -216,9 +216,13 @@ In either native fixture or the tested SuperTux/Proton setup, open
 classic, ASCII, alphanumeric, binary, blocks, Braille, or custom. For custom,
 enter the sequence in dark-to-light order or enable **Sort by ink density**.
 Use **Reverse dark / light** to invert the order. Optionally enter an absolute
-TTF/OTF path; empty uses system monospace (classic keeps its built-in bitmap).
+TTF/OTF path; empty prefers a bold DejaVu Sans Mono, Hack or similar face, then
+the system monospace (classic keeps its built-in bitmap).
 Press **Apply characters**, then **Save preset** if you want to keep the result.
-Changing the draft alone does not apply or save it.
+Changing the draft alone does not apply or save it. **Glyph weight**, below the
+Apply button, thickens font strokes and applies when you release the slider.
+In a font set, check that `_` and `.` sit on the cell floor while `'` and
+`` ` `` stay near the top.
 
 For SuperTux, add these keys to the file already used by GLYPHSHIFT_CONFIG:
 
@@ -228,6 +232,7 @@ characters=" .01ABCé░▒▓█"
 glyph_order=density
 glyph_reverse=false
 glyph_font=""
+glyph_weight=0.3
 ```
 
 Save the file while the game is running. Try character_set values `ascii`,

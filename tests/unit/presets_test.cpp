@@ -99,6 +99,7 @@ int main() {
         std::strcpy(custom.glyphs.text.data(), " ░▒▓█#\\\"");
         custom.glyphs.density_order = true;
         custom.glyphs.reverse = true;
+        custom.glyphs.weight = .4F;
         check(first.save("characters", custom, error) && first.load("characters", actual, error) &&
                   actual == custom,
             "custom Unicode selection persists");

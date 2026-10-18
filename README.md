@@ -20,7 +20,9 @@ effect running in the game through Proton.*
 - **Local shape matching:** select glyphs by the light/dark arrangement inside
   a cell to retain small silhouettes, with scene-colored paper to avoid black gaps.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
-  or up to 256 custom Unicode characters, with local TTF/OTF fonts.
+  or up to 256 custom Unicode characters, with local TTF/OTF fonts. Characters
+  keep their typographic position (`_` on the floor, `'` at the top) and an
+  adjustable stroke weight.
 - **Live art direction:** independent cell dimensions, source color or
   monochrome, ink and paper colors, exposure, contrast, gamma and contour controls.
 - **Adjustable intensity:** blend scene detail with glyphs or use strength 1

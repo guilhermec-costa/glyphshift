@@ -14,6 +14,8 @@ struct CharacterSelection {
     std::array<char, 1025> edges{"|-/\\"};
     bool density_order = false;
     bool reverse = false;
+    // Extra outline stroke for font glyphs, 0..1 (0 keeps the face's own weight).
+    float weight = 0;
     bool operator==(const CharacterSelection&) const = default;
 };
 

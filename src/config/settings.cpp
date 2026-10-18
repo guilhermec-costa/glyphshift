@@ -294,6 +294,9 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
         } else if (key == "glyph_font") {
             if (!string_value(value, parsed.value.glyphs.font))
                 parsed.warnings |= invalid_characters;
+        } else if (key == "glyph_weight") {
+            if (!number(value, parsed.value.glyphs.weight, 0, 1))
+                parsed.warnings |= invalid_characters;
         } else if (key == "glyph_order") {
             explicit_order = true;
             if (value == "density")
