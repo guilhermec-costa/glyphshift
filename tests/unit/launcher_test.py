@@ -48,6 +48,12 @@ assert auto.startswith('GLYPHSHIFT_PROFILE=') and len(auto.splitlines()[0].split
 for option in ['--profile','--preset']:
     run(option,'../escape','--',probe,expected=2)
     run(option,expected=2)
+# The target never inherits capability sets. When this test itself runs with
+# inheritable-only capabilities (as some desktop sessions grant), this also
+# checks that the launcher clears them instead of refusing.
+caps = run('--', probe, '--caps').stdout.split()
+assert caps == ['CapInh:', '0000000000000000', 'CapPrm:', '0000000000000000',
+    'CapEff:', '0000000000000000', 'CapAmb:', '0000000000000000'], caps
 run('--', probe, '--exit', expected=37)
 run('--', probe, '--signal', expected=-signal.SIGTERM)
 assert 'cannot find' in run('--', 'glyphshift-no-such-target-94715', expected=127).stderr

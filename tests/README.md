@@ -267,10 +267,12 @@ missing-font fallback on both APIs.
 
 ### `refusing to launch from a process with capabilities`
 
-Use the `setpriv --inh-caps=-all --ambient-caps=-all --` prefix shown in this
-guide. It removes inheritable and ambient capabilities only for the child
-execution, without changing the terminal or system settings. The launcher still
-refuses root and privileged processes; do not use sudo to address this error.
+The launcher now clears inheritable-only capabilities itself (for example the
+`cap_wake_alarm` some desktop sessions grant), so the `setpriv` prefix in this
+guide is no longer required for that case; it remains harmless. This error now
+means the shell has effective or permitted capabilities, which are real
+privileges and are always refused. Check with `grep Cap /proc/self/status`,
+start the launcher from an ordinary user shell, and do not use sudo.
 
 ### Display unavailable
 

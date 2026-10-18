@@ -2,7 +2,9 @@
 
 #include <csignal>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <string>
 #include <string_view>
 
 int main(int argc, char** argv) {
@@ -12,6 +14,14 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string_view(argv[1]) == "--exit")
         return 37;
+    if (argc == 2 && std::string_view(argv[1]) == "--caps") {
+        std::ifstream status("/proc/self/status");
+        for (std::string line; std::getline(status, line);)
+            if (line.starts_with("CapInh:") || line.starts_with("CapPrm:") ||
+                line.starts_with("CapEff:") || line.starts_with("CapAmb:"))
+                std::cout << line << '\n';
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--profile-env") {
         for (const char* name : {"GLYPHSHIFT_PROFILE", "GLYPHSHIFT_PRESET"}) {
             const char* value = std::getenv(name);

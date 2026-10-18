@@ -1102,8 +1102,15 @@ scripts, static executables, and other binary architectures are rejected.
 The module/build directory must not contain whitespace or colons because
 `LD_PRELOAD` uses them as separators. Target paths and arguments may contain
 spaces. Run as a normal user: root, mismatched real/effective IDs, secure
-execution, process capabilities, setuid/setgid targets, and targets with file
-capabilities are refused. The target runs with Linux `no_new_privs`, preventing
+execution, effective or permitted process capabilities, setuid/setgid targets,
+and targets with file capabilities are refused. Inheritable-only capabilities
+(some desktop sessions grant `cap_wake_alarm`) grant nothing to a target
+without file capabilities under `no_new_privs`; the launcher clears them with
+`capset` instead of refusing, after the user hit that refusal launching
+SuperTux. The launcher test checks that the target's inheritable, permitted,
+effective and ambient sets are all empty; on this machine its own shell carries
+an inheritable capability, so that path ran for real and CTest passed 12/12
+without the `setpriv` prefix. The target runs with Linux `no_new_privs`, preventing
 it and its descendants from acquiring privileges on later execs. Privilege
 metadata is inspected on the same open file that is executed. This tool is
 for local/offline applications; it does not detect whether a game is online.

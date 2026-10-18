@@ -56,10 +56,22 @@ void check_launcher_privileges() {
     __user_cap_data_struct caps[2]{};
     if (syscall(SYS_capget, &header, caps) != 0)
         throw system_error("capget");
+    // Effective or permitted capabilities are real privileges: refuse. Ambient
+    // capabilities are always a subset of permitted ones, so they are covered.
+    bool inheritable = false;
     for (const auto& cap : caps) {
-        if (cap.effective || cap.permitted || cap.inheritable) {
+        if (cap.effective || cap.permitted)
             throw std::runtime_error("refusing to launch from a process with capabilities");
-        }
+        inheritable |= cap.inheritable != 0;
+    }
+    // Inheritable-only capabilities (some desktop sessions set cap_wake_alarm)
+    // grant nothing to a target without file capabilities under no_new_privs,
+    // but clear them anyway so the game starts with no capability sets at all.
+    if (inheritable) {
+        for (auto& cap : caps)
+            cap.inheritable = 0;
+        if (syscall(SYS_capset, &header, caps) != 0)
+            throw system_error("clear inheritable capabilities");
     }
 }
 

@@ -101,8 +101,9 @@ GLYPHSHIFT_CONFIG="$PWD/presets/illustrated.conf" \
 ```
 
 Replace `/path/to/game` with its executable. Run as a regular user, without
-`sudo`. If the launcher reports `refusing to launch from a process with
-capabilities`, use the capability-dropping prefix shown in the
+`sudo`. Inheritable-only capabilities that some desktop sessions grant are
+cleared automatically; a process with real (effective or permitted)
+capabilities is refused, as described in the
 [test guide](tests/README.md#refusing-to-launch-from-a-process-with-capabilities).
 That guide also contains the complete **offline SuperTux/GE-Proton command**
 for the prepared local test environment; Steam is not required for that test.
