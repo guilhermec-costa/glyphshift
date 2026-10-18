@@ -37,7 +37,8 @@ add_library(glyphshift_editor SHARED src/editor/editor.cpp src/editor/x11_input.
 # Changes to a config trigger reconfiguration; the .conf files remain the source.
 set(BUILTIN_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/presets")
 file(MAKE_DIRECTORY "${BUILTIN_GENERATED}")
-foreach(style newsprint green-terminal blueprint amber-braille mosaic soft-color)
+foreach(style newsprint green-terminal blueprint amber-braille mosaic soft-color comic sepia chalk
+    midnight crt digital-rain)
     set(preset_source "${CMAKE_CURRENT_SOURCE_DIR}/presets/art-${style}.conf")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${preset_source}")
     file(READ "${preset_source}" PRESET_CONTENT)

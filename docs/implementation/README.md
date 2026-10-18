@@ -428,11 +428,21 @@ strength 0.65. They use existing renderer controls and do not add a milestone,
 backend or installation step. A later change embeds them at build time and lists
 them under **Insert → Preset → Included styles**.
 
-Six more config-only styles (Comic, Sepia, Chalk, Midnight, CRT, Digital rain)
+Six more included styles (Comic, Sepia, Chalk, Midnight, CRT, Digital rain)
 use the phase 1–4 controls. They were calibrated with `glyphshift-preview` on
-the same SuperTux frame and are documented in the preset gallery. They are not
-embedded in the overlay menu, because the focused editor test clicks the
-included-style rows by position and was not rerun.
+the same SuperTux frame and are embedded and listed like the first six. The
+preset combo now uses ImGui's largest popup height. The focused `--presets`
+editor test selects all twelve rows and checks distinct live images, but saves
+personal copies of only the first and last styles, so the saved section stays
+inside the popup without scrolling. On 2026-10-17 that focused test passed on the
+GLX fixture (Debug, NVIDIA/X11): all twelve rows applied with distinct live
+images, saved copies reloaded, and hotkeys, resize, focus loss and clean exit
+passed. Vulkan and SuperTux were not rerun for this menu change.
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev --application glx-fixture \
+  --presets --output /tmp/glyphshift-editor-presets
+```
 
 Each `presets/art-*.conf` was passed to the current Debug `glyphshift-preview`
 against the same captured SuperTux frame. All six parsed without warnings,

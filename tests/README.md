@@ -130,7 +130,7 @@ For dark ink on warm paper, change the config path to
 `$PWD/presets/illustrated-blocks.conf`. To return to the earlier classic
 rendering example, use `$PWD/presets/readable.conf`.
 
-For six additional finished styles, see the [preset gallery](../presets/README.md).
+For twelve finished styles, see the [preset gallery](../presets/README.md).
 After restarting through the rebuilt launcher, use **Insert → Preset → Included
 styles** to switch them directly over the running game. Hover a style for its
 description. **Save preset** stores edits as a personal copy; saved names remain
@@ -157,7 +157,7 @@ cp presets/art-mosaic.conf /tmp/glyphshift-style.conf
 cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
 ```
 
-These copies update only the temporary live config. The six included styles
+These copies update only the temporary live config. The twelve included styles
 already appear in the dropdown; **Save preset** adds your own named variation.
 
 The wrapper blocks IPv4/IPv6 socket creation in the process and its children,

@@ -22,9 +22,9 @@ omits most surface detail; Mosaic deliberately uses blocks instead of letters.
 
 ## More styles
 
-Six more configs use the newer ink, paper wash, glow and outline-glyph controls.
-They are config files only: load them with `GLYPHSHIFT_CONFIG` (below), then
-**Save preset** to keep one in the overlay's **Saved presets**.
+Six more included styles use the newer ink, paper wash, glow and outline-glyph
+controls. Like the first six, they appear under **Insert → Preset → Included
+styles** and can also be loaded from these files.
 
 | Config | Style | Cell size |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ cp presets/art-sepia.conf /tmp/glyphshift-style.conf
 ## Choose directly in the overlay
 
 Restart the application through the rebuilt launcher to load the updated shared
-libraries. Press **Insert**, open **Preset**, and choose any of the six names
+libraries. Press **Insert**, open **Preset**, and choose any of the twelve names
 under **Included styles**. The running scene updates immediately; hover a name
 for a short description. Your own saved presets appear under **Saved presets**.
 No file copying or additional installation is required.

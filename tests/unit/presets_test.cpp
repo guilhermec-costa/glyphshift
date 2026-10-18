@@ -27,8 +27,8 @@ int main() {
         PresetStore first(path, "game-a"), other(path, "game-b");
         std::string error;
         Settings actual;
-        check(builtin_presets().size() == 6 && !builtin_preset("not-included"),
-            "six included styles with explicit lookup");
+        check(builtin_presets().size() == 12 && !builtin_preset("not-included"),
+            "twelve included styles with explicit lookup");
         for (const auto& preset : builtin_presets()) {
             check(first.load(preset.name, actual, error) && error.empty(),
                 "included styles load without installed files");

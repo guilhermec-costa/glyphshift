@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--illustrated', action='store_true', help='Enable the new rendering mode through the actual panel')
     parser.add_argument('--level', action='store_true', help='Use the previously prepared offline SuperTux test level')
-    parser.add_argument('--presets', action='store_true', help='Select all six included styles and save personal copies through the overlay')
+    parser.add_argument('--presets', action='store_true', help='Select every included style and save personal copies through the overlay')
     args = parser.parse_args()
     args.build = args.build.resolve()
     out = args.output.resolve()
@@ -108,14 +108,17 @@ def main():
                     if position < 0:
                         capture('personal-preset-menu', True)
                         saved_count = len(list(profile_dir.glob('*.conf')))
-                        control.click(100, 340 + (saved_count-1)*23)
+                        # The "Saved presets" heading follows the last included row.
+                        first_saved = 174 + (len(names)-1)*23 + 51
+                        control.click(100, first_saved + (saved_count-1)*23)
                     else:
                         # The grouped popup has one default row, a heading,
-                        # then six selectable rows at the normal ImGui pitch.
+                        # then one selectable row per included style.
                         control.click(100, 123 if position == 0 else 174 + (position-1)*23)
                     time.sleep(.35)
                     assert (profile_dir / 'active').read_text() == expected + '\n', (expected, (profile_dir / 'active').read_text())
-                names = ['art-soft-color', 'art-newsprint', 'art-green-terminal', 'art-blueprint', 'art-amber-braille', 'art-mosaic']
+                names = ['art-soft-color', 'art-newsprint', 'art-green-terminal', 'art-blueprint', 'art-amber-braille', 'art-mosaic',
+                         'art-comic', 'art-sepia', 'art-chalk', 'art-midnight', 'art-crt', 'art-digital-rain']
                 seen = []
                 for index, name in enumerate(names, 1):
                     choose(index, name)
@@ -126,6 +129,10 @@ def main():
                     scene = b''.join(rgb[(y*w+400)*3:(y*w+w)*3] for y in range(h))
                     assert all(scene != previous for previous in seen), name
                     seen.append(scene)
+                    # Save copies of the first and last styles only, so the
+                    # saved section stays within the popup without scrolling.
+                    if index not in (1, len(names)):
+                        continue
                     control.click(290, 124)
                     saved_copy = profile_dir / (name + '-copy.conf')
                     assert saved_copy.exists(), 'Included style did not propose a personal copy'
@@ -134,7 +141,8 @@ def main():
                     for key, value in expected.items():
                         if value != actual[key]:
                             assert all(abs(float(a)-float(b)) < 1e-6 for a,b in zip(value.split(','),actual[key].split(','))), (name,key,value,actual[key])
-                # Included styles and the six saved copies coexist in the list.
+                # Included styles and the saved copies coexist in the list; the
+                # last saved row alphabetically is the soft color copy.
                 choose(-1, 'art-soft-color-copy')
                 capture('personal-copy-selected', True)
                 choose(0, 'default')
@@ -144,7 +152,7 @@ def main():
                 time.sleep(.35)
                 config.write_text('color_mode=mono\nglyph_strength=1\n')
                 time.sleep(.35)
-                print(f'{app}: six included styles, distinct live scene images and saved copies passed', flush=True)
+                print(f'{app}: {len(names)} included styles, distinct live scene images and saved copies passed', flush=True)
             if args.illustrated:
                 control.click(100, 388)  # Illustration section, after Reset.
                 capture('illustration-controls', True)
