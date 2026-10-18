@@ -21,6 +21,36 @@ GE-Proton/DXVK. Mesa llvmpipe GLX passed; Mesa Vulkan and the Mesa offscreen
 oracle remain unverified for the environment-specific reasons recorded below.
 These are existing results, not new tests performed by this documentation split.
 
+M6 (standalone capture overlay) has steps 1–4 complete: capture, window
+tracking, editor with per-game presets, and the background daemon with a
+global attach hotkey.
+
+## Roadmap
+
+Agreed order of the next work, recorded on 2026-10-18. Each item still starts
+only when the user requests it.
+
+1. **Close M6.** Attach through the hotkey to native SuperTux and an offline
+   Proton game; measure end-to-end latency and GPU cost of the overlay against
+   the launcher.
+2. **M6 step 5: background app packaging.** A `glyphshift.desktop` entry and
+   icon installed by `cmake --install`, optional autostart
+   (`~/.config/autostart`), and a single instance: a second launch reports that
+   GlyphShift is already running instead of exiting silently on the hotkey
+   conflict. A system tray icon (preset choice, attached games, quit) follows
+   as a separate step.
+3. **Open-source release readiness.** Choose and add the license (see Later
+   Linux support below), CI (build and CPU tests; graphics smoke on Mesa
+   llvmpipe), an animated capture at the top of the main README, an AUR
+   package and a first tagged release.
+4. **Art in motion.** The world-anchored glyph grid (camera motion estimation,
+   see Rendering and editor controls) and automatic exposure for dark games,
+   which needs its parameters moved from push constants (at the 128-byte
+   Vulkan 1.0 ceiling) to a uniform buffer.
+5. **Wayland.** First check the current overlay under XWayland with X11 games
+   (cheap, unverified); then design a portal/PipeWire capture path.
+6. **M7 — Windows capture overlay** (below).
+
 ## Remaining TODOs
 
 These items are pending scope, not instructions to begin implementation.
@@ -2925,6 +2955,32 @@ python3 tests/smoke/overlay_daemon.py --build build/dev --output /tmp/glyphshift
 - Add EGL only for a concrete compatibility target.
 - Add Steam-specific installation and profile UX.
 - Expand tested Proton compatibility, still restricted to offline use.
+
+### M7 — Windows capture overlay (planned, after the Linux release)
+
+This milestone extends the platform scope beyond Linux and starts only after
+roadmap items 1–3. It ports only the capture overlay. Injection into Windows
+games (D3D9/11/12 hooks) stays out of scope: ReShade already covers that
+model, and it carries anti-cheat risk that capture avoids.
+
+- Capture the game window with Windows.Graphics.Capture (official API, no
+  injection; request no capture border where the OS allows it).
+- Present in a topmost, click-through window (`WS_EX_LAYERED |
+  WS_EX_TRANSPARENT`) kept above the game; borderless fullscreen only, as on
+  Linux.
+- Global attach hotkey with `RegisterHotKey`; editor input through Win32.
+- Rendering: preferably D3D11 with the glyph shaders ported to HLSL, or OpenGL
+  through WGL with D3D interop to reuse more code; decide in the first step.
+- Reuse unchanged: settings, presets, profiles, the ImGui editor model and
+  the two-pass pipeline design.
+
+Prerequisite refactor, also useful for Wayland: put the glyph pipeline behind
+a backend interface (OpenGL, Vulkan, later D3D11) instead of the current
+GL-specific `glyphshift_gl_pipeline` and separate Vulkan renderer.
+
+Exit condition: as for M6, an independently started offline game on Windows is
+transformed live, input reaches the game, the overlay follows the window and
+detaches cleanly, and latency/cost are measured.
 
 ## Definition of MVP done
 
