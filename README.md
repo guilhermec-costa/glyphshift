@@ -258,8 +258,8 @@ Mesa llvmpipe GLX was also tested. AMD/Intel hardware, Mesa Vulkan and arbitrary
 Proton games are not established by those results.
 
 Native Wayland input, EGL, Steam integration, exclusive fullscreen and HDR are
-not currently supported. A Windows version of the capture overlay is planned
-after the first Linux release; see the
+not currently supported. A Windows version of the capture overlay is the next
+planned milestone, before Wayland; see the
 [roadmap](docs/implementation/README.md#roadmap). The tool is intended for **offline games and local
 graphics applications**; online games and anti-cheat are outside its scope.
 The launcher refuses privileged processes and targets. Full glyph rendering

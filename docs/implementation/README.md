@@ -45,8 +45,10 @@ places it did not cover are listed there.
 
 ## Roadmap
 
-Agreed order of the next work, recorded on 2026-10-18. Each item still starts
-only when the user requests it.
+Agreed order of the next work, recorded on 2026-10-18 and revised the same
+day at the user's request: the Windows capture overlay comes before Wayland,
+and the AUR package is not a current goal. Each item still starts only when
+the user requests it.
 
 1. **Close M6.** Done on 2026-10-18: attached through the hotkey to native
    SuperTux and an offline Proton game; measured end-to-end latency and GPU
@@ -58,14 +60,12 @@ only when the user requests it.
    daemon. The system tray icon (attached games, style choice, start at
    login, quit) followed as a separate step, also done on 2026-10-18 (see
    [System tray](#m6-step-5-system-tray)).
-3. **Open-source release readiness.** In progress (see
+3. **Open-source release readiness.** Partly done (see
    [Open-source release readiness](#open-source-release-readiness)): MIT
-   license, CI, the README animation and the PKGBUILD are done and pushed
-   (repository still private); the AUR, the tag and going public wait for
-   the user. Originally: choose and add
-   the license (see Later Linux support below), CI (build and CPU tests; graphics smoke on Mesa
-   llvmpipe), an animated capture at the top of the main README, an AUR
-   package and a first tagged release.
+   license, CI, the README animation and the PKGBUILD are done and pushed.
+   Making the repository public and tagging a first release wait for the
+   user. Publishing to the AUR is not planned for now (decided by the user on
+   2026-10-18); the PKGBUILD stays in the repository, unpublished.
 4. **Art in motion.** Done on 2026-10-18 (see
    [Art in motion](#art-in-motion-roadmap-item-4)). The world-anchored glyph
    grid (camera motion estimation, see Rendering and editor controls) and
@@ -76,10 +76,10 @@ only when the user requests it.
    listed under [Platform architecture](#platform-architecture) were removed,
    so platform, window system and renderer are independent layers.
    Prerequisite for items 6 and 7.
-6. **Wayland.** First check the current overlay under XWayland with X11 games
-   (cheap, unverified); then add a Wayland window-system adapter
+6. **M7 — Windows capture overlay** (below). Next in priority.
+7. **Wayland**, after M7. First check the current overlay under XWayland with
+   X11 games (cheap, unverified); then add a Wayland window-system adapter
    (portal/PipeWire capture).
-7. **M7 — Windows capture overlay** (below).
 
 ## Remaining TODOs
 
@@ -3832,8 +3832,10 @@ GitHub access here). The user decided not to publish to the AUR yet; with a
 private repository the PKGBUILD's source could not be downloaded anyway.
 
 Still to do, when the user decides: confirm the workflow passes on GitHub,
-make the repository public, tag `v0.1.0` with release notes, fill the
-checksum and publish to the AUR.
+make the repository public and tag `v0.1.0` with release notes. Publishing to
+the AUR (filling the PKGBUILD's checksum from the tag's tarball) is not a
+current goal. Since 2026-10-18 the CI's graphics job runs only when started by
+hand.
 
 ### Later — Broader Linux support
 
@@ -3842,10 +3844,12 @@ checksum and publish to the AUR.
 - Add Steam-specific installation and profile UX.
 - Expand tested Proton compatibility, still restricted to offline use.
 
-### M7 — Windows capture overlay (planned, after the Linux release)
+### M7 — Windows capture overlay (planned, next in priority)
 
-This milestone extends the platform scope beyond Linux and starts only after
-roadmap items 1–3 and the platform architecture migration (item 5). It adds
+This milestone extends the platform scope beyond Linux. It is the next item
+of the roadmap (item 6), before Wayland; its prerequisite, the platform
+architecture migration (item 5), is done. It does not wait for a public Linux
+release or the AUR. It adds
 a Windows platform layer and a Win32 window-system adapter, and ports only the
 capture overlay. Injection into Windows
 games (D3D9/11/12 hooks) stays out of scope: ReShade already covers that
