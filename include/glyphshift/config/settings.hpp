@@ -44,12 +44,15 @@ struct Settings {
     bool operator==(const Settings&) const = default;
 };
 
-// Six vec4s, shared by the GL uniforms and Vulkan push constants (128 bytes in
-// total, Vulkan 1.0's guaranteed limit). Renderers zero the stability entry
-// whenever no valid previous frame exists.
+// Art parameters as vec4s, shared by the GL uniforms and a Vulkan uniform
+// buffer (push constants stay at Vulkan 1.0's guaranteed 128 bytes without
+// them). Renderers zero the stability entry whenever no valid previous frame
+// exists. Entries after the last used one are zero.
+inline constexpr std::size_t art_vectors = 8;
 inline constexpr std::size_t art_stability = 19;
+using ArtParameters = std::array<float, 4 * art_vectors>;
 
-inline std::array<float, 24> art_parameters(const Settings& s) {
+inline ArtParameters art_parameters(const Settings& s) {
     const auto& a = s.art;
     return {a.exposure,
         a.contrast,
@@ -74,8 +77,7 @@ inline std::array<float, 24> art_parameters(const Settings& s) {
         a.stability,
         a.dog_sigma,
         a.dog_threshold,
-        a.edge_votes,
-        0};
+        a.edge_votes};
 }
 
 enum SettingWarning : std::uint32_t {

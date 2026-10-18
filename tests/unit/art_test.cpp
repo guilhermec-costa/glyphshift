@@ -66,6 +66,16 @@ int main() {
                   art_parameters(parsed.value)[22] == .25F &&
                   art_parameters(parsed.value)[art_stability] == .7F,
             "saturation, glow and paper wash reach the shared shader parameters");
+        {
+            // Eight vec4s; entries after the last used slot (22) stay zero.
+            const auto values = art_parameters(parsed.value);
+            check(values.size() == 4 * art_vectors && art_vectors == 8,
+                "art parameters fill eight vec4s");
+            bool zero = true;
+            for (std::size_t i = 23; i < values.size(); ++i)
+                zero &= values[i] == 0;
+            check(zero, "unused art parameter slots are zero");
+        }
         check(parse_settings(serialize_settings(parsed.value)).value == parsed.value,
             "all art controls persist exactly");
         for (const char* text : {"tone_exposure=nan",

@@ -66,10 +66,11 @@ only when the user requests it.
    the license (see Later Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
    package and a first tagged release.
-4. **Art in motion.** The world-anchored glyph grid (camera motion estimation,
-   see Rendering and editor controls) and automatic exposure for dark games,
-   which needs its parameters moved from push constants (at the 128-byte
-   Vulkan 1.0 ceiling) to a uniform buffer.
+4. **Art in motion.** In progress since 2026-10-18 (see
+   [Art in motion](#art-in-motion-roadmap-item-4)). The world-anchored glyph
+   grid (camera motion estimation, see Rendering and editor controls) and
+   automatic exposure for dark games, which needs its parameters moved from
+   push constants (at the 128-byte Vulkan 1.0 ceiling) to a uniform buffer.
 5. **Platform architecture migration.** Done on 2026-10-18 (see
    [Current state and migration](#current-state-and-migration)): the couplings
    listed under [Platform architecture](#platform-architecture) were removed,
@@ -579,6 +580,31 @@ graphics smokes with Khronos core/synchronization validation; all glyph SPIR-V
 modules passed `spirv-val`. DoG, crisp and static-stability smoke captures were
 identical between GLX and Vulkan. Focused editor tests and SuperTux were not
 run for this step.
+
+## Art in motion (roadmap item 4)
+
+Planned in three steps, each verified and committed before the next:
+(1) art parameters in a Vulkan uniform buffer, freeing push-constant space;
+(2) automatic exposure from a GPU-metered scene luminance, without CPU
+readback; (3) a world-anchored glyph grid that follows camera motion estimated
+on the GPU.
+
+**Step 1, art parameters in a uniform buffer (2026-10-18).** The art
+parameters grow from six to eight vec4s (`art_vectors`, `ArtParameters`; the
+two new vectors are zero and reserved for the next steps). GL uploads them as
+`uniform vec4 art[8]` as before. Vulkan moves them out of the push constants
+into a per-target, host-visible uniform buffer at descriptor binding 5,
+written while recording the frame (after the target's previous submission
+completed); push constants shrink from 128 to 32 bytes. The shader keeps one
+source: `ART` names the uniform block on Vulkan and the uniform array on GL.
+
+Verification: Debug 15/15 (the art test checks eight vec4s with the unused
+slots zero); Release 17/17 with Khronos core and synchronization validation,
+no `Vulkan validation` line; all five SPIR-V modules passed `spirv-val`.
+Comparing the Vulkan smoke captures with the previous commit's: 52 of 60 are
+byte-identical, and the 8 with the editor open differ only within the panel's
+"CPU render / submit" time text (rows 65–72). GL previews of Comic, Ink &
+Edges, `illustrated.conf` and `classic.conf` are byte-identical.
 
 ## SDL applications (native SuperTux)
 

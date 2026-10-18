@@ -69,6 +69,10 @@ private:
         VkDeviceMemory ui_memory = VK_NULL_HANDLE;
         void* ui_mapped = nullptr;
         VkDeviceSize ui_capacity = 0;
+        // This target's art parameters (uniform buffer, binding 5).
+        VkBuffer art_buffer = VK_NULL_HANDLE;
+        VkDeviceMemory art_memory = VK_NULL_HANDLE;
+        void* art_mapped = nullptr;
         // Binding 4 of set i reads cell grid i: composition reads the grid just
         // written, analysis reads the other one (the previous frame's).
         std::array<VkDescriptorSet, 2> descriptors{};
@@ -80,6 +84,7 @@ private:
     void pipelines();
     void analysis_pipeline(VkGraphicsPipelineCreateInfo create,
         VkPipelineShaderStageCreateInfo& fragment);
+    void art_buffer(Target& target);
     void ensure_ui_buffer(Target& target, VkDeviceSize required);
     void upload_ui(Target& target, const ImDrawData& data);
     void draw_ui(VkCommandBuffer command, const Target& target, const ImDrawData& data);

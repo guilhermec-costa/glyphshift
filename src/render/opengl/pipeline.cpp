@@ -143,7 +143,7 @@ struct Pipeline::Program {
         unsigned height,
         bool top,
         const Settings& settings,
-        const std::array<float, 24>& values) const {
+        const ArtParameters& values) const {
         const auto& gl = api();
         gl.UseProgram(id);
         gl.Uniform2f(size, static_cast<float>(width), static_cast<float>(height));
@@ -153,7 +153,7 @@ struct Pipeline::Program {
         gl.Uniform1ui(source_color, settings.source_color ? 1 : 0);
         gl.Uniform1f(strength, settings.glyph_strength);
         gl.Uniform1ui(top_down, top ? 1 : 0);
-        gl.Uniform4fv(art, 6, values.data());
+        gl.Uniform4fv(art, static_cast<GLsizei>(art_vectors), values.data());
     }
 };
 

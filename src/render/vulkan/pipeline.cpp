@@ -16,15 +16,19 @@
 
 namespace glyphshift::vulkan {
 namespace {
+// Push constants; the art parameters travel in a per-target uniform buffer.
 struct Parameters {
     float width, height, cell_width, cell_height;
     uint32_t source_color, ramp_count, output_srgb;
     float glyph_strength;
-    std::array<float, 24> art;
 };
 
-// Vulkan 1.0 guarantees 128 bytes of push constants: this is the ceiling.
-static_assert(sizeof(Parameters) == 128);
+// Vulkan 1.0 guarantees 128 bytes of push constants.
+static_assert(sizeof(Parameters) <= 128);
+// The editor's projection shares the same push-constant range.
+static_assert(sizeof(Parameters) >= 20);
+// std140: an array of vec4 is tightly packed.
+constexpr VkDeviceSize art_bytes = sizeof(ArtParameters);
 
 bool srgb(VkFormat format) {
     return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
@@ -88,6 +92,7 @@ Pipeline::Pipeline(const Resources& resources,
         targets_.resize(targets);
         for (auto& target : targets_) {
             ensure_ui_buffer(target, 256 * 1024);
+            art_buffer(target);
             for (auto& set : target.descriptors) {
                 auto descriptor = info<VkDescriptorSetAllocateInfo>(
                     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
@@ -121,6 +126,12 @@ void Pipeline::release() noexcept {
             api_.DestroyBuffer(device_, target.ui_buffer, nullptr);
         if (target.ui_memory)
             api_.FreeMemory(device_, target.ui_memory, nullptr);
+        if (target.art_mapped)
+            api_.UnmapMemory(device_, target.art_memory);
+        if (target.art_buffer)
+            api_.DestroyBuffer(device_, target.art_buffer, nullptr);
+        if (target.art_memory)
+            api_.FreeMemory(device_, target.art_memory, nullptr);
     }
     targets_.clear();
     for (auto* pipeline : {&ui_pipeline_, &pipeline_, &analysis_pipeline_}) {
@@ -186,14 +197,20 @@ void Pipeline::set_target(unsigned index, VkImageView source, VkImageView output
                 {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, cells_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
-        std::array<VkWriteDescriptorSet, 5> writes{};
+        const VkDescriptorBufferInfo art{target.art_buffer, 0, art_bytes};
+        std::array<VkWriteDescriptorSet, 6> writes{};
         for (uint32_t binding = 0; binding < writes.size(); ++binding) {
             writes[binding] = info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
             writes[binding].dstSet = target.descriptors[set];
             writes[binding].dstBinding = binding;
             writes[binding].descriptorCount = 1;
-            writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[binding].pImageInfo = &bindings[binding];
+            if (binding == 5) {
+                writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                writes[binding].pBufferInfo = &art;
+            } else {
+                writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writes[binding].pImageInfo = &bindings[binding];
+            }
         }
         api_.UpdateDescriptorSets(device_,
             static_cast<uint32_t>(writes.size()),
@@ -239,17 +256,18 @@ void Pipeline::record(VkCommandBuffer command,
         current_ ^= 1U;
     history_ = settings.enabled && settings.art.illustrated;
     history_settings_ = settings;
-    Parameters parameters{static_cast<float>(extent_.width),
+    const Parameters parameters{static_cast<float>(extent_.width),
         static_cast<float>(extent_.height),
         static_cast<float>(settings.cell_width),
         static_cast<float>(settings.cell_height),
         settings.source_color ? 1U : 0U,
         atlas_data_.count,
         srgb(format_) ? 1U : 0U,
-        settings.glyph_strength,
-        art_parameters(settings)};
+        settings.glyph_strength};
+    auto art = art_parameters(settings);
     if (!history)
-        parameters.art[art_stability] = 0;
+        art[art_stability] = 0;
+    std::memcpy(target.art_mapped, art.data(), art_bytes);
     api_.CmdPushConstants(command,
         layout_,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -344,10 +362,11 @@ void Pipeline::staging() {
 }
 
 void Pipeline::descriptors(unsigned targets) {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    // Bindings 0..4: source, atlas, ramp, editor font and cell grid; 5: art.
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i)
         bindings[i] = {i,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            i == 5 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             1,
             VK_SHADER_STAGE_FRAGMENT_BIT,
             nullptr};
@@ -357,12 +376,13 @@ void Pipeline::descriptors(unsigned targets) {
     layout.pBindings = bindings.data();
     check(api_.CreateDescriptorSetLayout(device_, &layout, nullptr, &descriptor_layout_),
         "create glyph descriptor layout");
-    VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        static_cast<uint32_t>(targets * 2 * 5)};
+    const std::array<VkDescriptorPoolSize, 2> sizes{
+        {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(targets * 2 * 5)},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(targets * 2)}}};
     auto pool = info<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
     pool.maxSets = static_cast<uint32_t>(targets * 2);
-    pool.poolSizeCount = 1;
-    pool.pPoolSizes = &size;
+    pool.poolSizeCount = static_cast<uint32_t>(sizes.size());
+    pool.pPoolSizes = sizes.data();
     check(api_.CreateDescriptorPool(device_, &pool, nullptr, &descriptor_pool_),
         "create glyph descriptor pool");
     auto sampler = info<VkSamplerCreateInfo>(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
@@ -548,6 +568,26 @@ void Pipeline::analysis_pipeline(VkGraphicsPipelineCreateInfo create,
               &analysis_pipeline_),
         "create glyph analysis pipeline");
     fragment.module = compose;
+}
+
+// Host-visible and coherent, written while recording each frame: the
+// target's previous submission has completed by then.
+void Pipeline::art_buffer(Target& target) {
+    auto buffer = info<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    buffer.size = art_bytes;
+    buffer.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    check(api_.CreateBuffer(device_, &buffer, nullptr, &target.art_buffer),
+        "create art parameter buffer");
+    VkMemoryRequirements requirements{};
+    api_.GetBufferMemoryRequirements(device_, target.art_buffer, &requirements);
+    resources_.allocate(requirements,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        target.art_memory);
+    check(api_.BindBufferMemory(device_, target.art_buffer, target.art_memory, 0),
+        "bind art parameter memory");
+    check(api_.MapMemory(device_, target.art_memory, 0, art_bytes, 0, &target.art_mapped),
+        "map art parameters");
 }
 
 void Pipeline::ensure_ui_buffer(Target& target, VkDeviceSize required) {

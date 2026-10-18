@@ -13,8 +13,11 @@ layout(push_constant) uniform Parameters {
     uint ramp_count;
     uint output_srgb;
     float glyph_strength;
-    vec4 art[6];
 } params;
+// Art parameters (glyphshift::art_parameters), beyond the push-constant budget.
+layout(set=0, binding=5, std140) uniform Art {
+    vec4 values[8];
+} art_block;
 layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
 layout(set=0, binding=2) uniform usampler2D ramp_image;
@@ -25,7 +28,7 @@ layout(set=0, binding=4) uniform usampler2D cell_image;
 #define RAMP_COUNT params.ramp_count
 #define OUTPUT_SRGB params.output_srgb
 #define GLYPH_STRENGTH params.glyph_strength
-#define ART params.art
+#define ART art_block.values
 #else
 uniform sampler2D source_image;
 uniform sampler2D atlas_image;
@@ -39,7 +42,7 @@ uniform vec2 cell;
 uniform uint source_color;
 uniform uint ramp_count;
 uniform float glyph_strength;
-uniform vec4 art[6];
+uniform vec4 art[8];
 #define SIZE size
 #define CELL cell
 #define SOURCE_COLOR source_color
