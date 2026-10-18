@@ -1,4 +1,7 @@
 #version 330 core
+// Two passes share this source. With ANALYSIS defined, one fragment per cell
+// writes the cell's glyph, palette and contour; otherwise each pixel composes
+// glyph masks from that cell data (or runs the classic renderer directly).
 #ifdef VULKAN
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
@@ -15,6 +18,7 @@ layout(push_constant) uniform Parameters {
 layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
 layout(set=0, binding=2) uniform usampler2D ramp_image;
+layout(set=0, binding=4) uniform usampler2D cell_image;
 #define SIZE params.size
 #define CELL params.cell
 #define SOURCE_COLOR params.source_color
@@ -26,6 +30,7 @@ layout(set=0, binding=2) uniform usampler2D ramp_image;
 uniform sampler2D source_image;
 uniform sampler2D atlas_image;
 uniform usampler2D ramp_image;
+uniform usampler2D cell_image;
 uniform vec2 size;
 uniform vec2 cell;
 uniform uint source_color;
@@ -40,7 +45,11 @@ uniform vec4 art[4];
 #define GLYPH_STRENGTH glyph_strength
 #define ART art
 #endif
+#ifdef ANALYSIS
+layout(location=0) out uvec4 cell_data;
+#else
 layout(location=0) out vec4 color;
+#endif
 vec3 sample_source(vec2 pixel) {
     ivec2 at = ivec2(clamp(floor(pixel), vec2(0.0), SIZE - vec2(1.0)));
 #ifndef VULKAN
@@ -48,6 +57,133 @@ vec3 sample_source(vec2 pixel) {
 #endif
     return texelFetch(source_image, at, 0).rgb;
 }
+float luma(vec3 rgb) { return dot(rgb, vec3(.2126,.7152,.0722)); }
+// Cell palettes travel as 10-bit unorm RGB in one uint: an integer target is
+// never blended, whatever blend state the host application left enabled.
+uint pack_rgb(vec3 rgb) {
+    uvec3 q = uvec3(round(clamp(rgb,0.0,1.0)*1023.0));
+    return q.r | (q.g << 10) | (q.b << 20);
+}
+vec3 unpack_rgb(uint v) {
+    return vec3(float(v & 1023u), float((v >> 10) & 1023u), float((v >> 20) & 1023u)) / 1023.0;
+}
+#ifdef ANALYSIS
+// Largest mean squared descriptor error accepted for a shape glyph (mirrors
+// glyphshift::shape_fit). Clean outlines fit a character closely; tiled
+// texture does not, so it keeps the calm tonal ramp instead of turning into
+// scattered punctuation.
+const float shape_fit = .06;
+// Mean of the 2x2 texels starting at p: a small low-pass that keeps a
+// boundary on the cell grid owned by exactly one side.
+vec3 box(vec2 p) {
+    return (sample_source(p) + sample_source(p + vec2(1,0)) +
+            sample_source(p + vec2(0,1)) + sample_source(p + vec2(1,1))) * .25;
+}
+// Mirrors glyphshift::contour_glyph for one 3x3 neighborhood: -1 or 0..3.
+int contour(float v[9]) {
+    vec2 gradient = vec2(-v[0]+v[2]-2.0*v[3]+2.0*v[5]-v[6]+v[8],
+                         -v[0]-2.0*v[1]-v[2]+v[6]+2.0*v[7]+v[8]) / 4.0;
+    float low = v[0], high = v[0];
+    for (int i=1;i<9;++i) { low = min(low,v[i]); high = max(high,v[i]); }
+    float magnitude = length(gradient);
+    if (ART[1].y <= 0.0 || magnitude*ART[1].y <= ART[1].z || magnitude <= .55*(high-low))
+        return -1;
+    vec2 direction = abs(gradient);
+    return direction.x > 2.414214*direction.y ? 0
+         : direction.y > 2.414214*direction.x ? 1
+         : gradient.x*gradient.y > 0.0 ? 2 : 3;
+}
+void main() {
+    ivec2 index = ivec2(gl_FragCoord.xy);
+    vec2 origin = vec2(index) * CELL;
+    if (ART[1].x < .5 || any(greaterThanEqual(origin, SIZE))) {
+        cell_data = uvec4(0);
+        return;
+    }
+    // Sixteen region means cover the whole cell, so thin features and fine
+    // texture average out instead of aliasing through a few point samples.
+    vec3 regions[16];
+    float levels[16];
+    vec3 average = vec3(0);
+    float dark = 1.0, light = 0.0;
+    for (int r=0;r<16;++r) {
+        vec2 center = origin + CELL * (vec2(r%4, r/4) + .5) / 4.0;
+        regions[r] = box(clamp(floor(center - .5), origin, origin + max(CELL - 2.0, vec2(0))));
+        levels[r] = luma(regions[r]);
+        average += regions[r] / 16.0;
+        dark = min(dark,levels[r]);
+        light = max(light,levels[r]);
+    }
+    // Contours vote on a 5x5 lattice spanning the cell and the first pixels of
+    // its right/lower neighbors. Each interior point classifies its own 3x3
+    // neighborhood; incoherent texture splits its votes and is rejected.
+    float lattice[25];
+    for (int j=0;j<5;++j) for (int i=0;i<5;++i)
+        lattice[j*5+i] = luma(box(floor(origin + CELL * vec2(i,j) * .25)));
+    int votes[4] = int[4](0,0,0,0);
+    for (int y=1;y<4;++y) for (int x=1;x<4;++x) {
+        float v[9];
+        // Doubling quarter-cell differences keeps edge_threshold in the
+        // half-cell units of the original 3x3 cell-scale contour test.
+        for (int k=0;k<9;++k) v[k] = 2.0 * lattice[(y+k/3-1)*5 + x+k%3-1];
+        int axis = contour(v);
+        if (axis >= 0) votes[axis] += 1;
+    }
+    int axis = 0;
+    for (int a=1;a<4;++a) if (votes[a] > votes[axis]) axis = a;
+    int second = 0;
+    for (int a=0;a<4;++a) if (a != axis) second = max(second,votes[a]);
+    // A straight contour crossing the cell yields three coherent votes.
+    bool edge = votes[axis] >= 3 && votes[axis] >= 2*second;
+    float tone = clamp((luma(average)*ART[0].x-.5)*ART[0].y+.5,0.0,1.0);
+    tone = pow(tone,1.0/ART[0].z);
+    uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ART[2].w >= 0.0 ? 3 : 1),0).r;
+    float peak = max(max(average.r,average.g),average.b);
+    // Tone controls density; normalized chroma supplies ink color without
+    // multiplying the source darkness into sparse glyphs a second time.
+    vec3 ink = (SOURCE_COLOR != 0u && peak > .005) ? average / peak : ART[2].rgb;
+    if (SOURCE_COLOR != 0u)
+        ink = mix(ink,min(average*1.4,vec3(1)),ART[3].w);
+    vec3 paper = SOURCE_COLOR != 0u ? mix(ART[3].rgb,average,ART[3].w) : ART[3].rgb;
+    bool shape = false;
+    if (ART[2].w >= 0.0 && ART[1].w > .5 && light-dark > max(ART[2].w,.0001)) {
+        // Split the regions into a light and a dark group, then pick the
+        // matchable glyph whose ink layout best fits the light group. Palette
+        // entries are constant per cell, never a blend with per-pixel detail.
+        float midpoint = (dark+light)*.5;
+        vec3 dark_color = vec3(0), light_color = vec3(0);
+        float dark_count = 0.0, light_count = 0.0;
+        for (int r=0;r<16;++r) {
+            if (levels[r] > midpoint) { light_color += regions[r]; light_count += 1.0; }
+            else { dark_color += regions[r]; dark_count += 1.0; }
+        }
+        // Dark monochrome ink on light paper draws the dark group instead.
+        bool invert = SOURCE_COLOR == 0u && luma(ART[2].rgb) < luma(ART[3].rgb);
+        int matchable = int(texelFetch(ramp_image,ivec2(0,4),0).r) + 1;
+        float best = 1e9;
+        uint shaped = 0u;
+        for (int g=0;g<matchable;++g) {
+            float error = 0.0;
+            for (int r=0;r<16 && error<best;++r) {
+                float target = (levels[r]-dark)/(light-dark);
+                float delta = float(texelFetch(ramp_image,ivec2(g,5+r),0).r)/255.0 -
+                              (invert ? 1.0-target : target);
+                error += delta*delta;
+            }
+            if (error < best) { best = error; shaped = uint(g); }
+        }
+        shape = best <= shape_fit * 16.0;
+        if (shape) glyph = shaped;
+        if (shape && SOURCE_COLOR != 0u) {
+            ink = light_color / light_count;
+            paper = mix(ART[3].rgb,dark_color/dark_count,ART[3].w);
+        }
+    }
+    // A matched silhouette already owns its boundary; drawing another
+    // centered contour over it would replace useful character detail.
+    cell_data = uvec4(pack_rgb(ink), pack_rgb(paper), glyph, edge && !shape ? uint(axis)+1u : 0u);
+}
+#else
 // Each glyph owns a 17x25 summed-area tile around its 16x24 coverage mask.
 // Integer prefixes remain exact in R32F; interpolation integrates fractional
 // texel footprints without mip bleeding between neighboring glyphs.
@@ -75,7 +211,6 @@ float glyph_mask(uint glyph, vec2 local, bool filtered) {
               -prefix(base,vec2(hi.x,lo.y))+prefix(base,lo);
     return clamp(sum / (255.0 * max((hi.x-lo.x)*(hi.y-lo.y),.00001)),0,1);
 }
-float luma(vec3 rgb) { return dot(rgb, vec3(.2126,.7152,.0722)); }
 void main() {
     vec2 pixel = gl_FragCoord.xy;
 #ifndef VULKAN
@@ -92,82 +227,16 @@ void main() {
         uint glyph = texelFetch(ramp_image,ivec2(int(index),0),0).r;
         result = (SOURCE_COLOR != 0u ? average : vec3(1)) * glyph_mask(glyph,pixel-origin,false);
     } else {
-        // Cell-scale low-pass samples suppress small texture details before
-        // direction classification; the shader never needs scene depth.
-        vec3 samples[9];
-        float levels[9];
-        vec3 average = vec3(0);
-        float low = 1, high = 0;
-        for (int y=0;y<3;++y) for (int x=0;x<3;++x) {
-            int i = y*3+x;
-            samples[i] = sample_source(origin + CELL * vec2(x,y)*.5);
-            levels[i] = luma(samples[i]);
-            float weight = float((x == 1 ? 2 : 1) * (y == 1 ? 2 : 1));
-            average += samples[i] * weight / 16.0;
-            low = min(low,levels[i]); high = max(high,levels[i]);
-        }
-        vec2 gradient = vec2(-levels[0]+levels[2]-2*levels[3]+2*levels[5]-levels[6]+levels[8],
-                             -levels[0]-2*levels[1]-levels[2]+levels[6]+2*levels[7]+levels[8]) / 4.0;
-        float magnitude = length(gradient);
-        bool edge = ART[1].y > 0 && magnitude*ART[1].y > ART[1].z &&
-                    magnitude > .55 * (high-low);
-        float tone = clamp((luma(average)*ART[0].x-.5)*ART[0].y+.5,0,1);
-        tone = pow(tone,1.0/ART[0].z);
-        uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255)),ART[2].w >= 0 ? 3 : 1),0).r;
-        float peak = max(max(average.r,average.g),average.b);
-        // Tone controls density; normalized chroma supplies ink color without
-        // multiplying the source darkness into sparse glyphs a second time.
-        vec3 ink = (SOURCE_COLOR != 0u && peak > .005) ? average / peak : ART[2].rgb;
-        if (SOURCE_COLOR != 0u)
-            ink = mix(ink,min(average*1.4,vec3(1)),ART[3].w);
-        vec3 paper = SOURCE_COLOR != 0u ? mix(ART[3].rgb,average,ART[3].w) : ART[3].rgb;
-        bool shape = false;
-        if (ART[2].w >= 0 && ART[1].w > .5) {
-            // Interior quadrant centers retain small objects without sampling
-            // the neighboring cell into their silhouette. Palette entries are
-            // constant per cell, never a blend with per-pixel source detail.
-            vec3 quadrants[4];
-            float dark = 1, light = 0;
-            for (int q=0;q<4;++q) {
-                quadrants[q] = sample_source(origin + CELL *
-                    (vec2(q%2,q/2)*.5 + vec2(.25)));
-                dark = min(dark,luma(quadrants[q]));
-                light = max(light,luma(quadrants[q]));
-            }
-            float midpoint = (dark+light)*.5;
-            uint pattern = 0u;
-            vec3 dark_color = vec3(0), light_color = vec3(0);
-            float dark_count = 0, light_count = 0;
-            for (int q=0;q<4;++q) {
-                if (luma(quadrants[q]) > midpoint) {
-                    pattern |= 1u << uint(q);
-                    light_color += quadrants[q]; light_count += 1;
-                } else {
-                    dark_color += quadrants[q]; dark_count += 1;
-                }
-            }
-            shape = light-dark > max(ART[2].w,.0001) && pattern > 0u && pattern < 15u;
-            if (shape) {
-                if (SOURCE_COLOR != 0u) {
-                    ink = light_color / light_count;
-                    paper = mix(ART[3].rgb,dark_color/dark_count,ART[3].w);
-                } else if (luma(ART[2].rgb) < luma(ART[3].rgb)) {
-                    pattern = 15u-pattern;
-                }
-                glyph = texelFetch(ramp_image,ivec2(int(pattern),2),0).r;
-            }
-        }
+        uvec4 data = texelFetch(cell_image, ivec2(floor(pixel / CELL)), 0);
+        vec3 ink = unpack_rgb(data.x), paper = unpack_rgb(data.y);
+        uint glyph = data.z;
         float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
         result = mix(paper,ink,fill_mask);
-        // A matched silhouette already owns its boundary; drawing another
-        // centered contour over it would replace useful character detail.
-        if (edge && !shape) {
-            vec2 direction = abs(gradient);
-            uint axis = direction.x > 2.414214*direction.y ? 0u
-                      : direction.y > 2.414214*direction.x ? 1u
-                      : gradient.x*gradient.y > 0 ? 2u : 3u;
-            float mask = glyph_mask(256u+axis,pixel-origin,true);
+        if (data.w != 0u) {
+            float mask = glyph_mask(255u+data.w,pixel-origin,true);
             if (ART[0].w > .5) {
+                // Choose whichever ink/paper stroke contrasts more with the
+                // cell's mean filled color, so contours never punch holes.
                 ivec2 corner = ivec2(int(glyph)%16,int(glyph)/16)*ivec2(17,25)+ivec2(16,24);
                 float coverage = ART[1].w > .5 ? texelFetch(atlas_image,corner,0).r/(255.0*16*24) : 0;
                 float ground = luma(mix(paper,ink,coverage));
@@ -186,3 +255,4 @@ void main() {
         result = mix(result/12.92,pow((result+.055)/1.055,vec3(2.4)),step(vec3(.04045),result));
     color = vec4(result,1);
 }
+#endif

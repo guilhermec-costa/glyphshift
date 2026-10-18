@@ -38,7 +38,7 @@ private:
     std::array<GLint, 4> scissor_{};
     std::array<GLboolean, 4> color_{};
     std::array<GLint, 2> polygon_{};
-    std::array<GLint, 3> textures_{}, samplers_{};
+    std::array<GLint, 4> textures_{}, samplers_{};
     inline static constexpr std::array<GLenum, 11> capabilities_{GL_DEPTH_TEST,
         GL_STENCIL_TEST,
         GL_CULL_FACE,

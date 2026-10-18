@@ -7,8 +7,8 @@ project's normal monospace font requirement.
 | Config | Style | Cell size | Glyph strength | Preview |
 | --- | --- | --- | --- | --- |
 | [art-soft-color.conf](art-soft-color.conf) | Gentle color treatment with original detail blended in; start here for gameplay. | 6×10 | 0.65 | [Image](../docs/presets/art-soft-color.png) |
-| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and block silhouettes. | 8×12 | 1 | [Image](../docs/presets/art-newsprint.png) |
-| [art-green-terminal.conf](art-green-terminal.conf) | Green terminal letters and structural blocks on a dark background. | 8×12 | 1 | [Image](../docs/presets/art-green-terminal.png) |
+| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 8×12 | 1 | [Image](../docs/presets/art-newsprint.png) |
+| [art-green-terminal.conf](art-green-terminal.conf) | Green terminal letters with ASCII outline silhouettes on a dark background. | 8×12 | 1 | [Image](../docs/presets/art-green-terminal.png) |
 | [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | 1 | [Image](../docs/presets/art-blueprint.png) |
 | [art-amber-braille.conf](art-amber-braille.conf) | Amber Braille dots on dark paper; deliberately dense and textured. | 6×10 | 1 | [Image](../docs/presets/art-amber-braille.png) |
 | [art-mosaic.conf](art-mosaic.conf) | Source-colored quadrant blocks for a geometric pixel mosaic. | 8×12 | 1 | [Image](../docs/presets/art-mosaic.png) |

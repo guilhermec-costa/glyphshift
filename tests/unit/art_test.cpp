@@ -101,6 +101,93 @@ int main() {
             parse_settings("character_set=custom\ncharacters=\"▌\"\n").value.glyphs);
         check(only_block.ramp[768] == 0 && only_block.ramp[1023] == 0,
             "partial-block-only sets retain a valid tonal fallback");
+        // Contour voting on the 5x5 analysis lattice.
+        const auto lattice = [](auto lit) {
+            std::array<float, 25> values{};
+            for (unsigned j = 0; j < 5; ++j)
+                for (unsigned i = 0; i < 5; ++i)
+                    values[j * 5 + i] = lit(i, j) ? 1.0F : 0.0F;
+            return values;
+        };
+        check(contour_vote(lattice([](unsigned i, unsigned) {
+            return i == 4;
+        }),
+                  1,
+                  .18F) == 0,
+            "a boundary on the right cell edge belongs to this cell as a vertical contour");
+        check(contour_vote(lattice([](unsigned i, unsigned) {
+            return i >= 1;
+        }),
+                  1,
+                  .18F) == 0 &&
+                  contour_vote(lattice([](unsigned, unsigned j) {
+                      return j >= 2;
+                  }),
+                      1,
+                      .18F) == 1,
+            "vertical and horizontal contours inside the cell");
+        check(contour_vote(lattice([](unsigned i, unsigned j) {
+            return i > j;
+        }),
+                  1,
+                  .18F) == 3,
+            "top-left to bottom-right diagonal is a backslash");
+        check(contour_vote(lattice([](unsigned i, unsigned j) {
+            return (i + j) % 2;
+        }),
+                  1,
+                  .01F) == -1 &&
+                  contour_vote(lattice([](unsigned, unsigned) {
+                      return false;
+                  }),
+                      1,
+                      0) == -1 &&
+                  contour_vote(lattice([](unsigned i, unsigned) {
+                      return i == 4;
+                  }),
+                      0,
+                      0) == -1,
+            "checkerboard texture, flat cells and zero strength have no contour");
+        // Descriptor matching recovers exact quadrant silhouettes.
+        for (unsigned pattern = 1; pattern < 15; ++pattern) {
+            std::array<float, 16> levels{};
+            for (unsigned r = 0; r < 16; ++r)
+                levels[r] = (pattern & (1U << ((r / 8) * 2 + (r % 4) / 2))) ? .9F : .1F;
+            const int glyph = shape_glyph(shapes, levels, false);
+            check(glyph == shapes.ramp[512 + pattern],
+                "descriptor matching selects the exact quadrant block");
+            check(shape_glyph(shapes, levels, true) == shapes.ramp[512 + (15 - pattern)],
+                "dark ink matches the inverted silhouette");
+        }
+        // Shape-only characters: matchable, never part of the tonal ramp.
+        auto outline = parse_settings(
+            "character_set=custom\ncharacters=\" .:-=+*#\"\nshape_characters=\"|_/\\\\\"\n");
+        check(!outline.warnings && std::string_view(outline.value.glyphs.shapes.data()) == "|_/\\",
+            "shape characters parse");
+        check(parse_settings(serialize_settings(outline.value)).value == outline.value,
+            "shape characters persist");
+        const auto outlines = build_character_atlas(outline.value.glyphs);
+        check(!outlines.diagnostic[0] && outlines.count == 8 && outlines.shapes == 4 &&
+                  outlines.ramp[256 * 4] == 11,
+            "shape glyphs occupy the slots after the fill set");
+        for (unsigned row = 0; row < 4; ++row)
+            for (unsigned bin = 0; bin < 256; ++bin)
+                check(row == 2 || outlines.ramp[256 * row + bin] < 8,
+                    "tonal lookups never use shape-only glyphs");
+        std::array<float, 16> bar{}, floor{}, checker{};
+        for (unsigned r = 0; r < 16; ++r) {
+            bar[r] = (r % 4 == 1 || r % 4 == 2) ? 1.0F : 0.0F;
+            floor[r] = r >= 12 ? 1.0F : 0.0F;
+            checker[r] = (r + r / 4) % 2 ? 1.0F : 0.0F;
+        }
+        check(shape_glyph(outlines, bar, false) == 8, "a centered bright column matches |");
+        check(shape_glyph(outlines, floor, false) == 9, "a bright bottom row matches _");
+        check(shape_glyph(outlines, checker, false) == -1,
+            "texture that no glyph resembles keeps tonal fill");
+        auto crowded = CharacterSelection{};
+        crowded.set = 5;
+        std::strcpy(crowded.shapes.data(), "|");
+        check(!valid_characters(crowded), "fill and shape glyphs share 256 atlas slots");
         auto selection = CharacterSelection{};
         selection.set = 5;
         selection.density_order = true;

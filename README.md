@@ -19,6 +19,8 @@ effect running in the game through Proton.*
   rendering with separate surface fill and directional contours.
 - **Local shape matching:** select glyphs by the light/dark arrangement inside
   a cell to retain small silhouettes, with scene-colored paper to avoid black gaps.
+  Add outline characters such as `/\|_()^` to draw edges with text, used only
+  where they actually fit the scene.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
   or up to 256 custom Unicode characters, with local TTF/OTF fonts. Characters
   keep their typographic position (`_` on the floor, `'` at the top) and an

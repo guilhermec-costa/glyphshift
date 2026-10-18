@@ -35,6 +35,11 @@ inline constexpr auto default_atlas = [] {
 float tone_luminance(float value, float exposure, float contrast, float gamma) noexcept;
 // Row-major 3x3 luminance neighborhood. -1 means fill, 0..3 are | - / \\.
 int contour_glyph(std::span<const float, 9> levels, float strength, float threshold) noexcept;
+// Row-major 5x5 luminance lattice at quarter-cell steps, spanning the cell and
+// the first pixels of its right/lower neighbors. Each interior point applies
+// contour_glyph (differences doubled to half-cell units); an axis wins with at
+// least three votes and twice any other axis. Mirrors the analysis shader.
+int contour_vote(std::span<const float, 25> lattice, float strength, float threshold) noexcept;
 float luminance(float red, float green, float blue) noexcept;
 std::uint8_t mapped_glyph(float luminance, std::span<const std::uint8_t> ramp) noexcept;
 }  // namespace glyphshift

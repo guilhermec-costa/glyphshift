@@ -404,8 +404,23 @@ fill** keeps the underlying block/character and automatically chooses a
 contrasting ink/paper stroke; disable it to replace fill in contour cells. Ink colors the
 contours and monochrome fill; Paper sets their background. Contour glyphs are
 four UTF-8 characters in vertical/horizontal/slash/backslash order and need
-**Apply contours**. Use **Save preset** to retain the result. Existing fill
+**Apply contour / shape glyphs**. Use **Save preset** to retain the result. Existing fill
 sets/custom characters/fonts continue to work independently.
+
+**Shape glyphs** (below Contour glyphs) adds characters used only to draw
+silhouettes, never as tonal fill. With **Match local shapes** enabled, try
+`/\|_()<>^v`',.-LJ7[]T`, apply it, and compare tree and block outlines.
+Partial blocks in the fill set fit hard edges exactly and usually win, so
+remove them when you want outlines drawn with text characters. In a config:
+
+```ini
+shape_matching=true
+shape_characters="/\\|_()<>^v`',.-LJ7[]T"
+```
+
+A shape glyph is used only where it closely fits the cell; busy texture keeps
+the calm tonal ramp. Newsprint, Green terminal and `illustrated-ink.conf` use
+this.
 
 The old mode remains available as `render_style=classic`. At 4×4, filtering
 preserves average ink, but letters may still be too small to recognize. The

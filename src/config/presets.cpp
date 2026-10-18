@@ -178,6 +178,7 @@ std::string serialize_settings(const Settings& s) {
            "\nglyph_reverse=" + (s.glyphs.reverse ? "true" : "false") +
            "\nglyph_weight=" + decimal(s.glyphs.weight) +
            "\nedge_characters=" + quoted(s.glyphs.edges.data()) +
+           "\nshape_characters=" + quoted(s.glyphs.shapes.data()) +
            "\nrender_style=" + (s.art.illustrated ? "illustrated" : "classic") +
            "\ntone_exposure=" + decimal(s.art.exposure) +
            "\ntone_contrast=" + decimal(s.art.contrast) + "\ntone_gamma=" + decimal(s.art.gamma) +

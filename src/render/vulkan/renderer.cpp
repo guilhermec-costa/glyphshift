@@ -15,6 +15,7 @@
 #include "dispatch.hpp"
 #include "editor_frag_spv.hpp"
 #include "editor_vert_spv.hpp"
+#include "glyph_analysis_spv.hpp"
 #include "glyph_frag_spv.hpp"
 #include "glyph_vert_spv.hpp"
 #include "present_chain.hpp"
@@ -166,6 +167,12 @@ public:
             api_.DestroyPipeline(device, ui_pipeline_, nullptr);
         if (pipeline_)
             api_.DestroyPipeline(device, pipeline_, nullptr);
+        if (analysis_pipeline_)
+            api_.DestroyPipeline(device, analysis_pipeline_, nullptr);
+        if (cell_framebuffer_)
+            api_.DestroyFramebuffer(device, cell_framebuffer_, nullptr);
+        if (analysis_pass_)
+            api_.DestroyRenderPass(device, analysis_pass_, nullptr);
         if (render_pass_)
             api_.DestroyRenderPass(device, render_pass_, nullptr);
         for (const auto module : modules_)
@@ -178,6 +185,7 @@ public:
         if (sampler_)
             api_.DestroySampler(device, sampler_, nullptr);
         destroy(font_);
+        destroy(cells_);
         destroy(atlas_);
         destroy(ramp_);
         if (staging_)
@@ -212,6 +220,12 @@ public:
             if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
                 throw std::runtime_error("capture/atlas texture format cannot be sampled");
         }
+        VkFormatProperties cell_properties{};
+        device_.instance->format_properties(device_.physical, cell_format, &cell_properties);
+        constexpr auto cell_features =
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+        if ((cell_properties.optimalTilingFeatures & cell_features) != cell_features)
+            throw std::runtime_error("glyph cell format cannot be rendered and sampled");
         uint32_t count = 0;
         check(device_.get_images(device_.handle, swapchain_, &count, nullptr),
             "query swapchain image count");
@@ -232,9 +246,27 @@ public:
         const auto font = editor::font();
         font_extent_ = {static_cast<uint32_t>(font.width), static_cast<uint32_t>(font.height)};
         texture(font_, VK_FORMAT_R8_UNORM, font_extent_);
+        // Sized for the smallest 2x2 cell, so live cell-size edits never
+        // reallocate; each frame renders only the current grid.
+        cell_extent_ = {(extent_.width + 1) / 2, (extent_.height + 1) / 2};
+        texture(cells_,
+            cell_format,
+            cell_extent_,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         staging();
         descriptors();
         pipeline();
+        auto cell_framebuffer =
+            info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+        cell_framebuffer.renderPass = analysis_pass_;
+        cell_framebuffer.attachmentCount = 1;
+        cell_framebuffer.pAttachments = &cells_.view;
+        cell_framebuffer.width = cell_extent_.width;
+        cell_framebuffer.height = cell_extent_.height;
+        cell_framebuffer.layers = 1;
+        check(
+            api_.CreateFramebuffer(device_.handle, &cell_framebuffer, nullptr, &cell_framebuffer_),
+            "create glyph cell framebuffer");
         auto semaphore = info<VkSemaphoreCreateInfo>(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
         auto fence = info<VkFenceCreateInfo>(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
         fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -274,12 +306,13 @@ public:
             descriptor.pSetLayouts = &descriptor_layout_;
             check(api_.AllocateDescriptorSets(device_.handle, &descriptor, &frame.descriptors),
                 "allocate glyph descriptors");
-            const std::array<VkDescriptorImageInfo, 4> bindings{
+            const std::array<VkDescriptorImageInfo, 5> bindings{
                 {{sampler_, frame.capture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                     {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                     {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                    {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
-            std::array<VkWriteDescriptorSet, 4> writes{};
+                    {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                    {sampler_, cells_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+            std::array<VkWriteDescriptorSet, 5> writes{};
             for (uint32_t binding = 0; binding < writes.size(); ++binding) {
                 writes[binding] =
                     info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -355,6 +388,57 @@ public:
             VK_ACCESS_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        const Parameters parameters{static_cast<float>(extent_.width),
+            static_cast<float>(extent_.height),
+            static_cast<float>(settings.cell_width),
+            static_cast<float>(settings.cell_height),
+            settings.source_color ? 1U : 0U,
+            atlas_data_.count,
+            (format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_R8G8B8A8_SRGB) ? 1U : 0U,
+            settings.glyph_strength,
+            art_parameters(settings)};
+        api_.CmdPushConstants(frame.command,
+            layout_,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(parameters),
+            &parameters);
+        api_.CmdBindDescriptorSets(frame.command,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            layout_,
+            0,
+            1,
+            &frame.descriptors,
+            0,
+            nullptr);
+        if (settings.enabled) {
+            // The composition pass declares the cell image, so it is always
+            // written (zeros in classic mode) and left shader-readable.
+            const VkExtent2D grid{
+                std::min(cell_extent_.width,
+                    (extent_.width + settings.cell_width - 1) / settings.cell_width),
+                std::min(cell_extent_.height,
+                    (extent_.height + settings.cell_height - 1) / settings.cell_height)};
+            auto analysis = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
+            analysis.renderPass = analysis_pass_;
+            analysis.framebuffer = cell_framebuffer_;
+            analysis.renderArea.extent = grid;
+            api_.CmdBeginRenderPass(frame.command, &analysis, VK_SUBPASS_CONTENTS_INLINE);
+            api_.CmdBindPipeline(frame.command,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                analysis_pipeline_);
+            const VkViewport cells{0,
+                0,
+                static_cast<float>(grid.width),
+                static_cast<float>(grid.height),
+                0,
+                1};
+            const VkRect2D area{{0, 0}, grid};
+            api_.CmdSetViewport(frame.command, 0, 1, &cells);
+            api_.CmdSetScissor(frame.command, 0, 1, &area);
+            api_.CmdDraw(frame.command, 3, 1, 0, 0);
+            api_.CmdEndRenderPass(frame.command);
+        }
         barrier(frame.command,
             frame.image,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -378,29 +462,6 @@ public:
         const VkRect2D scissor{{0, 0}, extent_};
         api_.CmdSetViewport(frame.command, 0, 1, &viewport);
         api_.CmdSetScissor(frame.command, 0, 1, &scissor);
-        api_.CmdBindDescriptorSets(frame.command,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            layout_,
-            0,
-            1,
-            &frame.descriptors,
-            0,
-            nullptr);
-        const Parameters parameters{static_cast<float>(extent_.width),
-            static_cast<float>(extent_.height),
-            static_cast<float>(settings.cell_width),
-            static_cast<float>(settings.cell_height),
-            settings.source_color ? 1U : 0U,
-            atlas_data_.count,
-            (format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_R8G8B8A8_SRGB) ? 1U : 0U,
-            settings.glyph_strength,
-            art_parameters(settings)};
-        api_.CmdPushConstants(frame.command,
-            layout_,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(parameters),
-            &parameters);
         if (settings.enabled)
             api_.CmdDraw(frame.command, 3, 1, 0, 0);
         if (ui)
@@ -439,8 +500,9 @@ private:
     std::mutex mutex_;
     bool uploaded_ = false, submitted_ = false;
     std::vector<Frame> frames_;
-    Texture atlas_, ramp_, font_;
-    VkExtent2D font_extent_{};
+    Texture atlas_, ramp_, font_, cells_;
+    VkExtent2D font_extent_{}, cell_extent_{};
+    static constexpr VkFormat cell_format = VK_FORMAT_R32G32B32A32_UINT;
     static constexpr VkDeviceSize font_offset_ =
         (integral_bytes + 256 * ramp_height + 3) & ~VkDeviceSize{3};
     VkBuffer staging_ = VK_NULL_HANDLE;
@@ -449,11 +511,12 @@ private:
     VkDescriptorSetLayout descriptor_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
-    VkRenderPass render_pass_ = VK_NULL_HANDLE;
+    VkRenderPass render_pass_ = VK_NULL_HANDLE, analysis_pass_ = VK_NULL_HANDLE;
+    VkFramebuffer cell_framebuffer_ = VK_NULL_HANDLE;
     VkPipeline ui_pipeline_ = VK_NULL_HANDLE;
-    VkPipeline pipeline_ = VK_NULL_HANDLE;
+    VkPipeline pipeline_ = VK_NULL_HANDLE, analysis_pipeline_ = VK_NULL_HANDLE;
     VkCommandPool pool_ = VK_NULL_HANDLE;
-    std::array<VkShaderModule, 4> modules_{};
+    std::array<VkShaderModule, 5> modules_{};
     const std::array<VkPipelineStageFlags, 64> wait_masks_ = [] {
         std::array<VkPipelineStageFlags, 64> values{};
         values.fill(VK_PIPELINE_STAGE_TRANSFER_BIT);
@@ -489,7 +552,10 @@ private:
         return result;
     }
 
-    void texture(Texture& target, VkFormat format, VkExtent2D extent) {
+    void texture(Texture& target,
+        VkFormat format,
+        VkExtent2D extent,
+        VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) {
         auto image = info<VkImageCreateInfo>(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
         image.imageType = VK_IMAGE_TYPE_2D;
         image.format = format;
@@ -497,7 +563,7 @@ private:
         image.mipLevels = image.arrayLayers = 1;
         image.samples = VK_SAMPLE_COUNT_1_BIT;
         image.tiling = VK_IMAGE_TILING_OPTIMAL;
-        image.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        image.usage = usage;
         image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         check(api_.CreateImage(device_.handle, &image, nullptr, &target.image),
             "create glyph texture");
@@ -549,7 +615,7 @@ private:
     }
 
     void descriptors() {
-        std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
         for (uint32_t i = 0; i < bindings.size(); ++i)
             bindings[i] = {i,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -563,7 +629,7 @@ private:
         check(api_.CreateDescriptorSetLayout(device_.handle, &layout, nullptr, &descriptor_layout_),
             "create glyph descriptor layout");
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            static_cast<uint32_t>(frames_.size() * 4)};
+            static_cast<uint32_t>(frames_.size() * 5)};
         auto pool = info<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
         pool.maxSets = static_cast<uint32_t>(frames_.size());
         pool.poolSizeCount = 1;
@@ -580,10 +646,11 @@ private:
     }
 
     void pipeline() {
-        const std::array<std::span<const uint32_t>, 4> code{shaders::glyph_vert_spv,
+        const std::array<std::span<const uint32_t>, 5> code{shaders::glyph_vert_spv,
             shaders::glyph_frag_spv,
             shaders::editor_vert_spv,
-            shaders::editor_frag_spv};
+            shaders::editor_frag_spv,
+            shaders::glyph_analysis_spv};
         for (unsigned i = 0; i < code.size(); ++i) {
             auto module =
                 info<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
@@ -682,6 +749,7 @@ private:
                   nullptr,
                   &pipeline_),
             "create glyph graphics pipeline");
+        analysis_pipeline(create, stages[1]);
         stages[0].module = modules_[2];
         stages[1].module = modules_[3];
         const VkVertexInputBindingDescription binding{0,
@@ -709,6 +777,62 @@ private:
                   nullptr,
                   &ui_pipeline_),
             "create editor graphics pipeline");
+    }
+
+    // Per-cell analysis: one integer attachment, rewritten every frame. The
+    // dependencies order it after the previous frame's composition reads and
+    // make its writes visible to this frame's composition.
+    void analysis_pipeline(VkGraphicsPipelineCreateInfo create,
+        VkPipelineShaderStageCreateInfo& fragment) {
+        VkAttachmentDescription attachment{};
+        attachment.format = cell_format;
+        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        const VkAttachmentReference reference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &reference;
+        const std::array<VkSubpassDependency, 2> dependencies{
+            {{VK_SUBPASS_EXTERNAL,
+                 0,
+                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 0,
+                 VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                 0},
+                {0,
+                    VK_SUBPASS_EXTERNAL,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    0}}};
+        auto pass = info<VkRenderPassCreateInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
+        pass.attachmentCount = 1;
+        pass.pAttachments = &attachment;
+        pass.subpassCount = 1;
+        pass.pSubpasses = &subpass;
+        pass.dependencyCount = static_cast<uint32_t>(dependencies.size());
+        pass.pDependencies = dependencies.data();
+        check(api_.CreateRenderPass(device_.handle, &pass, nullptr, &analysis_pass_),
+            "create glyph analysis render pass");
+        const auto compose = fragment.module;
+        fragment.module = modules_[4];
+        create.renderPass = analysis_pass_;
+        check(api_.CreateGraphicsPipelines(device_.handle,
+                  VK_NULL_HANDLE,
+                  1,
+                  &create,
+                  nullptr,
+                  &analysis_pipeline_),
+            "create glyph analysis pipeline");
+        fragment.module = compose;
     }
 
     void ensure_ui_buffer(Frame& frame, VkDeviceSize required) {

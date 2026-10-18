@@ -66,6 +66,30 @@ void flip(std::vector<unsigned char>& pixels, unsigned width, unsigned height) {
             std::swap(pixels[y * row + x], pixels[(height - 1 - y) * row + x]);
 }
 
+GLuint link(const char* fragment) {
+    const auto program = glCreateProgram();
+    for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
+        const auto shader = glCreateShader(static_cast<GLenum>(type));
+        const char* source = type == GL_VERTEX_SHADER ? glyphshift::shaders::vertex : fragment;
+        glShaderSource(shader, 1, &source, nullptr);
+        glCompileShader(shader);
+        GLint ok = 0;
+        glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char log[4096]{};
+            glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+            throw std::runtime_error(log);
+        }
+        glAttachShader(program, shader);
+        glDeleteShader(shader);
+    }
+    glLinkProgram(program);
+    GLint linked = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    require(linked, "Shader link failed");
+    return program;
+}
+
 GLuint texture(unsigned unit,
     GLint internal,
     unsigned width,
@@ -122,27 +146,8 @@ int main(int argc, char** argv) {
         if (characters.diagnostic[0])
             std::cerr << characters.diagnostic.data() << '\n';
         const Context context(width, height);
-        const auto program = glCreateProgram();
-        for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
-            const auto shader = glCreateShader(static_cast<GLenum>(type));
-            const char* source = type == GL_VERTEX_SHADER ? glyphshift::shaders::vertex
-                                                          : glyphshift::shaders::fragment;
-            glShaderSource(shader, 1, &source, nullptr);
-            glCompileShader(shader);
-            GLint ok = 0;
-            glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-            if (!ok) {
-                char log[4096]{};
-                glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-                throw std::runtime_error(log);
-            }
-            glAttachShader(program, shader);
-            glDeleteShader(shader);
-        }
-        glLinkProgram(program);
-        GLint linked = 0;
-        glGetProgramiv(program, GL_LINK_STATUS, &linked);
-        require(linked, "Shader link failed");
+        const auto program = link(glyphshift::shaders::fragment);
+        const auto analysis = link(glyphshift::shaders::analysis);
         glUseProgram(program);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         flip(pixels, width, height);
@@ -160,34 +165,55 @@ int main(int argc, char** argv) {
             glyphshift::ramp_height,
             GL_RED_INTEGER,
             characters.ramp.data());
-        const auto output = texture(3, GL_RGB8, width, height, GL_RGB, nullptr);
+        const auto output = texture(4, GL_RGB8, width, height, GL_RGB, nullptr);
         GLuint fbo = 0, vao = 0;
         glGenFramebuffers(1, &fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, output, 0);
         require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
             "Incomplete output framebuffer");
+        // Cell grid for the illustrated analysis pass: one texel per cell.
+        const unsigned columns = (width + settings.cell_width - 1) / settings.cell_width;
+        const unsigned rows = (height + settings.cell_height - 1) / settings.cell_height;
+        const auto cells =
+            texture(3, GL_RGBA32UI, columns, rows, GL_RGBA_INTEGER, nullptr, GL_UNSIGNED_INT);
+        GLuint cell_fbo = 0;
+        glGenFramebuffers(1, &cell_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, cell_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, cells, 0);
+        require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
+            "Incomplete cell framebuffer");
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
-        glUniform1i(glGetUniformLocation(program, "source_image"), 0);
-        glUniform1i(glGetUniformLocation(program, "atlas_image"), 1);
-        glUniform1i(glGetUniformLocation(program, "ramp_image"), 2);
-        glUniform2f(glGetUniformLocation(program, "size"),
-            static_cast<float>(width),
-            static_cast<float>(height));
-        glUniform2f(glGetUniformLocation(program, "cell"),
-            static_cast<float>(settings.cell_width),
-            static_cast<float>(settings.cell_height));
-        glUniform1ui(glGetUniformLocation(program, "source_color"), settings.source_color);
-        glUniform1ui(glGetUniformLocation(program, "ramp_count"), characters.count);
-        glUniform1f(glGetUniformLocation(program, "glyph_strength"), settings.glyph_strength);
         const auto art = glyphshift::art_parameters(settings);
-        glUniform4fv(glGetUniformLocation(program, "art[0]"), 4, art.data());
-        glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+        for (const auto current : {analysis, program}) {
+            glUseProgram(current);
+            glUniform1i(glGetUniformLocation(current, "source_image"), 0);
+            glUniform1i(glGetUniformLocation(current, "atlas_image"), 1);
+            glUniform1i(glGetUniformLocation(current, "ramp_image"), 2);
+            glUniform1i(glGetUniformLocation(current, "cell_image"), 3);
+            glUniform2f(glGetUniformLocation(current, "size"),
+                static_cast<float>(width),
+                static_cast<float>(height));
+            glUniform2f(glGetUniformLocation(current, "cell"),
+                static_cast<float>(settings.cell_width),
+                static_cast<float>(settings.cell_height));
+            glUniform1ui(glGetUniformLocation(current, "source_color"), settings.source_color);
+            glUniform1ui(glGetUniformLocation(current, "ramp_count"), characters.count);
+            glUniform1f(glGetUniformLocation(current, "glyph_strength"), settings.glyph_strength);
+            glUniform4fv(glGetUniformLocation(current, "art[0]"), 4, art.data());
+        }
         glDisable(GL_DITHER);
         if (!settings.enabled) {
             flip(pixels, width, height);
         } else {
+            glBindFramebuffer(GL_FRAMEBUFFER, cell_fbo);
+            glViewport(0, 0, static_cast<GLsizei>(columns), static_cast<GLsizei>(rows));
+            glUseProgram(analysis);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+            glUseProgram(program);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             glPixelStorei(GL_PACK_ALIGNMENT, 1);
             glReadPixels(0,
@@ -205,9 +231,11 @@ int main(int argc, char** argv) {
         destination.write(reinterpret_cast<const char*>(pixels.data()),
             static_cast<std::streamsize>(pixels.size()));
         require(static_cast<bool>(destination), "Cannot write output");
-        const GLuint textures[] = {source, atlas, ramp, output};
-        glDeleteTextures(4, textures);
+        const GLuint textures[] = {source, atlas, ramp, output, cells};
+        glDeleteTextures(5, textures);
         glDeleteFramebuffers(1, &fbo);
+        glDeleteFramebuffers(1, &cell_fbo);
+        glDeleteProgram(analysis);
         glDeleteVertexArrays(1, &vao);
         glDeleteProgram(program);
         std::cout << "Preview " << width << 'x' << height << " strength=" << settings.glyph_strength

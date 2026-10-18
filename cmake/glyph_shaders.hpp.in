@@ -2,6 +2,7 @@
 namespace glyphshift::shaders {
 inline constexpr char vertex[] = R"GLYPHSHIFT(@GLYPH_VERTEX@)GLYPHSHIFT";
 inline constexpr char fragment[] = R"GLYPHSHIFT(@GLYPH_FRAGMENT@)GLYPHSHIFT";
+inline constexpr char analysis[] = R"GLYPHSHIFT(@GLYPH_ANALYSIS@)GLYPHSHIFT";
 inline constexpr char editor_vertex[] = R"GLYPHSHIFT(@EDITOR_VERTEX@)GLYPHSHIFT";
 inline constexpr char editor_fragment[] = R"GLYPHSHIFT(@EDITOR_FRAGMENT@)GLYPHSHIFT";
 }

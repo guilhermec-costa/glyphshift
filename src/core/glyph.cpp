@@ -21,6 +21,26 @@ int contour_glyph(std::span<const float, 9> v, float strength, float threshold) 
     return gx * gy > 0 ? 2 : 3;
 }
 
+int contour_vote(std::span<const float, 25> lattice, float strength, float threshold) noexcept {
+    std::array<int, 4> votes{};
+    for (unsigned y = 1; y < 4; ++y)
+        for (unsigned x = 1; x < 4; ++x) {
+            std::array<float, 9> neighborhood{};
+            for (unsigned k = 0; k < 9; ++k)
+                neighborhood[k] = 2 * lattice[(y + k / 3 - 1) * 5 + x + k % 3 - 1];
+            const int axis = contour_glyph(neighborhood, strength, threshold);
+            if (axis >= 0)
+                ++votes[static_cast<unsigned>(axis)];
+        }
+    const auto winner =
+        static_cast<unsigned>(std::max_element(votes.begin(), votes.end()) - votes.begin());
+    int second = 0;
+    for (unsigned a = 0; a < 4; ++a)
+        if (a != winner)
+            second = std::max(second, votes[a]);
+    return votes[winner] >= 3 && votes[winner] >= 2 * second ? static_cast<int>(winner) : -1;
+}
+
 float luminance(float red, float green, float blue) noexcept {
     return red * 0.2126F + green * 0.7152F + blue * 0.0722F;
 }

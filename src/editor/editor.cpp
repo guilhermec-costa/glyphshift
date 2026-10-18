@@ -433,12 +433,18 @@ void controls(State& state,
             ImGui::ColorEdit3("Ink / contours", art.foreground.data(), ImGuiColorEditFlags_Float);
             ImGui::ColorEdit3("Paper", art.background.data(), ImGuiColorEditFlags_Float);
             ImGui::InputText("Contour glyphs", state.draft.edges.data(), state.draft.edges.size());
+            ImGui::InputText("Shape glyphs", state.draft.shapes.data(), state.draft.shapes.size());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Optional, for example /\\|_()^: drawn only where a glyph "
+                    "fits a silhouette, never as tonal fill.");
             ImGui::TextWrapped(
-                "Four glyphs: vertical, horizontal, / and \\. Apply to update the "
-                "atlas.");
-            if (ImGui::Button("Apply contours")) {
+                "Contours: four glyphs, vertical, horizontal, / and \\. Shape glyphs "
+                "need Match local shapes. Apply to update the atlas.");
+            if (ImGui::Button("Apply contour / shape glyphs")) {
                 auto selection = state.settings.glyphs;
                 selection.edges = state.draft.edges;
+                selection.shapes = state.draft.shapes;
                 if (valid_characters(selection)) {
                     state.settings.glyphs = selection;
                     state.draft = state.draft_base = selection;
@@ -446,7 +452,8 @@ void controls(State& state,
                 } else
                     std::snprintf(state.character_error.data(),
                         state.character_error.size(),
-                        "Use exactly four valid UTF-8 contour characters.");
+                        "Use exactly four contour characters and at most 256 fill plus "
+                        "shape characters (valid UTF-8).");
             }
             if (state.character_error[0])
                 ImGui::TextWrapped("%s", state.character_error.data());

@@ -277,6 +277,9 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
         } else if (key == "edge_characters") {
             if (!string_value(value, parsed.value.glyphs.edges))
                 parsed.warnings |= invalid_characters;
+        } else if (key == "shape_characters") {
+            if (!string_value(value, parsed.value.glyphs.shapes))
+                parsed.warnings |= invalid_characters;
         } else if (key == "character_set") {
             explicit_set = true;
             bool found = false;

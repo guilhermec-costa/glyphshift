@@ -28,13 +28,12 @@ Only implement work explicitly requested by the user.
 
 ### Rendering and editor controls
 
-- [ ] Art direction phase 2: split the illustrated pass into a cell-resolution
-  analysis pass (true cell averages, shape matching against every selected
-  glyph, a calm tonal ramp for flat areas) and a cheap glyph composition pass,
-  on GLX, Vulkan and the preview tool. See
-  [typographic glyph atlas](#typographic-glyph-atlas-art-direction-phase-1).
 - [ ] Art direction phase 3: automatic ink/paper polarity per cell, saturation,
-  optional phosphor glow and recalibrated included styles.
+  optional phosphor glow and recalibrated included styles. Source-color
+  styles still fill bright scenes with dense glyphs, and directional texture
+  (SuperTux ice) still produces contour strokes at the shipped thresholds.
+- [ ] Measure the GPU cost of the phase 2 analysis pass. Shape matching reads
+  16 descriptor texels per matchable glyph in each high-contrast cell.
 - [ ] Add configurable temporal glyph stability/hysteresis. The current
   illustrated renderer filters spatially and has no previous-frame glyph state.
   The phase 2 cell texture is intended to carry the previous frame's choice.
@@ -137,6 +136,124 @@ SuperTux frame with per-cell shape matching over this atlas. Silhouettes and
 outlines became oriented characters (`|`, `_`, `^`, `T`) instead of a pixel
 mosaic. That result motivates phase 2; it is not a shipped renderer.
 
+## Two-pass glyph analysis (art direction, phase 2)
+
+Phase 1 made characters legible; outlines still rarely became characters.
+The illustrated renderer read nine point samples per cell, classified one
+cell-scale Sobel direction, and matched only 2×2 light/dark patterns. Fine
+texture aliased into scattered glyphs, and text glyphs could not express a
+silhouette's side, floor or slope.
+
+The illustrated mode now runs two passes on GLX, Vulkan and
+`glyphshift-preview`. Both come from `shaders/glyph/glyph.frag`; CMake builds
+the first with `ANALYSIS` defined.
+
+1. **Analysis**, one fragment per cell, writes one `RGBA32UI` texel: ink and
+   paper as 10-bit-per-channel RGB, the fill glyph, and the contour (0 none,
+   1..4 axis). An integer target is never blended, whatever blend state the
+   host application left enabled.
+2. **Composition**, per pixel, reads that texel, integrates the fill and
+   contour masks from the summed-area atlas, chooses the adaptive stroke, and
+   applies glyph strength and sRGB output exactly as before.
+
+Classic mode is unchanged: it still renders in the composition pass, and its
+images match the previous renderer. Analysis per cell:
+
+- **Tone and color** come from sixteen region means (each a 2×2 texel box),
+  replacing the nine point samples.
+- **Contours vote.** A 5×5 lattice at quarter-cell steps spans the cell plus
+  the first pixels of its right and lower neighbors, so a boundary on the grid
+  belongs to exactly one cell. Each of the nine interior points applies the
+  existing `contour_glyph` rule to its 3×3 neighborhood, with differences
+  doubled so `edge_threshold` keeps its half-cell units. An axis wins with at
+  least three votes (a straight contour crossing the cell) and at least twice
+  any other axis. `contour_vote` mirrors this on the CPU.
+- **Shapes match descriptors.** When `shape_matching` is on and the regions'
+  luminance range exceeds `shape_threshold`, the regions are normalized to
+  0..1 and compared against a 4×4 coverage descriptor of every matchable
+  glyph. Each descriptor is scaled so the glyph's densest region is 1.
+  Monochrome dark-on-light inverts the target, as before. The best glyph is
+  used only when its mean squared error is at most `shape_fit` (0.06). Clean
+  outlines fit closely; tiled texture does not and keeps the tonal ramp.
+  `shape_glyph` mirrors this on the CPU. Matched cells keep the existing
+  light/dark group palette and suppress contour strokes.
+
+A new optional `shape_characters` setting lists glyphs used only by shape
+matching, never by tonal fill, for example
+`shape_characters="/\\|_()<>^v`',.-LJ7[]T"`. They occupy the atlas slots after
+the fill set; fill plus shape characters must fit 256 slots, or the selection
+is rejected. The editor's **Illustration → Shape glyphs** field is applied by
+**Apply contour / shape glyphs** (formerly Apply contours), together with the
+contour glyphs. It sits below every control the focused editor tests click.
+Settings, presets and validation round-trip the new key.
+
+The lookup texture grows from 4 to 21 rows of 256 bytes. Row 4, texel 0 holds
+the matchable glyph count minus one; rows 5..20 hold the descriptors. Push
+constants stay at 96 bytes and the art parameters are unchanged.
+
+Backend resources:
+
+- **GLX:** a second program, plus a per-drawable cell texture and FBO
+  allocated only when the window or cell size changes the grid. Texture unit 3
+  is now saved and restored with units 0..2. NVIDIA compiles a program for the
+  framebuffer bound at link time; the analysis program first drawn into an
+  FBO was recompiled with a performance warning, which the GL debug smoke
+  correctly rejected. The analysis program is therefore linked while a
+  temporary 1×1 integer FBO is bound. This was traced to that exact draw with
+  synchronous debug output before the change.
+- **Vulkan:** one shared cell image per swapchain renderer, sized for 2×2
+  cells so live cell-size edits never reallocate, plus an analysis render pass,
+  pipeline and framebuffer. Its subpass dependencies order the rewrite after
+  the previous frame's composition reads (same queue, submission order) and
+  make the writes visible to this frame's composition. The pass runs whenever
+  the effect is enabled, so the image is always in the layout the composition
+  descriptor declares.
+
+The included Newsprint and Green terminal styles and `illustrated-ink.conf`
+replace their partial-block silhouettes with ASCII `shape_characters`. With
+partial blocks present, their exact 0/1 descriptors win most structural
+matches. The gallery images, [shape-color](../shape-color.png) and
+[shape-ink](../shape-ink.png) were regenerated with the two-pass preview.
+
+### Phase 2 verification
+
+Verified on 2026-10-17 on the existing Arch/X11/i3/NVIDIA RTX 3060 Ti setup.
+Debug and Release built without compiler warnings. Debug CTest passed 12/12.
+Release CTest passed 14/14, including both graphics smokes with Khronos core and
+synchronization validation (90 seconds). The Debug smoke target also passed on
+both APIs with no `GL debug:` or `Vulkan validation:` output. The analytic
+oracle passed unchanged against the two-pass preview: 14 area-filter cases,
+2 contour-over-fill cases and 28 silhouette cases, plus the exact
+strength-zero bypass. Nine illustrated smoke captures compared GLX against
+Vulkan: eight were identical and one had normalized RMSE 0.0000033. All six
+glyph SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
+
+New CPU checks cover contour votes (grid-edge ownership, both axes, a
+backslash diagonal, checkerboard/flat/zero-strength rejection), descriptor
+matching of all 14 mixed quadrant masks in both polarities, `|` and `_` from
+shape characters, rejection of a checkerboard no glyph fits, shape glyphs
+staying out of every tonal row, the 256-slot limit, and persistence. A
+deliberately wrong expectation was confirmed to fail the art test.
+
+The first full smoke after the shader change failed on the NVIDIA recompile
+warning described above; an exact-float cell format was tried and did not
+remove it, and was reverted. The focused XTest editor tests, SuperTux and GPU
+timing were not run for this change: the Shape glyphs field was not exercised
+through real input, and the analysis pass's GPU cost is unmeasured.
+
+```bash
+cmake --build --preset dev
+setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset dev
+setpriv --inh-caps=-all --ambient-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 cmake --build --preset dev --target smoke
+cmake --build --preset release
+setpriv --inh-caps=-all --ambient-caps=-all -- env \
+  VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
+  VK_LAYER_VALIDATE_SYNC=1 ctest --preset release
+spirv-val --target-env vulkan1.0 build/release/generated/glyph.analysis.spv
+```
+
 ## Ready-to-use style collection
 
 Six complete live configs are available in the [preset gallery](../../presets/README.md):
@@ -165,6 +282,10 @@ shape_matching=true
 shape_threshold=0.35
 scene_paper=0.95
 ```
+
+*Superseded in part by [phase 2](#two-pass-glyph-analysis-art-direction-phase-2):
+matching now uses 4×4 descriptors of every matchable glyph with a fit limit,
+and the lookup texture has 21 rows.*
 
 `shape_matching` defaults to false for compatibility. It samples the four
 interior quadrant centers of a cell and classifies their light/dark arrangement
@@ -1334,7 +1455,8 @@ not a promise that one style suits every game's textures or HUD.
 
 **Illustration** exposes the render mode, independent fill toggle, exposure,
 contrast, gamma, contour strength/threshold, contour compositing, ink/paper
-colors, and four custom contour characters. Edits to the four characters require **Apply contours**;
+colors, and four custom contour characters. Edits to the four characters require
+**Apply contours** (now **Apply contour / shape glyphs**);
 other controls update immediately. **Save preset** persists all fields. The
 existing **Characters and font** controls select the fill set and its ordering.
 Contours have separate atlas slots and do not reduce the 256-character fill
@@ -1368,6 +1490,9 @@ intentionally suppress the contour glyphs. Invalid fields warn and fall back
 to bounded defaults. Preset saves reject invalid fields and serialized data
 larger than the existing 4096-byte limit.
 
+*Phase 2 replaces this sampling with a per-cell analysis pass: region means
+and a voted 5×5 contour lattice; see
+[two-pass glyph analysis](#two-pass-glyph-analysis-art-direction-phase-2).*
 The illustrated pass samples a weighted 3×3 neighborhood at the scale of each
 cell. A Sobel gradient classifies vertical, horizontal and two diagonal
 contours. A magnitude threshold and a directional-coherence test reject weak

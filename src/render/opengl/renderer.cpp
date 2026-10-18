@@ -77,14 +77,21 @@ void diagnostic(const char* text) noexcept {
 struct Drawable {
     GLuint image = 0, framebuffer = 0;
     unsigned width = 0, height = 0;
+    // One RGBA32UI texel per cell, written by the illustrated analysis pass.
+    GLuint cells = 0, cell_framebuffer = 0;
+    unsigned columns = 0, rows = 0;
+};
+
+struct Uniforms {
+    GLint size = -1, cell = -1, source_color = -1, glyph_strength = -1, art = -1;
 };
 
 struct Context {
-    GLuint program = 0, vao = 0, atlas = 0, ramp = 0;
+    GLuint program = 0, analysis = 0, vao = 0, atlas = 0, ramp = 0;
     GLuint ui_program = 0, ui_vao = 0, ui_vertices = 0, ui_indices = 0, ui_font = 0;
     bool indexed_blend = false;
     GLint ui_scale = -1, ui_translate = -1;
-    GLint size = -1, cell = -1, source_color = -1, glyph_strength = -1;
+    Uniforms compose_uniforms, analysis_uniforms;
     unsigned clip_count = 0, tf_bindings = 0;
     bool disabled = false, caps_ready = false, viewport_array = false, clip_control = false;
     unsigned draw_buffers = 0;
@@ -99,6 +106,10 @@ struct Context {
                 gl.DeleteFramebuffers(1, &drawable.framebuffer);
             if (drawable.image)
                 gl.DeleteTextures(1, &drawable.image);
+            if (drawable.cell_framebuffer)
+                gl.DeleteFramebuffers(1, &drawable.cell_framebuffer);
+            if (drawable.cells)
+                gl.DeleteTextures(1, &drawable.cells);
         }
         drawables.clear();
         if (atlas)
@@ -109,6 +120,8 @@ struct Context {
             gl.DeleteVertexArrays(1, &vao);
         if (program)
             gl.DeleteProgram(program);
+        if (analysis)
+            gl.DeleteProgram(analysis);
         if (ui_program)
             gl.DeleteProgram(ui_program);
         if (ui_vao)
@@ -120,7 +133,7 @@ struct Context {
         if (ui_indices)
             gl.DeleteBuffers(1, &ui_indices);
         ui_program = ui_vao = ui_font = ui_vertices = ui_indices = 0;
-        atlas = ramp = vao = program = 0;
+        atlas = ramp = vao = program = analysis = 0;
     }
 
     GLuint shader(GLenum type, const char* source) {
@@ -216,8 +229,10 @@ struct Context {
             GL_RED_INTEGER,
             GL_UNSIGNED_BYTE,
             data.ramp.data());
-        gl.UseProgram(program);
-        gl.Uniform1ui(gl.GetUniformLocation(program, "ramp_count"), selected_count);
+        for (const auto current : {program, analysis}) {
+            gl.UseProgram(current);
+            gl.Uniform1ui(gl.GetUniformLocation(current, "ramp_count"), selected_count);
+        }
         editor::character_report(data.diagnostic.data());
         if (rebuilt && data.diagnostic[0]) {
             diagnostic(data.diagnostic.data());
@@ -225,24 +240,76 @@ struct Context {
         }
     }
 
-    void initialize(const glyphshift::CharacterSelection& characters) {
+    GLuint link(const char* fragment) {
         const auto& gl = api();
-        program = gl.CreateProgram();
+        const auto result = gl.CreateProgram();
         for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
             const auto object = shader(static_cast<GLenum>(type),
-                type == GL_VERTEX_SHADER ? shaders::vertex : shaders::fragment);
-            gl.AttachShader(program, object);
+                type == GL_VERTEX_SHADER ? shaders::vertex : fragment);
+            gl.AttachShader(result, object);
             gl.DeleteShader(object);
         }
-        gl.LinkProgram(program);
+        gl.LinkProgram(result);
         GLint ok = 0;
-        gl.GetProgramiv(program, GL_LINK_STATUS, &ok);
+        gl.GetProgramiv(result, GL_LINK_STATUS, &ok);
         if (!ok) {
             char log[2048]{};
-            gl.GetProgramInfoLog(program, sizeof(log), nullptr, log);
+            gl.GetProgramInfoLog(result, sizeof(log), nullptr, log);
             diagnostic(log);
+            gl.DeleteProgram(result);
             throw std::runtime_error("OpenGL glyph link failed");
         }
+        return result;
+    }
+
+    // NVIDIA compiles a program for the framebuffer bound at link time and
+    // recompiles it, with a performance warning, when first drawn into a
+    // different kind. Link the per-cell pass while a temporary integer FBO like
+    // its real target is bound. Bindings are restored by the caller's GlState.
+    GLuint link_offscreen(const char* fragment) {
+        const auto& gl = api();
+        GLuint target = 0, framebuffer = 0;
+        gl.GenTextures(1, &target);
+        gl.GenFramebuffers(1, &framebuffer);
+        GLuint result = 0;
+        try {
+            if (!target || !framebuffer)
+                throw std::runtime_error("GL link target allocation failed");
+            gl.ActiveTexture(GL_TEXTURE3);
+            gl.BindTexture(GL_TEXTURE_2D, target);
+            texture_parameters(gl);
+            gl.TexImage2D(GL_TEXTURE_2D,
+                0,
+                GL_RGBA32UI,
+                1,
+                1,
+                0,
+                GL_RGBA_INTEGER,
+                GL_UNSIGNED_INT,
+                nullptr);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+            gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                target,
+                0);
+            result = link(fragment);
+        } catch (...) {
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl.DeleteFramebuffers(1, &framebuffer);
+            gl.DeleteTextures(1, &target);
+            throw;
+        }
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.DeleteFramebuffers(1, &framebuffer);
+        gl.DeleteTextures(1, &target);
+        return result;
+    }
+
+    void initialize(const glyphshift::CharacterSelection& characters) {
+        const auto& gl = api();
+        program = link(shaders::fragment);
+        analysis = link_offscreen(shaders::analysis);
         gl.GenVertexArrays(1, &vao);
         gl.GenTextures(1, &atlas);
         gl.ActiveTexture(GL_TEXTURE1);
@@ -254,15 +321,80 @@ struct Context {
         texture_parameters(gl);
         if (!vao || !atlas || !ramp)
             throw std::runtime_error("GL object allocation failed");
-        gl.UseProgram(program);
-        gl.Uniform1i(gl.GetUniformLocation(program, "source_image"), 0);
-        gl.Uniform1i(gl.GetUniformLocation(program, "atlas_image"), 1);
-        gl.Uniform1i(gl.GetUniformLocation(program, "ramp_image"), 2);
+        for (const auto current : {program, analysis}) {
+            gl.UseProgram(current);
+            gl.Uniform1i(gl.GetUniformLocation(current, "source_image"), 0);
+            gl.Uniform1i(gl.GetUniformLocation(current, "atlas_image"), 1);
+            gl.Uniform1i(gl.GetUniformLocation(current, "ramp_image"), 2);
+            gl.Uniform1i(gl.GetUniformLocation(current, "cell_image"), 3);
+            auto& uniforms = current == program ? compose_uniforms : analysis_uniforms;
+            uniforms.size = gl.GetUniformLocation(current, "size");
+            uniforms.cell = gl.GetUniformLocation(current, "cell");
+            uniforms.source_color = gl.GetUniformLocation(current, "source_color");
+            uniforms.glyph_strength = gl.GetUniformLocation(current, "glyph_strength");
+            uniforms.art = gl.GetUniformLocation(current, "art[0]");
+        }
         update_characters(characters);
-        size = gl.GetUniformLocation(program, "size");
-        cell = gl.GetUniformLocation(program, "cell");
-        source_color = gl.GetUniformLocation(program, "source_color");
-        glyph_strength = gl.GetUniformLocation(program, "glyph_strength");
+    }
+
+    void parameters(GLuint current,
+        const Uniforms& uniforms,
+        unsigned width,
+        unsigned height,
+        const Settings& settings) {
+        const auto& gl = api();
+        gl.UseProgram(current);
+        gl.Uniform2f(uniforms.size, static_cast<float>(width), static_cast<float>(height));
+        gl.Uniform2f(uniforms.cell,
+            static_cast<float>(settings.cell_width),
+            static_cast<float>(settings.cell_height));
+        gl.Uniform1ui(uniforms.source_color, settings.source_color ? 1 : 0);
+        gl.Uniform1f(uniforms.glyph_strength, settings.glyph_strength);
+        const auto art = art_parameters(settings);
+        gl.Uniform4fv(uniforms.art, 4, art.data());
+    }
+
+    void viewport(unsigned width, unsigned height) {
+        const auto& gl = api();
+        if (viewport_array)
+            gl.ViewportIndexedf(0, 0, 0, static_cast<float>(width), static_cast<float>(height));
+        else
+            gl.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+    }
+
+    // Allocation happens only when the window or cell size changes the grid.
+    void prepare_cells(Drawable& drawable, unsigned columns, unsigned rows) {
+        const auto& gl = api();
+        if (!drawable.cells) {
+            gl.GenTextures(1, &drawable.cells);
+            gl.GenFramebuffers(1, &drawable.cell_framebuffer);
+            if (!drawable.cells || !drawable.cell_framebuffer)
+                throw std::runtime_error("GL cell object allocation failed");
+        }
+        gl.ActiveTexture(GL_TEXTURE3);
+        gl.BindTexture(GL_TEXTURE_2D, drawable.cells);
+        if (drawable.columns == columns && drawable.rows == rows)
+            return;
+        texture_parameters(gl);
+        gl.TexImage2D(GL_TEXTURE_2D,
+            0,
+            GL_RGBA32UI,
+            static_cast<GLsizei>(columns),
+            static_cast<GLsizei>(rows),
+            0,
+            GL_RGBA_INTEGER,
+            GL_UNSIGNED_INT,
+            nullptr);
+        drawable.columns = columns;
+        drawable.rows = rows;
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffer);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            drawable.cells,
+            0);
+        if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw std::runtime_error("OpenGL glyph cell framebuffer incomplete");
     }
 
     static void texture_parameters(const GlApi& gl) {
@@ -495,27 +627,29 @@ struct Context {
                 static_cast<GLint>(height),
                 GL_COLOR_BUFFER_BIT,
                 GL_NEAREST);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            gl.DrawBuffer(GL_BACK);
-            if (viewport_array)
-                gl.ViewportIndexedf(0, 0, 0, static_cast<float>(width), static_cast<float>(height));
-            else
-                gl.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-            gl.UseProgram(program);
             gl.BindVertexArray(vao);
-            for (unsigned i = 0; i < 3; ++i) {
+            if (settings.art.illustrated)
+                prepare_cells(drawable,
+                    (width + settings.cell_width - 1) / settings.cell_width,
+                    (height + settings.cell_height - 1) / settings.cell_height);
+            const GLuint units[] = {drawable.image, atlas, ramp, drawable.cells};
+            for (unsigned i = 0; i < 4; ++i) {
                 gl.ActiveTexture(GL_TEXTURE0 + i);
-                gl.BindTexture(GL_TEXTURE_2D, i == 0 ? drawable.image : (i == 1 ? atlas : ramp));
+                gl.BindTexture(GL_TEXTURE_2D, units[i]);
                 gl.BindSampler(i, 0);
             }
-            gl.Uniform2f(size, static_cast<float>(width), static_cast<float>(height));
-            gl.Uniform2f(cell,
-                static_cast<float>(settings.cell_width),
-                static_cast<float>(settings.cell_height));
-            gl.Uniform1ui(source_color, settings.source_color ? 1 : 0);
-            gl.Uniform1f(glyph_strength, settings.glyph_strength);
-            const auto art = art_parameters(settings);
-            gl.Uniform4fv(gl.GetUniformLocation(program, "art[0]"), 4, art.data());
+            if (settings.art.illustrated) {
+                // Integer target: host blend state cannot alter packed cell data.
+                gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffer);
+                gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
+                viewport(drawable.columns, drawable.rows);
+                parameters(analysis, analysis_uniforms, width, height, settings);
+                gl.DrawArrays(GL_TRIANGLES, 0, 3);
+            }
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl.DrawBuffer(GL_BACK);
+            viewport(width, height);
+            parameters(program, compose_uniforms, width, height, settings);
             gl.DrawArrays(GL_TRIANGLES, 0, 3);
         }
         if (ui)

@@ -55,16 +55,24 @@ bool decode_characters(std::string_view text, Codepoints& output) noexcept {
     return output.count != 0;
 }
 
+namespace {
+Codepoints selected(const CharacterSelection& selection);
+}  // namespace
+
 bool valid_characters(const CharacterSelection& selection) noexcept {
     if (selection.set >= character_sets.size() || selection.text.back() || selection.font.back() ||
-        selection.edges.back() || !std::isfinite(selection.weight) || selection.weight < 0 ||
-        selection.weight > 1)
+        selection.edges.back() || selection.shapes.back() || !std::isfinite(selection.weight) ||
+        selection.weight < 0 || selection.weight > 1)
         return false;
     Codepoints points;
     if (selection.text[0] || selection.set == 6)
         if (!decode_characters(selection.text.data(), points))
             return false;
     if (!decode_characters(selection.edges.data(), points) || points.count != 4)
+        return false;
+    // Fill and shape-only glyphs share the 256 selectable atlas slots.
+    if (selection.shapes[0] && (!decode_characters(selection.shapes.data(), points) ||
+                                   points.count + selected(selection).count > 256))
         return false;
     return !selection.font[0] || selection.font[0] == '/';
 }
@@ -217,6 +225,33 @@ struct Font {
 };
 }  // namespace
 
+int shape_glyph(const CharacterAtlas& atlas,
+    std::span<const float, 16> levels,
+    bool invert) noexcept {
+    const auto [low, high] = std::minmax_element(levels.begin(), levels.end());
+    const float dark = *low, range = *high - *low;
+    if (!(range > 0))
+        return -1;
+    const unsigned matchable = atlas.ramp[256 * 4] + 1U;
+    float best = std::numeric_limits<float>::max();
+    int glyph = -1;
+    for (unsigned g = 0; g < matchable; ++g) {
+        float error = 0;
+        for (unsigned r = 0; r < 16 && error < best; ++r) {
+            const float target = (levels[r] - dark) / range;
+            const float delta =
+                static_cast<float>(atlas.ramp[256 * (descriptor_row + r) + g]) / 255 -
+                (invert ? 1 - target : target);
+            error += delta * delta;
+        }
+        if (error < best) {
+            best = error;
+            glyph = static_cast<int>(g);
+        }
+    }
+    return best <= shape_fit * 16 ? glyph : -1;
+}
+
 CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
     CharacterAtlas atlas;
     Codepoints fill_points;
@@ -330,6 +365,13 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
                 atlas.ramp[g] = static_cast<std::uint8_t>(g);
                 render(g, points.values[g]);
             }
+        }
+        Codepoints shapes;
+        if (selection.shapes[0]) {
+            decode_characters(selection.shapes.data(), shapes);
+            for (unsigned s = 0; s < shapes.count; ++s)
+                render(atlas.count + s, shapes.values[s]);
+            atlas.shapes = shapes.count;
         }
         Codepoints edges;
         decode_characters(selection.edges.data(), edges);
@@ -464,6 +506,22 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
             }
         }
         atlas.ramp[768 + bin] = tonal[best];
+    }
+    // Shape descriptors: mean coverage of each 4x6-pixel region of the 16x24
+    // tile, scaled so a glyph's densest region is 1. Matching compares where
+    // ink falls, while each matched cell supplies its own two-tone palette.
+    const unsigned matchable = atlas.count + atlas.shapes;
+    atlas.ramp[256 * 4] = static_cast<std::uint8_t>(matchable - 1);
+    for (unsigned g = 0; g < matchable; ++g) {
+        std::array<float, 16> region{};
+        for (unsigned y = 0; y < 24; ++y)
+            for (unsigned x = 0; x < 16; ++x)
+                region[(y / 6) * 4 + x / 4] +=
+                    atlas.pixels[((g / 16) * 24 + y) * character_atlas_width + (g % 16) * 16 + x];
+        const float densest = *std::max_element(region.begin(), region.end());
+        for (unsigned r = 0; r < 16; ++r)
+            atlas.ramp[256 * (descriptor_row + r) + g] =
+                static_cast<std::uint8_t>(densest > 0 ? std::lround(region[r] / densest * 255) : 0);
     }
     return atlas;
 }
