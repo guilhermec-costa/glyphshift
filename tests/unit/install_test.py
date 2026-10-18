@@ -25,6 +25,9 @@ with tempfile.TemporaryDirectory(prefix='glyphshift-install-') as temporary:
     assert f'\nExec="{prefix}/bin/glyphshift-overlay"\n' in text, text
     assert '\nIcon=glyphshift\n' in text and '\nTerminal=false\n' in text, text
     assert (prefix / 'share/icons/hicolor/scalable/apps/glyphshift.svg').is_file()
+    licenses = prefix / 'share/licenses/glyphshift'
+    assert 'MIT License' in (licenses / 'LICENSE').read_text()
+    assert 'Omar Cornut' in (licenses / 'LICENSE.imgui.txt').read_text()
     if shutil.which('desktop-file-validate'):
         subprocess.run(['desktop-file-validate', str(entry)], check=True)
 

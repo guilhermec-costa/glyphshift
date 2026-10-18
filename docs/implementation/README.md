@@ -51,8 +51,11 @@ only when the user requests it.
    daemon. The system tray icon (attached games, style choice, start at
    login, quit) followed as a separate step, also done on 2026-10-18 (see
    [System tray](#m6-step-5-system-tray)).
-3. **Open-source release readiness.** Choose and add the license (see Later
-   Linux support below), CI (build and CPU tests; graphics smoke on Mesa
+3. **Open-source release readiness.** In progress (see
+   [Open-source release readiness](#open-source-release-readiness)): MIT
+   license, CI, the README animation and the PKGBUILD are done locally;
+   publishing (push, AUR, tag) waits for the user. Originally: choose and add
+   the license (see Later Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
    package and a first tagged release.
 4. **Art in motion.** The world-anchored glyph grid (camera motion estimation,
@@ -94,10 +97,11 @@ Only implement work explicitly requested by the user.
 
 ### Compatibility and validation
 
-- [ ] Retry Mesa Vulkan on an environment where the direct fixture can create
-  a drawable; the recorded NVIDIA X server fails before GlyphShift injection.
-- [ ] Run the analytic glyph-filter oracle with Mesa in a working offscreen
-  GLX environment; windowed Mesa GLX tests already passed.
+- [x] Retry Mesa Vulkan where the direct fixture can create a drawable: the
+  full Vulkan smoke passed on lavapipe under Xvfb with Khronos validation
+  (2026-10-18, see [Open-source release readiness](#open-source-release-readiness)).
+- [x] Run the analytic glyph-filter oracle with Mesa offscreen: it passed on
+  llvmpipe under Xvfb as part of the GLX smoke (2026-10-18).
 - [ ] Expand coverage to AMD/Intel hardware and additional offline Proton games.
   VKD3D/D3D12 coverage is not established by the SuperTux/DXVK test.
 - [ ] Investigate application-owned active input grabs, general XI2/raw-input
@@ -108,8 +112,8 @@ Only implement work explicitly requested by the user.
 - [ ] Investigate native Wayland input and a Gamescope-style compositor backend.
 - [ ] Add EGL only for a concrete compatibility target.
 - [ ] Design Steam-specific installation and profile UX.
-- [ ] Choose and add a project license before presenting the repository as
-  licensed open source; the existing ImGui license covers that dependency only.
+- [x] Choose and add a project license: MIT, chosen by the user on 2026-10-18
+  (`LICENSE`). Dear ImGui keeps its own MIT notice; both are installed.
 
 The original exclusions remain in force: no multiplayer/anti-cheat support,
 anti-cheat evasion, privileged targets or system-wide injection.
@@ -3410,6 +3414,56 @@ python3 tests/smoke/overlay_tray.py --build build/dev --output /tmp/glyphshift-o
    seeds the first frame.
 4. Resolved in step 3 without changing the editor: its X11 adapter already
    opens its own connection, so the overlay registers the target window.
+
+### Open-source release readiness
+
+Roadmap item 3, started on 2026-10-18. Publishing steps (pushing the CI to
+GitHub, submitting to the AUR, creating the tag) are visible to others and
+wait for the user's explicit go-ahead.
+
+- **License.** The user chose MIT: `LICENSE` (Copyright (c) 2026 Guilherme
+  China). Dear ImGui keeps its MIT notice. `cmake --install` installs both under
+  `share/licenses/glyphshift/` (`LICENSE`, `LICENSE.imgui.txt`); the install
+  test checks them.
+- **Dependencies.** The README's build list lacked `libxcomposite`,
+  `libxdamage`, `libxfixes` (overlay, M6) and `libxft` (tray); added.
+- **CI.** `.github/workflows/ci.yml` runs in `archlinux:latest` containers as an
+  unprivileged user (the launcher refuses root). Job `build`: format check,
+  Debug and Release builds and CPU tests. Job `graphics`: the GLX smoke on
+  Mesa llvmpipe and the Vulkan smoke on lavapipe with Khronos validation, in
+  Xvfb, with `GLYPHSHIFT_SMOKE_SETTLE=2.5`, keeping `smoke-evidence` as an
+  artifact. Software rendering takes longer than the smoke's fixed waits:
+  the first container run captured the classic image 0.4 s after switching
+  to illustrated, the overlay window before its first frame (showing the
+  window below it, without a compositor) and the image right after F10 on
+  lavapipe. `run.py` now waits `GLYPHSHIFT_SMOKE_SETTLE` seconds (default
+  0.25) after config changes and before captures; `overlay.py` polls for the
+  overlay's expected image up to 30 s instead of sleeping 1 s.
+- **Local CI check.** Both jobs' steps ran in a local `archlinux:latest`
+  container from a copy of the working tree made into a Git repository (the
+  format check needs Git; the first attempt without one failed there). Build:
+  format check passed; Debug and Release built without warnings and passed
+  14/14 CPU tests each. Graphics: the complete GLX smoke (including the
+  analytic and temporal oracles, the overlay, single-instance and tray
+  phases) passed on llvmpipe, and the complete Vulkan smoke passed on
+  lavapipe with validation, both through the same `cmake --build --target`
+  commands as the workflow. The workflow itself has not run on GitHub.
+- **README animation.** `docs/demo.webp` (640 px, 12 fps, 13.5 s, 3.4 MB):
+  native SuperTux's title screen, then the overlay attached to it switching
+  Comic, Newsprint and Blueprint through a live config. Recorded on the
+  NVIDIA/i3 setup by `tools/record_demo.py` (no input; ffmpeg x11grab, then
+  animated WebP, or GIF by extension). A GIF of the same clip was 7.8 MB
+  (640 px, 15 fps) or 5.8 MB (560 px, 12 fps). Its frames were inspected.
+- **AUR package.** `packaging/arch/PKGBUILD` builds the tagged GitHub source
+  tarball with CMake/Ninja (Release, prefix `/usr`), runs the CPU tests in
+  `check()` and installs with `cmake --install`. `sha256sums` stays `SKIP`
+  until the tag exists and its tarball can be hashed. `makepkg` passed from a
+  local tarball with the same layout: 14/14 tests, and the package holds the
+  private directory `/usr/lib/glyphshift`, the `/usr/bin` links, the desktop
+  entry, the icon and both licenses. `namcap` is not installed and was not run.
+
+Still to do: push and see the workflow pass on GitHub, tag `v0.1.0`, fill the
+checksum, publish to the AUR, and release notes.
 
 ### Later — Broader Linux support
 

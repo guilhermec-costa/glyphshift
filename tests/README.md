@@ -361,6 +361,22 @@ setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset release
 If the Khronos layer is not installed system-wide, run
 `VK_LAYER_VALIDATE_SYNC=1 python3 tests/smoke/test_env.py run -- ctest --preset release`.
 
+Software renderers are slower than the smoke's default waits. To run it on
+Mesa in a virtual X server, as the CI does (with `xorg-server-xvfb`, `mesa`,
+`vulkan-swrast` and `vulkan-validation-layers` installed):
+
+```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+DISPLAY=:99 GLYPHSHIFT_SMOKE_SETTLE=2.5 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+  cmake --build --preset dev --target smoke-glx
+DISPLAY=:99 GLYPHSHIFT_SMOKE_SETTLE=2.5 VK_LAYER_VALIDATE_SYNC=1 \
+  VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json \
+  cmake --build --preset dev --target smoke-vulkan
+```
+
+`GLYPHSHIFT_SMOKE_SETTLE` is the time in seconds the smoke waits for a live
+change to reach the screen (default 0.25).
+
 Observed results (historical runs and the character-selection suite: 11 Debug
 tests, 13 Release tests, Mesa GLX, and Mesa
 Vulkan/Proton limitations) are recorded in the

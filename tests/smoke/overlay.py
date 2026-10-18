@@ -269,12 +269,18 @@ try:
                                     '--preset', 'art-newsprint'], env=env, stdout=stream,
                                    stderr=subprocess.STDOUT)
     layer = wait_window('GlyphShift overlay', overlay, overlay_log)
-    time.sleep(1)
     # The overlay's own pixels equal the preview of the same source frame.
-    w, h, rendered = x.image(layer)
+    # Software renderers take seconds for the first frame; until then the
+    # window shows what is below it.
+    deadline = time.monotonic() + 30
+    while True:
+        time.sleep(.5)
+        w, h, rendered = x.image(layer)
+        worst, close = difference(rendered, expected)
+        if (close >= .999 and worst <= 8) or time.monotonic() > deadline:
+            break
     save('overlay', (w, h, rendered))
     assert (w, h) == original[:2], ((w, h), original[:2])
-    worst, close = difference(rendered, expected)
     assert close >= .999 and worst <= 8, (worst, close)
     # On screen, the fixture's region shows the overlay, not the original.
     root = x.root

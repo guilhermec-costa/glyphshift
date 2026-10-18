@@ -303,6 +303,10 @@ configure_file(cmake/install_desktop.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/insta
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_desktop.cmake")
 install(FILES data/glyphshift.svg
     DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
+# MIT notices for GlyphShift and the vendored Dear ImGui, kept with every copy.
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/glyphshift")
+install(FILES third_party/imgui/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/glyphshift"
+    RENAME LICENSE.imgui.txt)
 
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)

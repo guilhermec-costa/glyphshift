@@ -7,6 +7,12 @@ glyph art on Linux. Mix characters, solid blocks and directional contours,
 choose your palette, and shape the result while the application is running.
 An in-game editor lets you experiment and save a different style for each game.
 
+![SuperTux's title screen, then GlyphShift attached on top of it, switching between the Comic, Newsprint and Blueprint styles](docs/demo.webp)
+
+*Native SuperTux running on its own; the capture overlay is attached to its
+window and switches styles live (Comic, Newsprint, Blueprint). Recorded with
+`tools/record_demo.py`.*
+
 ![SuperTux drawn as scene-colored ASCII ink on a paper wash](docs/shape-color.png)
 
 *The default illustrated preset applied by the GPU shader to a captured SuperTux
@@ -61,7 +67,8 @@ applications rather than all Linux games.
 
 You need a C++20 compiler with floating-point `std::from_chars`, CMake 3.20+,
 Ninja, Python 3, Git, Xlib, OpenGL/GLX and Vulkan development files,
-`glslangValidator`, FreeType, Fontconfig, pkg-config, libxcb and xcb-keysyms.
+`glslangValidator`, FreeType, Fontconfig, pkg-config, libxcb, xcb-keysyms, and
+the X Composite, Damage, Fixes and Xft libraries.
 Install a monospace font or supply a local font for text character sets.
 
 On Arch Linux:
@@ -69,7 +76,7 @@ On Arch Linux:
 ```bash
 sudo pacman -S --needed base-devel cmake ninja python git libx11 libglvnd \
   vulkan-headers vulkan-icd-loader glslang freetype2 fontconfig pkgconf \
-  ttf-dejavu libxcb xcb-util-keysyms
+  ttf-dejavu libxcb xcb-util-keysyms libxcomposite libxdamage libxfixes libxft
 ```
 
 Install the Vulkan driver matching your GPU as well. From the repository root:
@@ -305,3 +312,10 @@ python3 tools/format.py --check
 Use `python3 tools/format.py --apply` to format project C/C++ files. Vendored
 sources are excluded. Before proposing a change, consult the implementation
 reference for the relevant scope and validation requirements.
+
+## License
+
+GlyphShift is released under the [MIT License](LICENSE). It includes
+[Dear ImGui](third_party/imgui), also under the MIT License
+([its notice](third_party/imgui/LICENSE.txt)). `cmake --install` installs both
+notices under `share/licenses/glyphshift`.

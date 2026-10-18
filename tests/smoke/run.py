@@ -19,6 +19,8 @@ try:x=X11()
 except RuntimeError as error:
     print('SKIP:',error);sys.exit(77)
 output=(args.output or build/'smoke-evidence'/api).resolve();output.mkdir(parents=True,exist_ok=True)
+# Seconds for a live config change or key to reach the screen; software renderers need more.
+settle=float(os.environ.get('GLYPHSHIFT_SMOKE_SETTLE','0.25'))
 env=os.environ.copy()
 for name in ['LD_PRELOAD','GLYPHSHIFT_CONFIG','GLYPHSHIFT_PROFILE','GLYPHSHIFT_PRESET','GLYPHSHIFT_LOG','GLYPHSHIFT_FIXTURE_MULTI','GLYPHSHIFT_FIXTURE_SRGB']:
     env.pop(name,None)
@@ -53,7 +55,7 @@ def launch(label,injected=True,extra=None,bounded=False):
             if process.poll() is None:process.terminate();process.wait(timeout=10)
 
 def image(window,label):
-    time.sleep(.15)
+    time.sleep(max(.15,settle))
     for attempt in range(4):
         try:picture=x.image(window);break
         except RuntimeError:
@@ -129,7 +131,7 @@ try:
     config=output/'characters.conf'
     base='enabled=true\ncolor_mode=mono\nglyph_strength=1\ncell_width=8\ncell_height=12\n'
     def characters(text):
-        temp=config.with_suffix('.tmp');temp.write_text(base+text);temp.replace(config);time.sleep(.25)
+        temp=config.with_suffix('.tmp');temp.write_text(base+text);temp.replace(config);time.sleep(settle)
     characters('character_set=classic\n')
     with launch('characters',extra={'GLYPHSHIFT_CONFIG':str(config),'GLYPHSHIFT_PRESET':'default','GLYPHSHIFT_LOG':'1'}) as (process,window,log):
         x.resize(window,800,600);classic=image(window,'characters-classic')

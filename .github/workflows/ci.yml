@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel cmake ninja python git clang \
+            libx11 libglvnd vulkan-headers vulkan-icd-loader glslang freetype2 fontconfig \
+            pkgconf ttf-dejavu libxcb xcb-util-keysyms libxcomposite libxdamage libxfixes \
+            libxft desktop-file-utils
+      - uses: actions/checkout@v4
+      - name: Prepare an unprivileged user
+        # The launcher refuses root, so builds and tests run as a regular user.
+        run: |
+          useradd --create-home builder
+          chown -R builder "$GITHUB_WORKSPACE"
+      - name: Format
+        run: runuser -u builder -- python3 tools/format.py --check
+      - name: Debug build and CPU tests
+        run: |
+          runuser -u builder -- cmake --preset dev
+          runuser -u builder -- cmake --build --preset dev
+          runuser -u builder -- ctest --preset dev --output-on-failure
+      - name: Release build and CPU tests
+        run: |
+          runuser -u builder -- cmake --preset release -DGLYPHSHIFT_GPU_SMOKE_TESTS=OFF
+          runuser -u builder -- cmake --build --preset release
+          runuser -u builder -- ctest --preset release --output-on-failure
+
+  graphics:
+    # Graphics smoke on Mesa in a virtual X server: llvmpipe (software OpenGL)
+    # and lavapipe (software Vulkan, with Khronos validation). GPU drivers and
+    # real games are not covered here. Software rendering is slow, so live
+    # changes get GLYPHSHIFT_SMOKE_SETTLE seconds to reach the screen.
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel cmake ninja python git \
+            libx11 libglvnd vulkan-headers vulkan-icd-loader glslang freetype2 fontconfig \
+            pkgconf ttf-dejavu libxcb xcb-util-keysyms libxcomposite libxdamage libxfixes \
+            libxft libxtst mesa vulkan-swrast vulkan-validation-layers xorg-server-xvfb
+      - uses: actions/checkout@v4
+      - name: Prepare an unprivileged user
+        run: |
+          useradd --create-home builder
+          chown -R builder "$GITHUB_WORKSPACE"
+      - name: Build
+        run: |
+          runuser -u builder -- cmake --preset dev
+          runuser -u builder -- cmake --build --preset dev
+      - name: GLX and Vulkan smoke on llvmpipe and lavapipe
+        run: |
+          runuser -u builder -- bash -c '
+            set -e
+            Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+            sleep 2
+            export DISPLAY=:99 GLYPHSHIFT_SMOKE_SETTLE=2.5
+            LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+              cmake --build --preset dev --target smoke-glx
+            VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json VK_LAYER_VALIDATE_SYNC=1 \
+              cmake --build --preset dev --target smoke-vulkan'
+      - name: Keep smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-evidence
+          path: build/dev/smoke-evidence
+          if-no-files-found: ignore
