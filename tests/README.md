@@ -385,6 +385,20 @@ setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
 These tests require the `/tmp` application paths documented above; they do not
 download or install dependencies. They are opt-in because they use desktop focus.
 
+The capture overlay has two focused drivers. `--application overlay-fixture`
+runs the editor script above on a GLX fixture with the overlay attached.
+`overlay_daemon.py` starts the background daemon, presses Ctrl+Alt+G on the
+focused fixture to attach, detach and attach again, then closes the fixture
+and stops the daemon. Stop your own daemon first, because both use the same
+hotkey.
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev \
+  --application overlay-fixture --output /tmp/glyphshift-overlay-editor
+python3 tests/smoke/overlay_daemon.py --build build/dev \
+  --output /tmp/glyphshift-overlay-daemon
+```
+
 Add `--level` to the SuperTux test to use the previously prepared test level.
 After checking the editor, it sends Enter to advance the introduction, verifies
 that the colored world appears, and captures the reopened panel with source

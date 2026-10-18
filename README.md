@@ -129,15 +129,26 @@ window's image on the GPU and draws the effect in its own click-through window;
 nothing is injected into the game. X11 only for now.
 
 ```bash
-sleep 3; ./build/dev/glyphshift-overlay --window "$(xdotool getactivewindow)" --preset art-comic
+./build/dev/glyphshift-overlay --preset art-comic
 ```
 
-Run that from a terminal and click the game window within three seconds; the
-window that is active when the delay ends is used. You can also pass an ID from
-`xdotool search --name "Game title"`. With the game focused, **Insert** opens the
-same editor as in launcher mode and **F10** toggles the effect; saved presets are
-kept per game. Close the game or press Ctrl+C to stop. A global attach hotkey is
-in progress; the launcher below remains the lowest-latency option.
+Leave it running, switch to the game and press **Ctrl+Alt+G** to attach
+GlyphShift to the focused window; press it again to detach. It works with any
+number of games, and each overlay ends when its game closes. Use
+`--hotkey super+shift+F9` (any of `ctrl`, `shift`, `alt`, `super` plus a key) if
+the combination is taken. Stop it with Ctrl+C; attached overlays end with it.
+
+| Key | Action |
+| --- | --- |
+| Ctrl+Alt+G | Attach to or detach from the focused game. |
+| Insert | Open or close the editor (game focused). |
+| F10 | Toggle the effect and compare with the original scene. |
+
+Saved presets are kept per game. To attach to one window without the
+background hotkey, pass its ID:
+`./build/dev/glyphshift-overlay --window "$(xdotool search --name "Game title")"`.
+The overlay adds about one frame of latency; launching through `glyphshift`
+(above) remains the lowest-latency option.
 
 ## Choose a starting style
 

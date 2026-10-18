@@ -189,7 +189,8 @@ target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
 # M6 capture overlay: reads a chosen window through X Composite and draws the
 # glyph effect in its own input-transparent window; it never enters the game.
 pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes)
-add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp)
+add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp
+    apps/overlay/daemon.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline OpenGL::GL X11::X11
     PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")

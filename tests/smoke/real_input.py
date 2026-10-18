@@ -71,21 +71,25 @@ class RealInput:
 
     def guard(self):
         if not self.belongs(self.focus()):
-            raise RuntimeError('Test application lost focus; refusing desktop input')
+            raise RuntimeError(f'Test application lost focus to 0x{self.focus():x}; refusing desktop input')
 
     def key(self, symbol, modifier=None):
+        # `modifier` is one keysym or a tuple of them, pressed in order.
         self.guard()
         code = self.x.lib.XKeysymToKeycode(self.x.display, symbol)
-        mod = self.x.lib.XKeysymToKeycode(self.x.display, modifier) if modifier else None
+        modifiers = modifier if isinstance(modifier, tuple) else (modifier,) if modifier else ()
+        mods = [self.x.lib.XKeysymToKeycode(self.x.display, m) for m in modifiers]
+        pressed = []
         try:
-            if mod:
+            for mod in mods:
                 self.test.XTestFakeKeyEvent(self.x.display, mod, True, 0)
+                pressed.append(mod)
             self.test.XTestFakeKeyEvent(self.x.display, code, True, 0)
             self.x.lib.XFlush(self.x.display)
             time.sleep(.04)
         finally:
             self.test.XTestFakeKeyEvent(self.x.display, code, False, 0)
-            if mod:
+            for mod in reversed(pressed):
                 self.test.XTestFakeKeyEvent(self.x.display, mod, False, 0)
             self.x.lib.XFlush(self.x.display)
         time.sleep(.12)

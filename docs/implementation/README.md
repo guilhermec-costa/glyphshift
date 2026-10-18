@@ -2846,6 +2846,62 @@ python3 tests/smoke/editor_apps.py --build build/dev --application overlay-fixtu
   --output /tmp/glyphshift-overlay-editor
 ```
 
+#### M6 step 4: background daemon and global hotkey
+
+`glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]`, without
+`--window`, runs in the background (`apps/overlay/daemon.{hpp,cpp}`). It
+registers one global hotkey, **Ctrl+Alt+G** by default; `--hotkey` accepts
+`ctrl`, `shift`, `alt` and `super` modifiers joined with `+` to a keysym name
+(for example `super+shift+F9`). Each press acts on the focused window:
+
+- The target is the keyboard focus resolved to its managed client (the
+  ancestor with `WM_STATE`, so Wine's inner presentation windows map to the
+  game's client), or the top-level window without a window manager;
+  `_NET_ACTIVE_WINDOW` is the fallback when focus is on the root.
+- If that window has no overlay, the daemon starts `glyphshift-overlay --window
+  ID` (itself, through `/proc/self/exe`) with the same `--preset`/`--log`;
+  otherwise it sends that overlay SIGTERM (detach). One process per game keeps
+  each game's editor session and profile separate, and a failure in one
+  overlay cannot affect the others.
+- Overlays end on their own when the game closes; the daemon reaps them and
+  forgets the window. They receive `PR_SET_PDEATHSIG` SIGTERM, so they also end
+  if the daemon is killed; on SIGINT/SIGTERM the daemon stops them, waits for
+  them and exits 0.
+- Presses within 400 ms of the previous one are ignored (key auto-repeat).
+
+This is a deliberate exception to "no root-window grabs" of the injected
+editor: a hotkey that works before any game is attached can only be a passive
+grab on the root. Only the one chosen combination is grabbed, with and without
+CapsLock/NumLock. A grab that conflicts with another client (BadAccess, checked
+with `XSync`) ends the daemon with status 1 and a message naming `--hotkey`.
+
+Verification on 2026-10-18 (NVIDIA, i3 with picom):
+
+- Invalid arguments (`--hotkey` with `--window`, unknown modifier) exit 2 with
+  usage; a second daemon on the same combination exits 1 with the conflict
+  diagnostic, and the first exits 0 on SIGTERM.
+- New focused driver `tests/smoke/overlay_daemon.py` (real XTest keyboard
+  input; `RealInput.key` now accepts several modifiers) passed: the GLX fixture
+  started without launcher showed 0.01% of its area different on screen from
+  its own pixels; Ctrl+Alt+G started one overlay child with Comic and 56.5%
+  differed; a second press ended the child and the screen matched again; a
+  third press attached again, closing the fixture ended that overlay while the
+  daemon kept running, and SIGTERM stopped the daemon with status 0.
+- Its first runs failed with "lost focus" after the first press: the test had
+  focused the fixture with `XSetInputFocus` behind i3, and when the hotkey's
+  grab ended, i3 handled the resulting FocusIn by restoring the window it
+  considered focused (the test's 1×1 sentinel). A probe without key input
+  showed that neither starting an overlay nor screen capture moves focus. The
+  driver now also focuses the fixture through `i3-msg`, as a user's click
+  would.
+
+Native SuperTux and a Proton game were not attached through the hotkey in this
+step; latency was not measured.
+
+```bash
+python3 tests/smoke/overlay_daemon.py --build build/dev --output /tmp/glyphshift-overlay-daemon
+```
+
 #### M6 technical debt (tracked)
 
 1. Resolved in step 3: one GL pipeline (`src/render/opengl/pipeline.{hpp,cpp}`,

@@ -25,6 +25,7 @@
 #include <string_view>
 
 #include "../../src/render/opengl/pipeline.hpp"
+#include "daemon.hpp"
 #include "tracker.hpp"
 
 // Standalone capture overlay (M6). Never touches the target process: it reads
@@ -54,6 +55,7 @@ using SwapInterval = void (*)(Display*, GLXDrawable, int);
 struct Options {
     Window target = 0;
     std::string preset;
+    std::string hotkey;
     bool log = false;
 };
 
@@ -65,13 +67,15 @@ Options parse(int argc, char** argv) {
             options.target = static_cast<Window>(std::strtoul(argv[++i], nullptr, 0));
         else if (argument == "--preset" && i + 1 < argc)
             options.preset = argv[++i];
+        else if (argument == "--hotkey" && i + 1 < argc)
+            options.hotkey = argv[++i];
         else if (argument == "--log")
             options.log = true;
         else
             throw std::invalid_argument("unknown argument: " + std::string(argument));
     }
-    if (!options.target)
-        throw std::invalid_argument("missing --window ID");
+    if (options.target && !options.hotkey.empty())
+        throw std::invalid_argument("--hotkey applies only without --window");
     return options;
 }
 
@@ -487,6 +491,15 @@ private:
 int main(int argc, char** argv) {
     try {
         const auto options = parse(argc, argv);
+        // Without a window, run in the background and attach with the hotkey.
+        if (!options.target) {
+            glyphshift::overlay::DaemonOptions daemon;
+            if (!options.hotkey.empty())
+                daemon.hotkey = options.hotkey;
+            daemon.preset = options.preset;
+            daemon.log = options.log;
+            return glyphshift::overlay::run_daemon(daemon);
+        }
         std::signal(SIGINT, [](int) {
             stop = 1;
         });
@@ -498,7 +511,8 @@ int main(int argc, char** argv) {
         return 0;
     } catch (const std::invalid_argument& error) {
         std::cerr << "glyphshift-overlay: " << error.what()
-                  << "\nUsage: glyphshift-overlay --window ID [--preset NAME] [--log]\n";
+                  << "\nUsage: glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]\n"
+                     "       glyphshift-overlay --window ID [--preset NAME] [--log]\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << "glyphshift-overlay: " << error.what() << '\n';
