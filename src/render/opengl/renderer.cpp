@@ -362,7 +362,7 @@ struct Context {
         auto art = art_parameters(settings);
         if (!history)
             art[art_stability] = 0;
-        gl.Uniform4fv(uniforms.art, 5, art.data());
+        gl.Uniform4fv(uniforms.art, 6, art.data());
     }
 
     void viewport(unsigned width, unsigned height) {

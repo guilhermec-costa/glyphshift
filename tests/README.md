@@ -433,6 +433,11 @@ presets do. **Saturation** (0..2) affects source color only. **Glow / ink
 bleed** pulls nearby paper toward the ink of surrounding glyphs: a phosphor
 glow on dark paper, a soft bleed on light paper. Compare 0 and 0.5 with F10.
 
+**Pixel-level contours (DoG)** traces outlines from every pixel with a difference
+of Gaussians: thin outlines become contours while gradients and fine texture do
+not. **DoG threshold** keeps only stronger outlines; **Contour votes** is the
+share of a cell's pixels that must agree. All included styles use it.
+
 **Crisp pixel glyphs** turns every pixel into ink or paper, with no gray
 antialiasing, for a pixel-art look; most included styles enable it.
 

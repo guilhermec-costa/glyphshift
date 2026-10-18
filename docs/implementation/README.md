@@ -455,6 +455,69 @@ updated contour expectation and the four crisp cases. Both API smokes require
 crisp glyphs to change the live image, and their GLX/Vulkan captures were
 identical. Focused editor tests and SuperTux were not run for this step.
 
+## Pixel-level DoG contours (art direction, phase 5, step 2)
+
+The reference shader traces outlines from a per-pixel difference of Gaussians
+and lets an 8×8 tile become a contour when enough of its pixels agree on a
+direction. Our cell lattice (25 box samples per cell) could not tell SuperTux's
+outlined ice texture from silhouettes; thicker strokes in step 1 made that more
+visible.
+
+`edge_detector=dog` (default `lattice`, unchanged) runs this in the existing
+analysis pass, without a new pass. Each cell reads up to 12×12 samples (one per
+pixel for cells up to 12 pixels, a regular stride beyond) plus a three-sample
+border. Two separable Gaussians (σ = `dog_sigma` pixels and 1.6σ, five taps)
+are subtracted and thresholded at `dog_threshold` into a binary edge band.
+Sobel on the band gives each sample's direction class (the same four classes
+as the lattice detector), and the cell's votes need `edge_votes` of its samples
+for a new contour and two thirds of that to keep one (temporal stability). The
+existing dominance rule (at least twice any other axis), contour compositing,
+crisp strokes and hysteresis are shared. `edge_threshold` applies to the
+lattice detector only. Classic and lattice images are unchanged: the default
+illustrated preview stayed pixel-identical before the presets were switched.
+
+| Setting | Range | Default |
+| --- | --- | --- |
+| `edge_detector` | `lattice` / `dog` | `lattice` |
+| `dog_sigma` | 0.3..4 px | 1.0 |
+| `dog_threshold` | 0..0.2 | 0.025 |
+| `edge_votes` | 0..1 | 0.2 |
+
+The defaults come from sweeps on the captured SuperTux frame with Newsprint:
+threshold 0.02 outlined trees but also striped the ice, 0.04 cleaned the ice
+but lost the trees, and larger σ made outlines sparser. At 0.025 and 20% votes
+trees, blocks, the trunk, the arch post and the ground are outlined while most
+ice outlines are rejected. Blueprint at 0.02 regained tree outlines but turned
+the ice into a hatching pattern, so it keeps the defaults. All eight included
+styles plus `illustrated.conf` and `illustrated-ink.conf` now use `dog`.
+
+DoG adds a fourth flag bit (4) and a sixth art vec4 (`dog_sigma`,
+`dog_threshold`, `edge_votes`, unused), so push constants grow from 112 to 128
+bytes, exactly Vulkan 1.0's guaranteed limit. Further parameters will need a
+uniform buffer. The editor shows **Pixel-level contours (DoG)** and its three
+sliders after **Contour threshold**, below the focused tests' clicks.
+
+### Step 2 verification
+
+Three new analytic oracle cases render contours only (white on black): a smooth
+ramp must produce no stroke; a one-pixel dark line must become a vertical
+stroke through every row of its cell with nothing two cells away; a two-pixel
+checkerboard must produce no stroke. Unit tests cover parsing, persistence,
+parameter placement (flags 7, slots 20–22) and invalid values. Both API smokes
+require `edge_detector=dog` to change the live image.
+
+As a rough cost check, 30 frames at 1920×1080 through `glyphshift-preview` took
+about 2.2 s with either detector; the run is dominated by PPM I/O and the
+difference was within noise (below about 1.5 ms per frame) on the RTX 3060 Ti.
+This is not a GPU timer measurement; GPU timing remains a TODO.
+
+Verified on 2026-10-18 on the existing NVIDIA/X11 setup: Debug and Release
+built without warnings; Debug CTest 12/12 and Release 14/14 including both
+graphics smokes with Khronos core/synchronization validation; all glyph SPIR-V
+modules passed `spirv-val`. DoG, crisp and static-stability smoke captures were
+identical between GLX and Vulkan. Focused editor tests and SuperTux were not
+run for this step.
+
 ## Ready-to-use style collection
 
 Eight embedded styles are listed under **Insert → Preset → Included styles**,

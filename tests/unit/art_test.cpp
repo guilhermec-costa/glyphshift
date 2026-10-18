@@ -50,14 +50,20 @@ int main() {
             "contrast=1.2\ntone_gamma=0.8\nedge_strength=0.7\nedge_threshold=0."
             "2\nforeground=0.2,0.3,0.4\nbackground=1,0.9,0.8\n"
             "shape_matching=true\nshape_threshold=0.17\nscene_paper=0.65\n"
-            "saturation=1.6\nglow=0.3\npaper_wash=true\nstability=0.7\ncrisp_glyphs=true\n");
+            "saturation=1.6\nglow=0.3\npaper_wash=true\nstability=0.7\ncrisp_glyphs=true\n"
+            "edge_detector=dog\ndog_sigma=1.4\ndog_threshold=0.03\nedge_votes=0.25\n");
         check(!parsed.warnings && parsed.value.art.illustrated && !parsed.value.art.fill &&
                   !parsed.value.art.contour_overlay && parsed.value.art.saturation == 1.6F &&
                   parsed.value.art.glow == .3F && parsed.value.art.paper_wash &&
-                  parsed.value.art.stability == .7F && parsed.value.art.crisp,
+                  parsed.value.art.stability == .7F && parsed.value.art.crisp &&
+                  parsed.value.art.dog_edges && parsed.value.art.dog_sigma == 1.4F &&
+                  parsed.value.art.dog_threshold == .03F && parsed.value.art.edge_votes == .25F,
             "illustration config");
         check(art_parameters(parsed.value)[16] == 1.6F && art_parameters(parsed.value)[17] == .3F &&
-                  art_parameters(parsed.value)[18] == 3 &&
+                  art_parameters(parsed.value)[18] == 7 &&
+                  art_parameters(parsed.value)[20] == 1.4F &&
+                  art_parameters(parsed.value)[21] == .03F &&
+                  art_parameters(parsed.value)[22] == .25F &&
                   art_parameters(parsed.value)[art_stability] == .7F,
             "saturation, glow and paper wash reach the shared shader parameters");
         check(parse_settings(serialize_settings(parsed.value)).value == parsed.value,
@@ -80,6 +86,10 @@ int main() {
                  "glow=-0.1",
                  "paper_wash=bad",
                  "crisp_glyphs=maybe",
+                 "edge_detector=sobel",
+                 "dog_sigma=0.1",
+                 "dog_threshold=0.5",
+                 "edge_votes=2",
                  "stability=1.5",
                  "stability=-1",
                  "foreground=1,2,0",

@@ -25,6 +25,8 @@ version of the effect running in the game through Proton.*
 - **Ink, paper and light:** scene-colored ink that glows on dark paper or
   prints dark on light paper, adjustable saturation, a smooth watercolor paper
   wash and a phosphor glow / ink bleed.
+- **Line art that follows the game:** pixel-level contour tracing turns real
+  outlines into `| - / \` strokes and ignores gradients and fine texture.
 - **Pixel-crisp glyphs:** optional binary glyph masks and solid outline
   strokes, so characters read like pixel art instead of blurred text.
 - **Calm in motion:** temporal stability keeps each cell's glyph while it still

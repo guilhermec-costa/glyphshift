@@ -438,6 +438,37 @@ void controls(State& state,
                 1,
                 "%.2f",
                 ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Cell lattice detector only.");
+            ImGui::Checkbox("Pixel-level contours (DoG)", &art.dog_edges);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Trace outlines from every pixel with a difference of Gaussians: thin "
+                    "lines become contours, smooth gradients and fine texture do not.");
+            if (art.dog_edges) {
+                ImGui::SliderFloat("DoG blur",
+                    &art.dog_sigma,
+                    .3F,
+                    4,
+                    "%.2f px",
+                    ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("DoG threshold",
+                    &art.dog_threshold,
+                    0,
+                    .2F,
+                    "%.3f",
+                    ImGuiSliderFlags_AlwaysClamp);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Higher keeps only stronger outlines.");
+                ImGui::SliderFloat("Contour votes",
+                    &art.edge_votes,
+                    0,
+                    1,
+                    "%.2f",
+                    ImGuiSliderFlags_AlwaysClamp);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Share of a cell's pixels that must agree on a direction.");
+            }
             ImGui::ColorEdit3("Ink / contours", art.foreground.data(), ImGuiColorEditFlags_Float);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip(

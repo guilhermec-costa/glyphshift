@@ -81,6 +81,34 @@ for cw, ch in [(3, 5), (8, 12), (13, 19), (64, 96)]:
             if abs(area - .4) > .01:
                 assert pixel == (b'\xff\xff\xff' if area >= .4 else b'\x00\x00\x00'), (name, x, y, area)
 print('4 crisp-glyph GPU cases passed: binary pixels matching analytic coverage')
+# Difference-of-Gaussians contours: render contours only (no fill), white on
+# black, so every lit pixel is a contour stroke.
+def dog_case(name, pixel):
+    w, h, cw, ch = 64, 48, 8, 12
+    source = args.output / (name + '-source.ppm')
+    source.write_bytes(f'P6\n{w} {h}\n255\n'.encode() +
+                       b''.join(bytes([pixel(x, y)]) * 3 for y in range(h) for x in range(w)))
+    config = args.output / (name + '.conf')
+    config.write_text('render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\n'
+        f'cell_width={cw}\ncell_height={ch}\nfill_enabled=false\ncontour_overlay=false\n'
+        'edge_detector=dog\nforeground=1,1,1\nbackground=0,0,0\n')
+    output = args.output / (name + '.ppm')
+    subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
+    rgb = output.read_bytes().split(b'\n', 3)[3]
+    return lambda x, y: rgb[(y * w + x) * 3]
+# A smooth ramp is not an outline.
+lit = dog_case('dog-gradient', lambda x, y: 40 + 3 * x)
+assert not any(lit(x, y) for y in range(48) for x in range(64)), 'DoG drew a contour on a gradient'
+# A one-pixel dark line through column 28 (cell 3, pixel 4) on a bright field
+# becomes a vertical stroke in that cell, through every row.
+lit = dog_case('dog-thin-line', lambda x, y: 30 if x == 28 else 220)
+assert all(lit(28, y) for y in range(12, 36)), 'DoG missed a one-pixel outline'
+assert not any(lit(x, y) for y in range(48) for x in list(range(0, 16)) + list(range(40, 64))), \
+    'DoG drew contours far from the line'
+# Fine checkerboard texture has no coherent direction.
+lit = dog_case('dog-checker', lambda x, y: 220 if (x // 2 + y // 2) % 2 else 30)
+assert not any(lit(x, y) for y in range(12, 36) for x in range(8, 56)), 'DoG outlined texture'
+print('3 DoG contour cases passed: gradient ignored, thin outline found, texture rejected')
 # Structural matching must recover every mixed quadrant silhouette, including
 # dark objects on bright paper, with both source colors and reversed mono ink.
 for mode in ['source', 'mono']:

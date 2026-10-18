@@ -256,13 +256,13 @@ int main(int argc, char** argv) {
                 glBindFramebuffer(GL_FRAMEBUFFER, cell_fbos[current]);
                 glViewport(0, 0, static_cast<GLsizei>(columns), static_cast<GLsizei>(rows));
                 glUseProgram(analysis);
-                glUniform4fv(glGetUniformLocation(analysis, "art[0]"), 5, art.data());
+                glUniform4fv(glGetUniformLocation(analysis, "art[0]"), 6, art.data());
                 glDrawArrays(GL_TRIANGLES, 0, 3);
                 glBindTexture(GL_TEXTURE_2D, cells[current]);
                 glBindFramebuffer(GL_FRAMEBUFFER, fbo);
                 glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
                 glUseProgram(program);
-                glUniform4fv(glGetUniformLocation(program, "art[0]"), 5, art.data());
+                glUniform4fv(glGetUniformLocation(program, "art[0]"), 6, art.data());
                 glDrawArrays(GL_TRIANGLES, 0, 3);
                 glReadPixels(0,
                     0,

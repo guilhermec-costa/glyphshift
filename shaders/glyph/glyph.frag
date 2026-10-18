@@ -13,7 +13,7 @@ layout(push_constant) uniform Parameters {
     uint ramp_count;
     uint output_srgb;
     float glyph_strength;
-    vec4 art[5];
+    vec4 art[6];
 } params;
 layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
@@ -36,7 +36,7 @@ uniform vec2 cell;
 uniform uint source_color;
 uniform uint ramp_count;
 uniform float glyph_strength;
-uniform vec4 art[5];
+uniform vec4 art[6];
 #define SIZE size
 #define CELL cell
 #define SOURCE_COLOR source_color
@@ -80,6 +80,66 @@ vec3 box(vec2 p) {
     return (sample_source(p) + sample_source(p + vec2(1,0)) +
             sample_source(p + vec2(0,1)) + sample_source(p + vec2(1,1))) * .25;
 }
+// Gradient direction class shared by both detectors: 0 | 1 - 2 / 3 backslash.
+int axis_of(vec2 gradient) {
+    vec2 direction = abs(gradient);
+    return direction.x > 2.414214*direction.y ? 0
+         : direction.y > 2.414214*direction.x ? 1
+         : gradient.x*gradient.y > 0.0 ? 2 : 3;
+}
+const int dog_samples = 12, dog_radius = 2;
+const int dog_patch = dog_samples + 2 + 2*dog_radius, dog_band = dog_samples + 2;
+// Difference-of-Gaussians contours: up to 12x12 samples per cell (one per
+// pixel for cells up to 12 pixels, a regular stride beyond), plus a border.
+// Two separable Gaussians (sigma, 1.6 sigma) are subtracted and thresholded
+// into a binary edge band; Sobel on that band gives each sample's direction,
+// counted into votes. Smooth gradients produce no band, and thin outlines do.
+void dog_votes(vec2 origin, inout int votes[4], out int samples) {
+    ivec2 count = ivec2(min(CELL, vec2(dog_samples)));
+    vec2 stride = CELL / vec2(count);
+    samples = count.x * count.y;
+    int width = count.x + 2 + 2*dog_radius, height = count.y + 2 + 2*dog_radius;
+    float level[dog_patch*dog_patch];
+    for (int y=0;y<height;++y) for (int x=0;x<width;++x)
+        level[y*dog_patch+x] = luma(sample_source(origin +
+            (vec2(x,y) - float(dog_radius+1) + .5) * stride));
+    float sigma = max(ART[5].x / max(stride.x, stride.y), .3);
+    float narrow[2*dog_radius+1], wide[2*dog_radius+1];
+    float narrow_sum = 0.0, wide_sum = 0.0;
+    for (int k=-dog_radius;k<=dog_radius;++k) {
+        narrow[k+dog_radius] = exp(-float(k*k) / (2.0*sigma*sigma));
+        wide[k+dog_radius] = exp(-float(k*k) / (2.0*2.56*sigma*sigma));
+        narrow_sum += narrow[k+dog_radius];
+        wide_sum += wide[k+dog_radius];
+    }
+    float row_narrow[dog_band*dog_patch], row_wide[dog_band*dog_patch];
+    for (int y=0;y<height;++y) for (int x=0;x<count.x+2;++x) {
+        float a = 0.0, b = 0.0;
+        for (int k=0;k<=2*dog_radius;++k) {
+            float v = level[y*dog_patch + x + k];
+            a += v * narrow[k];
+            b += v * wide[k];
+        }
+        row_narrow[y*dog_band+x] = a / narrow_sum;
+        row_wide[y*dog_band+x] = b / wide_sum;
+    }
+    float band[dog_band*dog_band];
+    for (int y=0;y<count.y+2;++y) for (int x=0;x<count.x+2;++x) {
+        float a = 0.0, b = 0.0;
+        for (int k=0;k<=2*dog_radius;++k) {
+            a += row_narrow[(y+k)*dog_band+x] * narrow[k];
+            b += row_wide[(y+k)*dog_band+x] * wide[k];
+        }
+        band[y*dog_band+x] = a/narrow_sum - b/wide_sum >= ART[5].y ? 1.0 : 0.0;
+    }
+    for (int y=1;y<=count.y;++y) for (int x=1;x<=count.x;++x) {
+        float v[9];
+        for (int k=0;k<9;++k) v[k] = band[(y+k/3-1)*dog_band + x+k%3-1];
+        vec2 gradient = vec2(-v[0]+v[2]-2.0*v[3]+2.0*v[5]-v[6]+v[8],
+                             -v[0]-2.0*v[1]-v[2]+v[6]+2.0*v[7]+v[8]);
+        if (dot(gradient,gradient) > 0.0) votes[axis_of(gradient)] += 1;
+    }
+}
 // Mirrors glyphshift::contour_glyph for one 3x3 neighborhood: -1 or 0..3.
 int contour(float v[9]) {
     vec2 gradient = vec2(-v[0]+v[2]-2.0*v[3]+2.0*v[5]-v[6]+v[8],
@@ -89,10 +149,7 @@ int contour(float v[9]) {
     float magnitude = length(gradient);
     if (ART[1].y <= 0.0 || magnitude*ART[1].y <= ART[1].z || magnitude <= .55*(high-low))
         return -1;
-    vec2 direction = abs(gradient);
-    return direction.x > 2.414214*direction.y ? 0
-         : direction.y > 2.414214*direction.x ? 1
-         : gradient.x*gradient.y > 0.0 ? 2 : 3;
+    return axis_of(gradient);
 }
 void main() {
     ivec2 index = ivec2(gl_FragCoord.xy);
@@ -129,29 +186,39 @@ void main() {
     // Contours vote on a 5x5 lattice spanning the cell and the first pixels of
     // its right/lower neighbors. Each interior point classifies its own 3x3
     // neighborhood; incoherent texture splits its votes and is rejected.
-    float lattice[25];
-    for (int j=0;j<5;++j) for (int i=0;i<5;++i)
-        lattice[j*5+i] = luma(box(floor(origin + CELL * vec2(i,j) * .25)));
     int votes[4] = int[4](0,0,0,0);
-    for (int y=1;y<4;++y) for (int x=1;x<4;++x) {
-        float v[9];
-        // Doubling quarter-cell differences keeps edge_threshold in the
-        // half-cell units of the original 3x3 cell-scale contour test.
-        for (int k=0;k<9;++k) v[k] = 2.0 * lattice[(y+k/3-1)*5 + x+k%3-1];
-        int axis = contour(v);
-        if (axis >= 0) votes[axis] += 1;
+    // A straight contour crossing the cell yields three coherent lattice
+    // votes; an existing contour may persist on two.
+    int needed = 3, keep = 2;
+    if ((int(ART[4].z + .5) & 4) != 0) {
+        int samples;
+        if (ART[1].y > 0.0) dog_votes(origin, votes, samples);
+        else samples = 1;
+        needed = max(2, int(ceil(ART[5].z * float(samples))));
+        keep = max(1, (2*needed + 2) / 3);
+    } else {
+        float lattice[25];
+        for (int j=0;j<5;++j) for (int i=0;i<5;++i)
+            lattice[j*5+i] = luma(box(floor(origin + CELL * vec2(i,j) * .25)));
+        for (int y=1;y<4;++y) for (int x=1;x<4;++x) {
+            float v[9];
+            // Doubling quarter-cell differences keeps edge_threshold in the
+            // half-cell units of the original 3x3 cell-scale contour test.
+            for (int k=0;k<9;++k) v[k] = 2.0 * lattice[(y+k/3-1)*5 + x+k%3-1];
+            int axis = contour(v);
+            if (axis >= 0) votes[axis] += 1;
+        }
     }
     int axis = 0;
     for (int a=1;a<4;++a) if (votes[a] > votes[axis]) axis = a;
     int second = 0;
     for (int a=0;a<4;++a) if (a != axis) second = max(second,votes[a]);
-    // A straight contour crossing the cell yields three coherent votes.
-    bool edge = votes[axis] >= 3 && votes[axis] >= 2*second;
+    bool edge = votes[axis] >= needed && votes[axis] >= 2*second;
     if (stability > 0.0 && previous_contour != 0u) {
         // An existing contour persists on weaker evidence than a new one needs,
         // so a stroke near the threshold does not blink frame to frame.
         int kept = int(previous_contour) - 1;
-        if (votes[kept] >= 2 && 2*votes[kept] >= votes[axis]) {
+        if (votes[kept] >= keep && 2*votes[kept] >= votes[axis]) {
             axis = kept;
             edge = true;
         }

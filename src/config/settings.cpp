@@ -259,6 +259,24 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
                 key.starts_with("edge_") || key == "shape_threshold" || key == "scene_paper";
             if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
                 parsed.warnings |= invalid_art;
+        } else if (key == "edge_detector") {
+            parsed.value.art.dog_edges = value == "dog";
+            if (value != "dog" && value != "lattice")
+                parsed.warnings |= invalid_art;
+        } else if (key == "dog_sigma" || key == "dog_threshold" || key == "edge_votes") {
+            float& target = key == "dog_sigma"       ? parsed.value.art.dog_sigma
+                            : key == "dog_threshold" ? parsed.value.art.dog_threshold
+                                                     : parsed.value.art.edge_votes;
+            target = key == "dog_sigma"       ? defaults.art.dog_sigma
+                     : key == "dog_threshold" ? defaults.art.dog_threshold
+                                              : defaults.art.edge_votes;
+            if (!number(value,
+                    target,
+                    key == "dog_sigma" ? .3F : 0,
+                    key == "dog_sigma"       ? 4
+                    : key == "dog_threshold" ? .2F
+                                             : 1))
+                parsed.warnings |= invalid_art;
         } else if (key == "saturation" || key == "glow" || key == "stability") {
             const bool unit = key != "saturation";
             float& target = key == "glow"        ? parsed.value.art.glow
@@ -351,6 +369,10 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
 
 bool valid_art(const ArtSettings& a) noexcept {
     if (!std::isfinite(a.saturation) || a.saturation < 0 || a.saturation > 2)
+        return false;
+    if (!std::isfinite(a.dog_sigma) || a.dog_sigma < .3F || a.dog_sigma > 4 ||
+        !std::isfinite(a.dog_threshold) || a.dog_threshold < 0 || a.dog_threshold > .2F ||
+        !std::isfinite(a.edge_votes) || a.edge_votes < 0 || a.edge_votes > 1)
         return false;
     for (const float v : {a.exposure, a.contrast, a.gamma})
         if (!std::isfinite(v) || v < .25F || v > 4)

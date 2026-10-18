@@ -191,6 +191,10 @@ std::string serialize_settings(const Settings& s) {
            "\nscene_paper=" + decimal(s.art.scene_paper) +
            "\npaper_wash=" + (s.art.paper_wash ? "true" : "false") +
            "\ncrisp_glyphs=" + (s.art.crisp ? "true" : "false") +
+           "\nedge_detector=" + (s.art.dog_edges ? "dog" : "lattice") +
+           "\ndog_sigma=" + decimal(s.art.dog_sigma) +
+           "\ndog_threshold=" + decimal(s.art.dog_threshold) +
+           "\nedge_votes=" + decimal(s.art.edge_votes) +
            "\nsaturation=" + decimal(s.art.saturation) + "\nglow=" + decimal(s.art.glow) +
            "\nstability=" + decimal(s.art.stability) + "\nforeground=" + rgb(s.art.foreground) +
            "\nbackground=" + rgb(s.art.background) + "\n";

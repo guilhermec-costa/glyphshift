@@ -14,6 +14,12 @@ struct ArtSettings {
     bool paper_wash = false;
     // Binary glyph masks: every pixel is ink or paper, like pixel-art glyphs.
     bool crisp = false;
+    // Contour detector: false votes on a 5x5 cell lattice; true uses a
+    // pixel-level difference of Gaussians, voted per cell.
+    bool dog_edges = false;
+    // DoG blur sigma in pixels (0.3..4), band threshold (0..0.2) and the share
+    // of a cell's samples that must agree on a direction (0..1).
+    float dog_sigma = 1.0F, dog_threshold = 0.025F, edge_votes = 0.2F;
     float shape_threshold = 0.2F, scene_paper = 0.0F;
     float exposure = 1.0F, contrast = 1.0F, gamma = 1.0F;
     float edge_strength = 1.0F, edge_threshold = 0.18F;
@@ -38,11 +44,12 @@ struct Settings {
     bool operator==(const Settings&) const = default;
 };
 
-// Five vec4s, shared by the GL uniforms and Vulkan push constants. Renderers
-// zero the last entry (stability) whenever no valid previous frame exists.
+// Six vec4s, shared by the GL uniforms and Vulkan push constants (128 bytes in
+// total, Vulkan 1.0's guaranteed limit). Renderers zero the stability entry
+// whenever no valid previous frame exists.
 inline constexpr std::size_t art_stability = 19;
 
-inline std::array<float, 20> art_parameters(const Settings& s) {
+inline std::array<float, 24> art_parameters(const Settings& s) {
     const auto& a = s.art;
     return {a.exposure,
         a.contrast,
@@ -62,9 +69,13 @@ inline std::array<float, 20> art_parameters(const Settings& s) {
         a.scene_paper,
         a.saturation,
         a.glow,
-        // Bit flags: 1 paper wash, 2 crisp glyphs.
-        (a.paper_wash ? 1.0F : 0.0F) + (a.crisp ? 2.0F : 0.0F),
-        a.stability};
+        // Bit flags: 1 paper wash, 2 crisp glyphs, 4 DoG contours.
+        (a.paper_wash ? 1.0F : 0.0F) + (a.crisp ? 2.0F : 0.0F) + (a.dog_edges ? 4.0F : 0.0F),
+        a.stability,
+        a.dog_sigma,
+        a.dog_threshold,
+        a.edge_votes,
+        0};
 }
 
 enum SettingWarning : std::uint32_t {

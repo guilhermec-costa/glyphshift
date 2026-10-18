@@ -171,6 +171,8 @@ try:
         # grid holds the same decisions, so ping-pong plumbing is exact.
         characters(art+'stability=1\n')
         assert image(window,'illustrated-stable')==illustrated,'temporal stability changed a static scene'
+        characters(art+'edge_detector=dog\n')
+        assert image(window,'illustrated-dog')!=illustrated,'DoG contours did not change image'
         characters(art+'crisp_glyphs=true\n')
         assert image(window,'illustrated-crisp')!=illustrated,'crisp glyphs did not change image'
         characters(art+'glow=0.8\n')
