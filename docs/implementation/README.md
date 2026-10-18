@@ -2806,11 +2806,15 @@ window-manager frame moves were not exercised live under i3 for this step.
 
 #### M6 technical debt (tracked)
 
-1. Two GL implementations of the two passes: the injected renderer (GL through
-   `dlsym`, host state saved and restored) and `GlyphPasses` (overlay and
-   preview). The shader is shared; the cell textures, ping-pong and history
-   plumbing are duplicated. Planned with step 3, by parameterizing the module
-   over the GL function table.
+1. Resolved in step 3: one GL pipeline (`src/render/opengl/pipeline.{hpp,cpp}`,
+   static library `glyphshift_gl_pipeline`) built on the run-time GL table
+   (`gl_api.cpp`) owns the programs, glyph atlas, cell grids and history, and
+   editor drawing. The injected renderer keeps only capture, state
+   preservation (GlState), context bookkeeping and the busy-state checks; the
+   overlay and preview use the same module, and `GlyphPasses` was removed.
+   After the change five reference previews stayed pixel-identical, the
+   injected library's exports were unchanged, and CTest plus both API smokes
+   (state probes, shader-failure pass-through, overlay) passed.
 2. Resolved in step 2: window tracking left the single overlay source file.
 3. With `--preset`, the overlay reparses the included style on every frame. It
    is cheap but per-frame work; to be removed with the step 3 editor.

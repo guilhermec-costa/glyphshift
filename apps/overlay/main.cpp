@@ -1,4 +1,3 @@
-#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <GL/glx.h>
@@ -22,7 +21,7 @@
 #include <string>
 #include <string_view>
 
-#include "../../src/render/standalone/glyph_passes.hpp"
+#include "../../src/render/opengl/pipeline.hpp"
 #include "tracker.hpp"
 
 // Standalone capture overlay (M6, step 1). Never touches the target process:
@@ -114,7 +113,7 @@ public:
 
         create_window(screen, target);
         create_context(screen);
-        passes_ = std::make_unique<glyphshift::standalone::GlyphPasses>();
+        pipeline_ = std::make_unique<glyphshift::opengl::Pipeline>(glyphshift::opengl::Caps{});
         glGenTextures(1, &source_);
         glBindTexture(GL_TEXTURE_2D, source_);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -127,7 +126,8 @@ public:
         if (display_ && context_)
             glXMakeCurrent(display_, window_, context_);
         release_pixmap();
-        passes_.reset();
+        cells_.release();
+        pipeline_.reset();
         if (source_)
             glDeleteTextures(1, &source_);
         if (context_) {
@@ -188,7 +188,8 @@ private:
     GLuint source_ = 0;
     BindTexImage bind_ = nullptr;
     ReleaseTexImage release_ = nullptr;
-    std::unique_ptr<glyphshift::standalone::GlyphPasses> passes_;
+    std::unique_ptr<glyphshift::opengl::Pipeline> pipeline_;
+    glyphshift::opengl::Target cells_;
     std::unique_ptr<Tracker> tracker_;
     Tracker::State state_{};
     bool mapped_ = false, enabled_ = true, dirty_ = true;
@@ -377,7 +378,7 @@ private:
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glBindTexture(GL_TEXTURE_2D, source_);
         bind_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, nullptr);
-        passes_->draw(source_, width_, height_, top_down_, settings);
+        pipeline_->draw(cells_, source_, width_, height_, top_down_, settings, 0);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_);
         release_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT);

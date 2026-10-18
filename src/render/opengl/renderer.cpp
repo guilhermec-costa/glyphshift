@@ -19,56 +19,9 @@
 
 #include "gl_api.hpp"
 #include "gl_state.hpp"
-#include "glyph_shaders.hpp"
+#include "pipeline.hpp"
 
 namespace glyphshift::opengl {
-const GlxApi& glx() {
-    static const GlxApi value = [] {
-        GlxApi result;
-        result.context =
-            reinterpret_cast<decltype(result.context)>(dlsym(RTLD_NEXT, "glXGetCurrentContext"));
-        result.drawable =
-            reinterpret_cast<decltype(result.drawable)>(dlsym(RTLD_NEXT, "glXGetCurrentDrawable"));
-        result.display =
-            reinterpret_cast<decltype(result.display)>(dlsym(RTLD_NEXT, "glXGetCurrentDisplay"));
-        result.query =
-            reinterpret_cast<decltype(result.query)>(dlsym(RTLD_NEXT, "glXQueryDrawable"));
-        return result;
-    }();
-    return value;
-}
-
-const GlApi& api() {
-    static const GlApi value = [] {
-        GlApi result;
-        using GetProc = void (*(*)(const GLubyte*))();
-        auto get = reinterpret_cast<GetProc>(dlsym(RTLD_NEXT, "glXGetProcAddressARB"));
-        if (!get)
-            get = reinterpret_cast<GetProc>(dlsym(RTLD_NEXT, "glXGetProcAddress"));
-        if (!get)
-            return result;
-        result.ViewportIndexedf = reinterpret_cast<decltype(result.ViewportIndexedf)>(
-            get(reinterpret_cast<const GLubyte*>("glViewportIndexedf")));
-        result.ScissorIndexed = reinterpret_cast<decltype(result.ScissorIndexed)>(
-            get(reinterpret_cast<const GLubyte*>("glScissorIndexed")));
-        result.ClipControl = reinterpret_cast<decltype(result.ClipControl)>(
-            get(reinterpret_cast<const GLubyte*>("glClipControl")));
-        result.BlendFuncSeparatei = reinterpret_cast<decltype(result.BlendFuncSeparatei)>(
-            get(reinterpret_cast<const GLubyte*>("glBlendFuncSeparatei")));
-        result.BlendEquationSeparatei = reinterpret_cast<decltype(result.BlendEquationSeparatei)>(
-            get(reinterpret_cast<const GLubyte*>("glBlendEquationSeparatei")));
-        result.available = true;
-#define LOAD(member, name)                                                                       \
-    result.member =                                                                              \
-        reinterpret_cast<decltype(result.member)>(get(reinterpret_cast<const GLubyte*>(#name))); \
-    result.available &= result.member != nullptr;
-        GLYPHSHIFT_GL_FUNCTIONS(LOAD)
-#undef LOAD
-        return result;
-    }();
-    return value;
-}
-
 namespace {
 void diagnostic(const char* text) noexcept {
     const auto ignored = write(STDERR_FILENO, text, std::strlen(text));
@@ -78,28 +31,14 @@ void diagnostic(const char* text) noexcept {
 struct Drawable {
     GLuint image = 0, framebuffer = 0;
     unsigned width = 0, height = 0;
-    // One RGBA32UI texel per cell, written by the illustrated analysis pass.
-    // The two grids alternate: one holds the previous frame's decisions.
-    std::array<GLuint, 2> cells{}, cell_framebuffers{};
-    unsigned columns = 0, rows = 0, current = 0;
-    // The previous grid is usable history only after an illustrated frame
-    // with identical settings (grid, glyph atlas and every art control).
-    bool history = false;
-    Settings previous{};
-};
-
-struct Uniforms {
-    GLint size = -1, cell = -1, source_color = -1, glyph_strength = -1, art = -1;
+    Target cells;
 };
 
 struct Context {
-    GLuint program = 0, analysis = 0, vao = 0, atlas = 0, ramp = 0;
-    GLuint ui_program = 0, ui_vao = 0, ui_vertices = 0, ui_indices = 0, ui_font = 0;
-    bool indexed_blend = false;
-    GLint ui_scale = -1, ui_translate = -1;
-    Uniforms compose_uniforms, analysis_uniforms;
+    std::unique_ptr<Pipeline> pipeline;
     unsigned clip_count = 0, tf_bindings = 0;
     bool disabled = false, caps_ready = false, viewport_array = false, clip_control = false;
+    bool indexed_blend = false;
     unsigned draw_buffers = 0;
     std::atomic<bool> bound{true}, retired{false};
     std::unordered_map<GLXDrawable, Drawable> drawables;
@@ -112,53 +51,10 @@ struct Context {
                 gl.DeleteFramebuffers(1, &drawable.framebuffer);
             if (drawable.image)
                 gl.DeleteTextures(1, &drawable.image);
-            for (auto& framebuffer : drawable.cell_framebuffers)
-                if (framebuffer)
-                    gl.DeleteFramebuffers(1, &framebuffer);
-            for (auto& cells : drawable.cells)
-                if (cells)
-                    gl.DeleteTextures(1, &cells);
+            drawable.cells.release();
         }
         drawables.clear();
-        if (atlas)
-            gl.DeleteTextures(1, &atlas);
-        if (ramp)
-            gl.DeleteTextures(1, &ramp);
-        if (vao)
-            gl.DeleteVertexArrays(1, &vao);
-        if (program)
-            gl.DeleteProgram(program);
-        if (analysis)
-            gl.DeleteProgram(analysis);
-        if (ui_program)
-            gl.DeleteProgram(ui_program);
-        if (ui_vao)
-            gl.DeleteVertexArrays(1, &ui_vao);
-        if (ui_font)
-            gl.DeleteTextures(1, &ui_font);
-        if (ui_vertices)
-            gl.DeleteBuffers(1, &ui_vertices);
-        if (ui_indices)
-            gl.DeleteBuffers(1, &ui_indices);
-        ui_program = ui_vao = ui_font = ui_vertices = ui_indices = 0;
-        atlas = ramp = vao = program = analysis = 0;
-    }
-
-    GLuint shader(GLenum type, const char* source) {
-        const auto& gl = api();
-        const auto shader = gl.CreateShader(type);
-        gl.ShaderSource(shader, 1, &source, nullptr);
-        gl.CompileShader(shader);
-        GLint ok = 0;
-        gl.GetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-        if (!ok) {
-            char log[2048]{};
-            gl.GetShaderInfoLog(shader, sizeof(log), nullptr, log);
-            diagnostic(log);
-            gl.DeleteShader(shader);
-            throw std::runtime_error("OpenGL glyph shader failed");
-        }
-        return shader;
+        pipeline.reset();
     }
 
     void probe() {
@@ -202,360 +98,10 @@ struct Context {
         caps_ready = true;
     }
 
-    glyphshift::CharacterSelection selection{};
-    unsigned selected_count = 10;
-    std::unique_ptr<CharacterAtlas> character_data;
-
-    void update_characters(const glyphshift::CharacterSelection& value) {
-        const auto& gl = api();
-        const bool rebuilt = !character_data || selection != value;
-        if (rebuilt) {
-            character_data = std::make_unique<CharacterAtlas>(build_character_atlas(value));
-            selection = value;
-        }
-        const auto& data = *character_data;
-        selected_count = data.count;
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, atlas);
-        gl.TexImage2D(GL_TEXTURE_2D,
-            0,
-            GL_R32F,
-            integral_width,
-            integral_height,
-            0,
-            GL_RED,
-            GL_FLOAT,
-            data.integral.data());
-        gl.ActiveTexture(GL_TEXTURE2);
-        gl.BindTexture(GL_TEXTURE_2D, ramp);
-        gl.TexImage2D(GL_TEXTURE_2D,
-            0,
-            GL_R8UI,
-            256,
-            ramp_height,
-            0,
-            GL_RED_INTEGER,
-            GL_UNSIGNED_BYTE,
-            data.ramp.data());
-        for (const auto current : {program, analysis}) {
-            gl.UseProgram(current);
-            gl.Uniform1ui(gl.GetUniformLocation(current, "ramp_count"), selected_count);
-        }
-        editor::character_report(data.diagnostic.data());
-        if (rebuilt && data.diagnostic[0]) {
-            diagnostic(data.diagnostic.data());
-            diagnostic("\n");
-        }
-    }
-
-    GLuint link(const char* fragment) {
-        const auto& gl = api();
-        const auto result = gl.CreateProgram();
-        for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
-            const auto object = shader(static_cast<GLenum>(type),
-                type == GL_VERTEX_SHADER ? shaders::vertex : fragment);
-            gl.AttachShader(result, object);
-            gl.DeleteShader(object);
-        }
-        gl.LinkProgram(result);
-        GLint ok = 0;
-        gl.GetProgramiv(result, GL_LINK_STATUS, &ok);
-        if (!ok) {
-            char log[2048]{};
-            gl.GetProgramInfoLog(result, sizeof(log), nullptr, log);
-            diagnostic(log);
-            gl.DeleteProgram(result);
-            throw std::runtime_error("OpenGL glyph link failed");
-        }
-        return result;
-    }
-
-    // NVIDIA compiles a program for the framebuffer bound at link time and
-    // recompiles it, with a performance warning, when first drawn into a
-    // different kind. Link the per-cell pass while a temporary integer FBO like
-    // its real target is bound. Bindings are restored by the caller's GlState.
-    GLuint link_offscreen(const char* fragment) {
-        const auto& gl = api();
-        GLuint target = 0, framebuffer = 0;
-        gl.GenTextures(1, &target);
-        gl.GenFramebuffers(1, &framebuffer);
-        GLuint result = 0;
-        try {
-            if (!target || !framebuffer)
-                throw std::runtime_error("GL link target allocation failed");
-            gl.ActiveTexture(GL_TEXTURE3);
-            gl.BindTexture(GL_TEXTURE_2D, target);
-            texture_parameters(gl);
-            gl.TexImage2D(GL_TEXTURE_2D,
-                0,
-                GL_RGBA32UI,
-                1,
-                1,
-                0,
-                GL_RGBA_INTEGER,
-                GL_UNSIGNED_INT,
-                nullptr);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-            gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                target,
-                0);
-            result = link(fragment);
-        } catch (...) {
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            gl.DeleteFramebuffers(1, &framebuffer);
-            gl.DeleteTextures(1, &target);
-            throw;
-        }
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        gl.DeleteFramebuffers(1, &framebuffer);
-        gl.DeleteTextures(1, &target);
-        return result;
-    }
-
-    void initialize(const glyphshift::CharacterSelection& characters) {
-        const auto& gl = api();
-        program = link(shaders::fragment);
-        analysis = link_offscreen(shaders::analysis);
-        gl.GenVertexArrays(1, &vao);
-        gl.GenTextures(1, &atlas);
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, atlas);
-        texture_parameters(gl);
-        gl.GenTextures(1, &ramp);
-        gl.ActiveTexture(GL_TEXTURE2);
-        gl.BindTexture(GL_TEXTURE_2D, ramp);
-        texture_parameters(gl);
-        if (!vao || !atlas || !ramp)
-            throw std::runtime_error("GL object allocation failed");
-        for (const auto current : {program, analysis}) {
-            gl.UseProgram(current);
-            gl.Uniform1i(gl.GetUniformLocation(current, "source_image"), 0);
-            gl.Uniform1i(gl.GetUniformLocation(current, "atlas_image"), 1);
-            gl.Uniform1i(gl.GetUniformLocation(current, "ramp_image"), 2);
-            gl.Uniform1i(gl.GetUniformLocation(current, "cell_image"), 3);
-            auto& uniforms = current == program ? compose_uniforms : analysis_uniforms;
-            uniforms.size = gl.GetUniformLocation(current, "size");
-            uniforms.cell = gl.GetUniformLocation(current, "cell");
-            uniforms.source_color = gl.GetUniformLocation(current, "source_color");
-            uniforms.glyph_strength = gl.GetUniformLocation(current, "glyph_strength");
-            uniforms.art = gl.GetUniformLocation(current, "art[0]");
-        }
-        update_characters(characters);
-    }
-
-    void parameters(GLuint current,
-        const Uniforms& uniforms,
-        unsigned width,
-        unsigned height,
-        const Settings& settings,
-        bool history) {
-        const auto& gl = api();
-        gl.UseProgram(current);
-        gl.Uniform2f(uniforms.size, static_cast<float>(width), static_cast<float>(height));
-        gl.Uniform2f(uniforms.cell,
-            static_cast<float>(settings.cell_width),
-            static_cast<float>(settings.cell_height));
-        gl.Uniform1ui(uniforms.source_color, settings.source_color ? 1 : 0);
-        gl.Uniform1f(uniforms.glyph_strength, settings.glyph_strength);
-        auto art = art_parameters(settings);
-        if (!history)
-            art[art_stability] = 0;
-        gl.Uniform4fv(uniforms.art, 6, art.data());
-    }
-
-    void viewport(unsigned width, unsigned height) {
-        const auto& gl = api();
-        if (viewport_array)
-            gl.ViewportIndexedf(0, 0, 0, static_cast<float>(width), static_cast<float>(height));
-        else
-            gl.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-    }
-
-    // Allocation happens only when the window or cell size changes the grid,
-    // which also discards the history.
-    void prepare_cells(Drawable& drawable, unsigned columns, unsigned rows) {
-        const auto& gl = api();
-        if (!drawable.cells[0]) {
-            gl.GenTextures(2, drawable.cells.data());
-            gl.GenFramebuffers(2, drawable.cell_framebuffers.data());
-            if (!drawable.cells[0] || !drawable.cells[1] || !drawable.cell_framebuffers[0] ||
-                !drawable.cell_framebuffers[1])
-                throw std::runtime_error("GL cell object allocation failed");
-        }
-        if (drawable.columns == columns && drawable.rows == rows)
-            return;
-        drawable.history = false;
-        gl.ActiveTexture(GL_TEXTURE3);
-        for (unsigned i = 0; i < 2; ++i) {
-            gl.BindTexture(GL_TEXTURE_2D, drawable.cells[i]);
-            texture_parameters(gl);
-            gl.TexImage2D(GL_TEXTURE_2D,
-                0,
-                GL_RGBA32UI,
-                static_cast<GLsizei>(columns),
-                static_cast<GLsizei>(rows),
-                0,
-                GL_RGBA_INTEGER,
-                GL_UNSIGNED_INT,
-                nullptr);
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffers[i]);
-            gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                drawable.cells[i],
-                0);
-            if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                throw std::runtime_error("OpenGL glyph cell framebuffer incomplete");
-        }
-        drawable.columns = columns;
-        drawable.rows = rows;
-    }
-
     void forget_history() {
         for (auto& [handle, drawable] : drawables) {
             (void)handle;
-            drawable.history = false;
-        }
-    }
-
-    static void texture_parameters(const GlApi& gl) {
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-
-    void draw_editor(const ImDrawData& data, unsigned width, unsigned height) {
-        const auto& gl = api();
-        if (!ui_program) {
-            ui_program = gl.CreateProgram();
-            for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
-                const auto object = shader(static_cast<GLenum>(type),
-                    type == GL_VERTEX_SHADER ? shaders::editor_vertex : shaders::editor_fragment);
-                gl.AttachShader(ui_program, object);
-                gl.DeleteShader(object);
-            }
-            gl.LinkProgram(ui_program);
-            GLint ok = 0;
-            gl.GetProgramiv(ui_program, GL_LINK_STATUS, &ok);
-            if (!ok)
-                throw std::runtime_error("OpenGL editor shader link failed");
-            ui_scale = gl.GetUniformLocation(ui_program, "scale");
-            ui_translate = gl.GetUniformLocation(ui_program, "translate");
-            gl.GenVertexArrays(1, &ui_vao);
-            gl.GenBuffers(1, &ui_vertices);
-            gl.GenBuffers(1, &ui_indices);
-            gl.GenTextures(1, &ui_font);
-            gl.ActiveTexture(GL_TEXTURE0);
-            gl.BindTexture(GL_TEXTURE_2D, ui_font);
-            texture_parameters(gl);
-            const auto font = editor::font();
-            gl.TexImage2D(GL_TEXTURE_2D,
-                0,
-                GL_R8,
-                font.width,
-                font.height,
-                0,
-                GL_RED,
-                GL_UNSIGNED_BYTE,
-                font.pixels);
-            if (!ui_vao || !ui_vertices || !ui_indices || !ui_font)
-                throw std::runtime_error("OpenGL editor allocation failed");
-        }
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        gl.DrawBuffer(GL_BACK);
-        if (viewport_array)
-            gl.ViewportIndexedf(0, 0, 0, static_cast<float>(width), static_cast<float>(height));
-        else
-            gl.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-        gl.Enablei(GL_BLEND, 0);
-        if (indexed_blend) {
-            gl.BlendEquationSeparatei(0, GL_FUNC_ADD, GL_FUNC_ADD);
-            gl.BlendFuncSeparatei(0,
-                GL_SRC_ALPHA,
-                GL_ONE_MINUS_SRC_ALPHA,
-                GL_ONE,
-                GL_ONE_MINUS_SRC_ALPHA);
-        } else {
-            gl.BlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-            gl.BlendFuncSeparate(GL_SRC_ALPHA,
-                GL_ONE_MINUS_SRC_ALPHA,
-                GL_ONE,
-                GL_ONE_MINUS_SRC_ALPHA);
-        }
-        if (viewport_array)
-            gl.Enablei(GL_SCISSOR_TEST, 0);
-        else
-            gl.Enable(GL_SCISSOR_TEST);
-        gl.UseProgram(ui_program);
-        gl.Uniform2f(ui_scale,
-            2.0F / static_cast<float>(width),
-            -2.0F / static_cast<float>(height));
-        gl.Uniform2f(ui_translate, -1, 1);
-        gl.Uniform1i(gl.GetUniformLocation(ui_program, "font_image"), 0);
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, ui_font);
-        gl.BindSampler(0, 0);
-        gl.BindVertexArray(ui_vao);
-        gl.BindBuffer(GL_ARRAY_BUFFER, ui_vertices);
-        gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, ui_indices);
-        for (GLuint i = 0; i < 3; ++i)
-            gl.EnableVertexAttribArray(i);
-        gl.VertexAttribPointer(0,
-            2,
-            GL_FLOAT,
-            GL_FALSE,
-            sizeof(ImDrawVert),
-            reinterpret_cast<void*>(offsetof(ImDrawVert, pos)));
-        gl.VertexAttribPointer(1,
-            2,
-            GL_FLOAT,
-            GL_FALSE,
-            sizeof(ImDrawVert),
-            reinterpret_cast<void*>(offsetof(ImDrawVert, uv)));
-        gl.VertexAttribPointer(2,
-            4,
-            GL_UNSIGNED_BYTE,
-            GL_TRUE,
-            sizeof(ImDrawVert),
-            reinterpret_cast<void*>(offsetof(ImDrawVert, col)));
-        for (const auto* list : data.CmdLists) {
-            gl.BufferData(GL_ARRAY_BUFFER,
-                list->VtxBuffer.Size * static_cast<GLsizeiptr>(sizeof(ImDrawVert)),
-                list->VtxBuffer.Data,
-                GL_STREAM_DRAW);
-            gl.BufferData(GL_ELEMENT_ARRAY_BUFFER,
-                list->IdxBuffer.Size * static_cast<GLsizeiptr>(sizeof(ImDrawIdx)),
-                list->IdxBuffer.Data,
-                GL_STREAM_DRAW);
-            for (const auto& cmd : list->CmdBuffer) {
-                if (cmd.UserCallback)
-                    continue;  // The shared editor never installs callbacks or custom
-                               // textures.
-                const int x = std::max(0, static_cast<int>(cmd.ClipRect.x));
-                const int y = std::max(0, static_cast<int>(cmd.ClipRect.y));
-                const int right =
-                    std::min(static_cast<int>(width), static_cast<int>(cmd.ClipRect.z));
-                const int bottom =
-                    std::min(static_cast<int>(height), static_cast<int>(cmd.ClipRect.w));
-                if (right <= x || bottom <= y)
-                    continue;
-                if (viewport_array)
-                    gl.ScissorIndexed(0,
-                        x,
-                        static_cast<int>(height) - bottom,
-                        right - x,
-                        bottom - y);
-                else
-                    gl.Scissor(x, static_cast<int>(height) - bottom, right - x, bottom - y);
-                gl.DrawElementsBaseVertex(GL_TRIANGLES,
-                    static_cast<GLsizei>(cmd.ElemCount),
-                    sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
-                    reinterpret_cast<void*>(cmd.IdxOffset * sizeof(ImDrawIdx)),
-                    static_cast<GLint>(cmd.VtxOffset));
-            }
+            drawable.cells.history = false;
         }
     }
 
@@ -580,6 +126,60 @@ struct Context {
         return false;
     }
 
+    // Copies the default back buffer into this drawable's capture texture.
+    void capture(Drawable& drawable, unsigned width, unsigned height) {
+        const auto& gl = api();
+        gl.ActiveTexture(GL_TEXTURE0);
+        if (!drawable.image) {
+            gl.GenTextures(1, &drawable.image);
+            gl.GenFramebuffers(1, &drawable.framebuffer);
+            if (!drawable.image || !drawable.framebuffer)
+                throw std::runtime_error("GL capture object allocation failed");
+        }
+        gl.BindTexture(GL_TEXTURE_2D, drawable.image);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (drawable.width != width || drawable.height != height) {
+            gl.TexImage2D(GL_TEXTURE_2D,
+                0,
+                GL_RGBA8,
+                static_cast<GLsizei>(width),
+                static_cast<GLsizei>(height),
+                0,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                nullptr);
+            drawable.width = width;
+            drawable.height = height;
+            GLint allocated_width = 0, allocated_height = 0;
+            gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &allocated_width);
+            gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &allocated_height);
+            if (allocated_width != static_cast<GLint>(width) ||
+                allocated_height != static_cast<GLint>(height))
+                throw std::runtime_error("GL capture allocation failed");
+        }
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.framebuffer);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            drawable.image,
+            0);
+        if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw std::runtime_error("OpenGL glyph capture framebuffer incomplete");
+        gl.BlitFramebuffer(0,
+            0,
+            static_cast<GLint>(width),
+            static_cast<GLint>(height),
+            0,
+            0,
+            static_cast<GLint>(width),
+            static_cast<GLint>(height),
+            GL_COLOR_BUFFER_BIT,
+            GL_NEAREST);
+    }
+
     void draw(GLXDrawable handle,
         unsigned width,
         unsigned height,
@@ -598,99 +198,15 @@ struct Context {
         gl.GetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
         if (!double_buffer)
             return;
+        if (!pipeline)
+            pipeline = std::make_unique<Pipeline>(Caps{viewport_array, indexed_blend});
         if (settings.enabled) {
-            if (!program)
-                initialize(settings.glyphs);
-            else if (selection != settings.glyphs)
-                update_characters(settings.glyphs);
             auto& drawable = drawables[handle];
-            gl.ActiveTexture(GL_TEXTURE0);
-            if (!drawable.image) {
-                gl.GenTextures(1, &drawable.image);
-                gl.GenFramebuffers(1, &drawable.framebuffer);
-                if (!drawable.image || !drawable.framebuffer)
-                    throw std::runtime_error("GL capture object allocation failed");
-            }
-            gl.BindTexture(GL_TEXTURE_2D, drawable.image);
-            texture_parameters(gl);
-            if (drawable.width != width || drawable.height != height) {
-                gl.TexImage2D(GL_TEXTURE_2D,
-                    0,
-                    GL_RGBA8,
-                    static_cast<GLsizei>(width),
-                    static_cast<GLsizei>(height),
-                    0,
-                    GL_RGBA,
-                    GL_UNSIGNED_BYTE,
-                    nullptr);
-                drawable.width = width;
-                drawable.height = height;
-                GLint allocated_width = 0, allocated_height = 0;
-                gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &allocated_width);
-                gl.GetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &allocated_height);
-                if (allocated_width != static_cast<GLint>(width) ||
-                    allocated_height != static_cast<GLint>(height))
-                    throw std::runtime_error("GL capture allocation failed");
-            }
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.framebuffer);
-            gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                drawable.image,
-                0);
-            if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                throw std::runtime_error("OpenGL glyph capture framebuffer incomplete");
-            gl.BlitFramebuffer(0,
-                0,
-                static_cast<GLint>(width),
-                static_cast<GLint>(height),
-                0,
-                0,
-                static_cast<GLint>(width),
-                static_cast<GLint>(height),
-                GL_COLOR_BUFFER_BIT,
-                GL_NEAREST);
-            gl.BindVertexArray(vao);
-            const bool illustrated = settings.art.illustrated;
-            bool history = false;
-            if (illustrated) {
-                prepare_cells(drawable,
-                    (width + settings.cell_width - 1) / settings.cell_width,
-                    (height + settings.cell_height - 1) / settings.cell_height);
-                history = drawable.history && drawable.previous == settings;
-                drawable.current ^= 1U;
-            }
-            // During analysis, unit 3 holds the previous grid; composition
-            // then reads the grid just written.
-            const GLuint units[] = {drawable.image,
-                atlas,
-                ramp,
-                drawable.cells[drawable.current ^ 1U]};
-            for (unsigned i = 0; i < 4; ++i) {
-                gl.ActiveTexture(GL_TEXTURE0 + i);
-                gl.BindTexture(GL_TEXTURE_2D, units[i]);
-                gl.BindSampler(i, 0);
-            }
-            if (illustrated) {
-                // Integer target: host blend state cannot alter packed cell data.
-                gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,
-                    drawable.cell_framebuffers[drawable.current]);
-                gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
-                viewport(drawable.columns, drawable.rows);
-                parameters(analysis, analysis_uniforms, width, height, settings, history);
-                gl.DrawArrays(GL_TRIANGLES, 0, 3);
-                gl.BindTexture(GL_TEXTURE_2D, drawable.cells[drawable.current]);
-            }
-            drawable.history = illustrated;
-            drawable.previous = settings;
-            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            gl.DrawBuffer(GL_BACK);
-            viewport(width, height);
-            parameters(program, compose_uniforms, width, height, settings, history);
-            gl.DrawArrays(GL_TRIANGLES, 0, 3);
+            capture(drawable, width, height);
+            pipeline->draw(drawable.cells, drawable.image, width, height, false, settings, 0);
         }
         if (ui)
-            draw_editor(*ui, width, height);
+            pipeline->draw_editor(*ui, width, height, 0);
     }
 };
 

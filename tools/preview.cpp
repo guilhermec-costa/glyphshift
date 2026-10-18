@@ -1,4 +1,3 @@
-#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <GL/glx.h>
@@ -11,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "../src/render/standalone/glyph_passes.hpp"
+#include "../src/render/opengl/pipeline.hpp"
 
 namespace {
 void require(bool value, const char* message) {
@@ -96,7 +95,7 @@ void write_ppm(const char* path,
 // never in the injected render loop. PPM input is deliberately minimal.
 // Additional INPUT/OUTPUT pairs render as consecutive frames, so temporal
 // stability sees the previous frame's cells exactly as the renderers do.
-// Rendering uses the same GlyphPasses module as the capture overlay.
+// Rendering uses the same glyph pipeline as the injected renderer and overlay.
 int main(int argc, char** argv) {
     if (argc < 4 || argc % 2) {
         std::cerr << "Usage: glyphshift-preview INPUT.ppm SETTINGS.conf OUTPUT.ppm "
@@ -113,7 +112,8 @@ int main(int argc, char** argv) {
         require(!parsed.warnings, "Invalid settings");
         const auto& settings = parsed.value;
         const Context context(width, height);
-        glyphshift::standalone::GlyphPasses passes;
+        glyphshift::opengl::Pipeline pipeline(glyphshift::opengl::Caps{});
+        glyphshift::opengl::Target target;
         GLuint source = 0, output = 0, framebuffer = 0;
         glGenTextures(1, &source);
         glGenTextures(1, &output);
@@ -139,7 +139,6 @@ int main(int argc, char** argv) {
         require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
             "Incomplete output framebuffer");
         glDisable(GL_DITHER);
-        bool reported = false;
         for (int frame = 0; 2 * frame + 3 < argc; ++frame) {
             if (frame) {
                 unsigned next_width = 0, next_height = 0;
@@ -161,12 +160,7 @@ int main(int argc, char** argv) {
                     GL_RGB,
                     GL_UNSIGNED_BYTE,
                     pixels.data());
-                glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-                passes.draw(source, width, height, false, settings);
-                if (!reported && passes.diagnostic()[0]) {
-                    std::cerr << passes.diagnostic() << '\n';
-                    reported = true;
-                }
+                pipeline.draw(target, source, width, height, false, settings, framebuffer);
                 glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
                 glReadPixels(0,
                     0,
@@ -180,6 +174,7 @@ int main(int argc, char** argv) {
             require(glGetError() == GL_NO_ERROR, "OpenGL preview error");
             write_ppm(argv[2 * frame + 3], pixels, width, height);
         }
+        target.release();
         glDeleteFramebuffers(1, &framebuffer);
         glDeleteTextures(1, &output);
         glDeleteTextures(1, &source);

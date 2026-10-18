@@ -54,6 +54,17 @@ set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exp
 target_include_directories(glyphshift_editor PUBLIC include PRIVATE ${X11_INCLUDE_DIR})
 target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG PkgConfig::XCB_INPUT)
 
+# Glyph pipeline shared by every GL path: the injected renderer, the capture
+# overlay and the preview tool. GL is resolved at run time (no libGL link).
+add_library(glyphshift_gl_pipeline STATIC src/render/opengl/gl_api.cpp
+    src/render/opengl/pipeline.cpp)
+set_target_properties(glyphshift_gl_pipeline PROPERTIES POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+target_compile_definitions(glyphshift_gl_pipeline PUBLIC GL_GLEXT_PROTOTYPES)
+target_include_directories(glyphshift_gl_pipeline SYSTEM PRIVATE third_party/imgui)
+target_include_directories(glyphshift_gl_pipeline PUBLIC ${OPENGL_INCLUDE_DIR})
+target_link_libraries(glyphshift_gl_pipeline PUBLIC ${CMAKE_DL_LIBS} glyphshift_editor)
+
 add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
     src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp src/editor/x11_interpose.cpp)
 target_compile_definitions(glyphshift_gl PRIVATE GL_GLEXT_PROTOTYPES)
@@ -61,7 +72,8 @@ set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_gl SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
-target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core glyphshift_editor Threads::Threads)
+target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core glyphshift_editor
+    glyphshift_gl_pipeline Threads::Threads)
 set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/opengl/exports.map")
 target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
 set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
@@ -173,16 +185,12 @@ foreach(stage vert frag)
     target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/editor_${stage}_spv.hpp")
 endforeach()
 target_include_directories(glyphshift_gl PRIVATE "${GLYPH_GENERATED}")
-# Two-pass glyph rendering for processes that own their GL context (preview,
-# capture overlay); the injected renderer keeps its own implementation.
-add_library(glyphshift_standalone STATIC src/render/standalone/glyph_passes.cpp)
-target_include_directories(glyphshift_standalone PRIVATE "${GLYPH_GENERATED}")
-target_link_libraries(glyphshift_standalone PUBLIC glyphshift_editor OpenGL::GL)
+target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
 # M6 capture overlay: reads a chosen window through X Composite and draws the
 # glyph effect in its own input-transparent window; it never enters the game.
 pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes)
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp)
-target_link_libraries(glyphshift-overlay PRIVATE glyphshift_standalone X11::X11
+target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline OpenGL::GL X11::X11
     PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
@@ -209,7 +217,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/launcher_test.py"
         "$<TARGET_FILE:glyphshift>" "$<TARGET_FILE:glyphshift-launcher-probe>")
     add_executable(glyphshift-preview tools/preview.cpp)
-    target_link_libraries(glyphshift-preview PRIVATE glyphshift_standalone X11::X11)
+    target_link_libraries(glyphshift-preview PRIVATE glyphshift_gl_pipeline OpenGL::GL X11::X11)
     add_library(glyphshift-fault-glx SHARED tests/fixtures/fault_glx.cpp)
     target_link_libraries(glyphshift-fault-glx PRIVATE ${CMAKE_DL_LIBS})
     target_include_directories(glyphshift-fault-glx PRIVATE ${OPENGL_INCLUDE_DIR} ${X11_INCLUDE_DIR})
