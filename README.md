@@ -216,6 +216,28 @@ The launcher refuses privileged processes and targets. Full glyph rendering
 can lose fine HUD/text detail. Temporal stability calms flicker from noise and
 lighting; camera scrolling still moves glyphs across the screen-fixed grid.
 
+## Architecture: built to be multi-platform
+
+GlyphShift runs on Linux with X11 today, but it is designed to stay independent
+of the operating system, the window system and the GPU API. These are three
+separate layers, each with its own implementations:
+
+| Layer | Today | Planned |
+| --- | --- | --- |
+| Platform (operating system) | Linux | Windows, later macOS |
+| Window system (capture, overlay, input) | X11 | Wayland, Win32, Cocoa |
+| Renderer (GPU API) | OpenGL, Vulkan | reused through interop where possible |
+
+The art itself (settings, presets, characters, the glyph pipeline design and
+the editor) lives in a portable core that knows none of them. X11 and Wayland
+are window systems, not renderers: the same OpenGL or Vulkan pipeline serves
+both. The capture overlay is the mode meant for every platform; injected
+rendering through the launcher stays a Linux feature. Some Linux-specific code
+still sits in shared modules and will be moved out before Wayland and Windows
+work starts. See
+[Platform architecture](docs/implementation/README.md#platform-architecture)
+for the layers, dependency rules and migration plan.
+
 ## Development and documentation
 
 - [Test guide](tests/README.md): manual demos, offline SuperTux, troubleshooting

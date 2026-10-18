@@ -47,9 +47,13 @@ only when the user requests it.
    see Rendering and editor controls) and automatic exposure for dark games,
    which needs its parameters moved from push constants (at the 128-byte
    Vulkan 1.0 ceiling) to a uniform buffer.
-5. **Wayland.** First check the current overlay under XWayland with X11 games
-   (cheap, unverified); then design a portal/PipeWire capture path.
-6. **M7 — Windows capture overlay** (below).
+5. **Platform architecture migration.** Remove the couplings listed under
+   [Platform architecture](#platform-architecture), so platform, window system
+   and renderer are independent layers. Prerequisite for items 6 and 7.
+6. **Wayland.** First check the current overlay under XWayland with X11 games
+   (cheap, unverified); then add a Wayland window-system adapter
+   (portal/PipeWire capture).
+7. **M7 — Windows capture overlay** (below).
 
 ## Remaining TODOs
 
@@ -897,46 +901,153 @@ semantics, draws the same editor controls, and then presents. Never perform
 substantial graphics work in a shared-library constructor. Initialize lazily
 only after a valid OpenGL context or Vulkan device/swapchain exists.
 
-## Proposed repository layout
+## Platform architecture
+
+GlyphShift is designed to run on several operating systems (Linux now,
+Windows planned in M7, macOS possible later) and several window systems
+(X11 now, Wayland planned). The architecture separates three independent
+axes, so adding one platform, window system or GPU API does not touch the
+others:
+
+| Axis | What varies | Implementations |
+| --- | --- | --- |
+| Platform (operating system) | Configuration paths, font discovery, processes and signals, autostart and packaging | Linux (implemented), Windows (M7), macOS (later) |
+| Window system | Window capture, overlay surface, window tracking, editor input, global hotkey | X11 (implemented), Wayland (planned), Win32 (M7), Cocoa (later) |
+| Renderer (GPU API) | The glyph pipeline and editor drawing | OpenGL and Vulkan (implemented); D3D11 or Metal only if interop rules them out |
+
+X11 and Wayland are window systems, not renderers: the same OpenGL or Vulkan
+renderer works under either one.
+
+### Layers and dependency rules
+
+```text
+apps/            launcher, overlay, daemon: the only code that picks concrete
+   |             implementations and wires them together
+   v
+window system    x11 | wayland | win32 | cocoa
+   |             capture, overlay surface, tracking, input, hotkeys
+   v
+platform         linux | windows | macos
+   |             paths, fonts, processes, autostart
+   v
+renderer         opengl | vulkan | (d3d11 | metal)
+   |             glyph pipeline: analysis + composition passes, editor drawing
+   v
+core             settings, presets, characters and atlas layout, glyph
+                 semantics, editor model (ImGui), shader sources
+```
+
+- **Core** includes no operating-system, window-system or GPU-API header. It is
+  testable on any platform with plain unit tests.
+- A **renderer** depends only on core and its GPU API. It receives the source
+  image as an imported GPU image and never creates windows or reads input.
+- A **window system** adapter depends on core, the platform layer, and the
+  interop extension that hands captured images to a renderer.
+- A **platform** layer depends only on core and operating-system APIs.
+- **Apps** compose one window system, one platform and one renderer. They hold
+  no rendering or capture logic of their own.
+
+Shaders keep one source of truth. GLSL compiles to SPIR-V today; another API
+receives generated code (for example, SPIRV-Cross to HLSL or MSL), not a
+hand-maintained copy.
+
+### Interfaces between layers
+
+The names below describe responsibilities; exact C++ signatures are chosen
+when each interface is extracted.
+
+- `render::Pipeline`: `draw(target, source, settings)` and
+  `draw_editor(ui, target)`. `source` is a renderer-native image: a GL
+  texture, a Vulkan image or a D3D11 texture.
+- `display::Capture`: turns one window into frames of a renderer-native image
+  and reports new frames (XDamage, PipeWire buffers, Windows.Graphics.Capture
+  frame pool, ScreenCaptureKit samples).
+- `display::Overlay`: a click-through surface kept exactly above the target,
+  shown and hidden with it.
+- `display::Tracker`: target geometry, visibility, stacking and destruction.
+- `display::Input`: editor input as platform-neutral events (keys, text,
+  pointer, focus) for the editor model, plus the Insert/F10 hotkeys on the target.
+- `display::GlobalHotkey`: the attach/detach key of the daemon.
+- `platform::Paths`, `platform::Fonts`, `platform::Process`,
+  `platform::Autostart`: configuration directory, font file lookup by family,
+  spawning overlays that end with their parent, and start-on-login.
+
+### Image interop, per platform
+
+The capture-to-renderer handoff decides which combinations exist:
+
+| Platform / window system | Capture | Handoff | Renderer |
+| --- | --- | --- | --- |
+| Linux / X11 | X Composite | `GLX_EXT_texture_from_pixmap` | OpenGL (implemented) |
+| Linux / Wayland | xdg-desktop-portal + PipeWire | dmabuf | OpenGL (EGL) or Vulkan |
+| Windows / Win32 | Windows.Graphics.Capture | D3D11 shared texture (`VK_KHR_external_memory_win32` or `WGL_NV_DX_interop2`) | Vulkan, OpenGL, or D3D11 |
+| macOS / Cocoa | ScreenCaptureKit | IOSurface | Metal, or Vulkan through MoltenVK |
+
+Vulkan is the most portable renderer: native on Linux and Windows, and
+available on macOS through MoltenVK. Prefer extending it over adding new
+renderers when the interop allows.
+
+### Integration modes
+
+- **Capture overlay** (`glyphshift-overlay`, M6): the cross-platform mode. It
+  never enters the game and is the only mode planned for Windows and macOS.
+- **Injected rendering** (launcher with GLX interposition and Vulkan layer):
+  Linux-specific, lowest latency. It stays a Linux platform feature and is not
+  ported; injection into Windows or macOS games is out of scope.
+
+### Current state and migration
+
+The rules above are the target. The code still has these couplings, to be
+removed incrementally, each step verified by the existing tests:
+
+1. `src/editor/x11_input.cpp` lives in the editor library and the editor entry
+   point takes an `x11_input` flag. It becomes the X11 `display::Input`, with
+   the editor model receiving neutral events.
+2. `src/config/characters.cpp` calls Fontconfig directly; it becomes the Linux
+   `platform::Fonts`. FreeType rasterization stays in core.
+3. `src/config/presets.cpp` resolves `XDG_CONFIG_HOME`/`HOME`; it becomes the
+   Linux `platform::Paths`.
+4. The OpenGL renderer library resolves GLX entry points (`gl_api.cpp`) and the
+   injected renderer is bound to GLX. GL function loading stays in the
+   renderer; GLX context handling moves to the X11 adapter.
+5. `apps/overlay/main.cpp` contains Composite, GLX pixmap binding and overlay
+   window code inline. They become the X11 `display::Capture` and
+   `display::Overlay`; `tracker.cpp` is already separate. `daemon.cpp` splits
+   into `display::GlobalHotkey` (X11 grab) and `platform::Process` (fork,
+   `PR_SET_PDEATHSIG`).
+6. The Vulkan renderer exists only inside the layer and has its own pipeline
+   code; it is extracted into a reusable `render::Pipeline` so the overlay can
+   use it.
+
+This migration is a roadmap prerequisite for Wayland and M7 and is done
+before them, not mixed into feature work.
+
+### Repository layout (target)
 
 ```text
 .
-├── CMakeLists.txt
-├── CMakePresets.json
-├── apps/
-│   └── launcher/
-├── include/glyphshift/
-│   ├── config/
-│   ├── core/
-│   ├── editor/
-│   └── render/
+├── apps/                launcher (Linux), overlay and daemon
+├── include/glyphshift/  public headers: config, core, editor, render, display, platform
 ├── src/
-│   ├── config/
-│   ├── core/
-│   ├── editor/
-│   └── render/
-│       ├── opengl/
-│       │   ├── glx_interpose.cpp
-│       │   ├── gl_state.cpp
-│       │   └── context_registry.cpp
-│       └── vulkan/
-│           ├── layer.cpp
-│           ├── dispatch.cpp
-│           └── swapchain_registry.cpp
-├── shaders/
-│   ├── opengl/
-│   └── vulkan/
-├── layers/
-│   └── VK_LAYER_GLYPHSHIFT_overlay.json.in
-├── assets/fonts/
+│   ├── core/  config/  editor/     portable; no OS, window-system or GPU headers
+│   ├── render/
+│   │   ├── opengl/                 pipeline and GL loading
+│   │   └── vulkan/                 pipeline; the loader layer stays a Linux injection module
+│   ├── display/
+│   │   ├── x11/                    capture, overlay, tracker, input, hotkey, GLX interposition
+│   │   ├── wayland/                (planned)
+│   │   └── win32/                  (M7)
+│   └── platform/
+│       ├── linux/                  paths (XDG), fonts (Fontconfig), processes
+│       └── windows/                (M7)
+├── shaders/             single source, compiled per API
+├── layers/              Vulkan layer manifest (Linux injection)
 ├── tests/
-│   ├── unit/
-│   └── fixtures/
 └── docs/
 ```
 
-Do not create all directories speculatively. Add them when their milestone
-needs them.
+CMake builds only the platform and window-system directories for the target
+operating system. Create a directory only when its work starts.
 
 ## Rendering model
 
@@ -2959,7 +3070,9 @@ python3 tests/smoke/overlay_daemon.py --build build/dev --output /tmp/glyphshift
 ### M7 — Windows capture overlay (planned, after the Linux release)
 
 This milestone extends the platform scope beyond Linux and starts only after
-roadmap items 1–3. It ports only the capture overlay. Injection into Windows
+roadmap items 1–3 and the platform architecture migration (item 5). It adds
+a Windows platform layer and a Win32 window-system adapter, and ports only the
+capture overlay. Injection into Windows
 games (D3D9/11/12 hooks) stays out of scope: ReShade already covers that
 model, and it carries anti-cheat risk that capture avoids.
 
@@ -2969,14 +3082,12 @@ model, and it carries anti-cheat risk that capture avoids.
   WS_EX_TRANSPARENT`) kept above the game; borderless fullscreen only, as on
   Linux.
 - Global attach hotkey with `RegisterHotKey`; editor input through Win32.
-- Rendering: preferably D3D11 with the glyph shaders ported to HLSL, or OpenGL
-  through WGL with D3D interop to reuse more code; decide in the first step.
+- Rendering: reuse the Vulkan renderer through `VK_KHR_external_memory_win32`
+  import of the captured D3D11 texture, or the OpenGL renderer through
+  `WGL_NV_DX_interop2`; a D3D11 renderer (shaders generated with SPIRV-Cross)
+  only if neither interop is reliable. Decide in the first step.
 - Reuse unchanged: settings, presets, profiles, the ImGui editor model and
   the two-pass pipeline design.
-
-Prerequisite refactor, also useful for Wayland: put the glyph pipeline behind
-a backend interface (OpenGL, Vulkan, later D3D11) instead of the current
-GL-specific `glyphshift_gl_pipeline` and separate Vulkan renderer.
 
 Exit condition: as for M6, an independently started offline game on Windows is
 transformed live, input reaches the game, the overlay follows the window and
