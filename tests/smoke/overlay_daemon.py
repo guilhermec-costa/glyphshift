@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from real_input import RealInput
+from tray_panel import XK_DOWN, XK_RETURN, Panel, key, manager_running, mapped, menu_window
 from x11 import X11
 
 XK_G, XK_CONTROL_L, XK_ALT_L = 0x67, 0xffe3, 0xffe9
@@ -103,6 +104,29 @@ try:
 
     hotkey()
     eventually(lambda: len(children()) == 1, 'hotkey did not attach again')
+    # The tray menu lists the attached game; choosing it detaches. Needs a
+    # stand-in tray manager (synthetic menu events, no XTest).
+    if not manager_running(x):
+        panel = Panel()
+        try:
+            icon = panel.dock_request()
+            panel.embed(icon)
+            menu = menu_window(x)
+            x.send(icon, 4, 3, 10, 10)
+            eventually(lambda: mapped(x, menu), 'the tray menu did not open')
+            time.sleep(.1)
+            key(x, menu, XK_DOWN)  # The first choice: "Detach from <game>".
+            key(x, menu, XK_RETURN)
+            eventually(lambda: not children(), 'the tray menu did not detach the game')
+            eventually(lambda: changed() < .01, 'the screen did not return after the menu')
+            print('tray: "Detach from" in the tray menu detached the game')
+        finally:
+            panel.quit()
+        control.guard()
+        hotkey()
+        eventually(lambda: len(children()) == 1, 'hotkey did not attach after the menu')
+    else:
+        print('tray: SKIPPED, a real tray manager runs on this display')
     x.close(window)
     assert fixture.wait(timeout=10) == 0, fixture_log.read_text()
     eventually(lambda: not children(), 'overlay did not end with its game')

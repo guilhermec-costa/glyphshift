@@ -163,6 +163,17 @@ This uses the standard `~/.config/autostart` entry, which GNOME, KDE, Xfce and
 similar desktops run; with i3, start a runner such as `dex --autostart` in
 your configuration.
 
+While running, GlyphShift shows its icon in the system tray. Click it to
+detach a game, choose the style for the next games you attach, turn start at
+login on or off, or quit. With polybar, enable its tray by adding a module:
+
+```ini
+[module/tray]
+type = internal/tray
+```
+
+and listing `tray` in your bar's `modules-right`.
+
 | Key | Action |
 | --- | --- |
 | Ctrl+Alt+G | Attach to or detach from the focused game. |

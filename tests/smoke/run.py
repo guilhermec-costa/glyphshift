@@ -215,5 +215,6 @@ try:
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('temporal.py')),'--build',str(build),'--output',str(output/'temporal')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay.py')),'--build',str(build),'--output',str(output/'overlay')],check=True)
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay_tray.py')),'--build',str(build),'--output',str(output/'overlay-tray')],check=True)
     print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
 finally:x.shutdown()

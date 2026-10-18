@@ -13,12 +13,16 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <glyphshift/config/presets.hpp>
 #include <glyphshift/platform/desktop.hpp>
 #include <glyphshift/platform/process.hpp>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "../../src/display/x11/tray.hpp"
 
 // Background mode: one global hotkey attaches a capture overlay to the focused
 // game window, or detaches it. Each attachment is a separate
@@ -197,6 +201,30 @@ std::string read_text(Display* display, Window window, Atom property) {
     return text;
 }
 
+// The window's title for the tray menu: _NET_WM_NAME (UTF-8), else WM_NAME.
+std::string window_title(Display* display, Window window) {
+    std::string title = read_text(display, window, XInternAtom(display, "_NET_WM_NAME", False));
+    if (title.empty())
+        title = read_text(display, window, XA_WM_NAME);
+    if (title.size() > 48)
+        title = title.substr(0, 45) + "...";
+    return title.empty() ? "untitled window" : title;
+}
+
+// Tray menu row ids.
+enum : int {
+    own_style = 100,
+    first_style = 101,
+    start_at_login = 200,
+    quit = 300,
+    first_game = 1000,
+};
+
+struct Attached {
+    pid_t pid;
+    std::string title;
+};
+
 // One daemon per X display. Like window managers and compositors, it owns a
 // selection, held by a hidden window that also publishes its hotkey; the
 // selection is released when the process exits. Returns the owner window, or
@@ -306,21 +334,98 @@ int run_daemon(const DaemonOptions& options) {
     if (!isatty(STDERR_FILENO))
         platform::notify("GlyphShift is running",
             "Press " + display_name(options.hotkey) + " in a game to attach or detach.");
-    std::map<Window, pid_t> attached;
+    auto current = options;
+    std::map<Window, Attached> attached;
+    const auto toggle = [&](Window game) {
+        if (const auto found = attached.find(game); found != attached.end()) {
+            kill(found->second.pid, SIGTERM);
+            std::fprintf(stderr, "glyphshift-overlay: detached 0x%lx\n", game);
+        } else if (const pid_t child = spawn(program, game, current); child > 0) {
+            attached[game] = {child, window_title(display, game)};
+            std::fprintf(stderr, "glyphshift-overlay: attached 0x%lx\n", game);
+        }
+    };
+    // The tray menu: attached games (choose one to detach it), the style for
+    // new attachments, start at login and quit.
+    std::vector<Window> listed;
+    const auto menu = [&] {
+        const display::x11::MenuItem separator{"", -1, false, false, true};
+        std::vector<display::x11::MenuItem> rows;
+        rows.push_back({"GlyphShift: press " + display_name(current.hotkey) + " in a game"});
+        rows.push_back(separator);
+        listed.clear();
+        for (const auto& [window, game] : attached) {
+            rows.push_back(
+                {"Detach from " + game.title, first_game + static_cast<int>(listed.size())});
+            listed.push_back(window);
+        }
+        if (attached.empty())
+            rows.push_back({"No game attached"});
+        rows.push_back(separator);
+        rows.push_back({"Style for newly attached games"});
+        rows.push_back({"Each game's saved style", own_style, true, current.preset.empty()});
+        int id = first_style;
+        for (const auto& style : builtin_presets())
+            rows.push_back({std::string(style.title), id++, true, current.preset == style.name});
+        rows.push_back(separator);
+        rows.push_back({"Start at login", start_at_login, true, platform::autostart_enabled()});
+        rows.push_back({"Quit GlyphShift", quit});
+        return rows;
+    };
+    const auto choose = [&](int id) {
+        if (id == quit) {
+            stop = 1;
+        } else if (id == start_at_login) {
+            try {
+                if (platform::autostart_enabled()) {
+                    platform::disable_autostart();
+                } else {
+                    std::vector<std::string> command{program};
+                    if (current.hotkey != DaemonOptions{}.hotkey)
+                        command.insert(command.end(), {"--hotkey", current.hotkey});
+                    if (!current.preset.empty())
+                        command.insert(command.end(), {"--preset", current.preset});
+                    platform::enable_autostart(command);
+                }
+                std::fprintf(stderr,
+                    "glyphshift-overlay: start at login %s\n",
+                    platform::autostart_enabled() ? "on" : "off");
+            } catch (const std::exception& error) {
+                std::fprintf(stderr, "glyphshift-overlay: start at login: %s\n", error.what());
+            }
+        } else if (id == own_style || (id >= first_style && id < start_at_login)) {
+            const auto styles = builtin_presets();
+            const auto index = static_cast<std::size_t>(id - first_style);
+            current.preset = id == own_style || index >= styles.size()
+                                 ? std::string()
+                                 : std::string(styles[index].name);
+            std::fprintf(stderr,
+                "glyphshift-overlay: newly attached games use %s\n",
+                current.preset.empty() ? "their saved style" : current.preset.c_str());
+        } else if (id >= first_game && static_cast<std::size_t>(id - first_game) < listed.size()) {
+            const Window game = listed[static_cast<std::size_t>(id - first_game)];
+            if (attached.count(game))
+                toggle(game);
+        }
+    };
+    auto tray = std::make_unique<display::x11::Tray>(display);
     auto last = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     while (!stop) {
         // Reap overlays that ended (game closed or overlay failed).
         for (pid_t pid; (pid = waitpid(-1, nullptr, WNOHANG)) > 0;)
             for (auto it = attached.begin(); it != attached.end(); ++it)
-                if (it->second == pid) {
+                if (it->second.pid == pid) {
                     attached.erase(it);
                     break;
                 }
         while (XPending(display)) {
             XEvent event;
             XNextEvent(display, &event);
-            if (event.type != KeyPress)
+            if (event.type != KeyPress || event.xkey.window != root) {
+                if (const int id = tray->handle(event, menu); id >= 0)
+                    choose(id);
                 continue;
+            }
             // Ignore key auto-repeat and double presses.
             const auto now = std::chrono::steady_clock::now();
             if (now - last < std::chrono::milliseconds(400))
@@ -331,13 +436,7 @@ int run_daemon(const DaemonOptions& options) {
                 std::fprintf(stderr, "glyphshift-overlay: no focused window to attach to\n");
                 continue;
             }
-            if (const auto found = attached.find(game); found != attached.end()) {
-                kill(found->second, SIGTERM);
-                std::fprintf(stderr, "glyphshift-overlay: detached 0x%lx\n", game);
-            } else if (const pid_t child = spawn(program, game, options); child > 0) {
-                attached[game] = child;
-                std::fprintf(stderr, "glyphshift-overlay: attached 0x%lx\n", game);
-            }
+            toggle(game);
         }
         const int fd = ConnectionNumber(display);
         fd_set read{};
@@ -346,14 +445,15 @@ int run_daemon(const DaemonOptions& options) {
         timeval timeout{0, 200000};
         select(fd + 1, &read, nullptr, nullptr, &timeout);
     }
-    for (const auto& [window, pid] : attached) {
+    for (const auto& [window, game] : attached) {
         (void)window;
-        kill(pid, SIGTERM);
+        kill(game.pid, SIGTERM);
     }
-    for (const auto& [window, pid] : attached) {
+    for (const auto& [window, game] : attached) {
         (void)window;
-        waitpid(pid, nullptr, 0);
+        waitpid(game.pid, nullptr, 0);
     }
+    tray.reset();  // Uses the connection: before it closes.
     XUngrabKey(display, code, AnyModifier, root);
     XCloseDisplay(display);
     return 0;

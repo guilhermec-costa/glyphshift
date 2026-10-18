@@ -324,7 +324,11 @@ These include `platform` (autostart entries and their quoting) and `install`,
 which runs `cmake --install` into temporary prefixes and starts the installed
 programs. The overlay smoke, part of the GLX graphics smoke, also checks that
 only one background daemon runs per display, without keyboard input; it
-reports a skip for that phase if your own daemon is already running.
+reports a skip for that phase if your own daemon is already running. The GLX
+graphics smoke also runs `overlay_tray.py`, which plays a tray manager and
+checks the tray icon and menu with synthetic events (no XTest); it is skipped
+when a real tray manager or your own daemon runs, and opening the menu grabs
+pointer and keyboard for a moment.
 
 Sequential graphics smoke tests, with X11/GPU access and the Khronos layer
 available:
@@ -404,9 +408,10 @@ first. They are opt-in because they use desktop focus.
 The capture overlay has two focused drivers. `--application overlay-fixture`
 runs the editor script above on a GLX fixture with the overlay attached.
 `overlay_daemon.py` starts the background daemon, presses Ctrl+Alt+G on the
-focused fixture to attach, detach and attach again, then closes the fixture
-and stops the daemon. Stop your own daemon first, because both use the same
-hotkey.
+focused fixture to attach, detach and attach again, detaches once more through
+the tray menu (against a stand-in tray manager, when no real one runs), then
+closes the fixture and stops the daemon. Stop your own daemon first: only one
+runs per display, and both use the same hotkey.
 
 ```bash
 python3 tests/smoke/editor_apps.py --build build/dev \

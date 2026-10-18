@@ -194,9 +194,14 @@ pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes
 add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
     src/platform/linux/process.cpp)
 target_include_directories(glyphshift_platform PUBLIC include)
+# Window-system layer, X11: system tray icon and menu (XEmbed, Xft text).
+pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft)
+add_library(glyphshift_x11_tray STATIC src/display/x11/tray.cpp)
+target_link_libraries(glyphshift_x11_tray PUBLIC X11::X11 PRIVATE PkgConfig::XFT)
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp
     apps/overlay/daemon.cpp)
-target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform OpenGL::GL X11::X11
+target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
+    glyphshift_x11_tray OpenGL::GL X11::X11
     PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 

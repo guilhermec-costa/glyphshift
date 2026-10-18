@@ -32,7 +32,9 @@ test assets now live in a persistent test environment
 (`tests/smoke/test_env.py`) instead of `/tmp`. M6 step 5 makes the background
 overlay an installable desktop application: `cmake --install` with a menu
 entry and icon, optional start at login, one daemon per display, and desktop
-notifications when started without a terminal.
+notifications when started without a terminal, and a system tray icon whose
+menu detaches games, picks the style for new attachments, toggles start at
+login and quits.
 
 ## Roadmap
 
@@ -46,8 +48,9 @@ only when the user requests it.
    [M6 step 5](#m6-step-5-background-app-packaging)): a `glyphshift.desktop`
    entry and icon installed by `cmake --install`, optional autostart
    (`~/.config/autostart`), and a single instance that reports the running
-   daemon. A system tray icon (preset choice, attached games, quit) follows
-   as a separate step, not started.
+   daemon. The system tray icon (attached games, style choice, start at
+   login, quit) followed as a separate step, also done on 2026-10-18 (see
+   [System tray](#m6-step-5-system-tray)).
 3. **Open-source release readiness.** Choose and add the license (see Later
    Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
@@ -1033,8 +1036,10 @@ removed incrementally, each step verified by the existing tests:
 This migration is a roadmap prerequisite for Wayland and M7 and is done
 before them, not mixed into feature work.
 
-Code added since this list was written already follows the rules: the Linux
-platform layer exists as `src/platform/linux/` (static library
+Code added since this list was written already follows the rules: the X11
+window-system layer exists as `src/display/x11/` (the tray, static library
+`glyphshift_x11_tray`), the Linux
+platform layer as `src/platform/linux/` (static library
 `glyphshift_platform`, headers in `include/glyphshift/platform/`) with XDG
 autostart, notifications, `config_home()` and `executable_path()`. Step 3
 above should resolve preset paths through its `config_home()`, which
@@ -3318,6 +3323,75 @@ cmake --install build/release --prefix ~/.local
 glyphshift-overlay --autostart on
 ctest --preset dev -R 'platform|install'
 python3 tests/smoke/overlay.py --build build/dev --output /tmp/glyphshift-overlay-smoke
+```
+
+#### M6 step 5: system tray
+
+The second part of roadmap item 2, done on 2026-10-18. Started from a menu,
+the daemon had no visible presence and could only be stopped from a terminal.
+
+`src/display/x11/tray.{hpp,cpp}` (window-system layer; Xlib and Xft) shows an
+icon through the freedesktop System Tray protocol (XEmbed): the daemon offers
+its icon window to the owner of `_NET_SYSTEM_TRAY_S<screen>` with
+`SYSTEM_TRAY_REQUEST_DOCK`, and listens on the root window for `MANAGER`, so
+it docks when a panel starts after it. When the manager goes away the X
+server returns the icon to the root, where a window manager can take it; the
+daemon destroys that window and offers a fresh one to the next manager (an
+early version only unmapped it, and under i3 the window manager's handling of
+the orphan raced with the next panel's embedding and left the icon unmapped
+on the root). An icon destroyed together with its manager is replaced the
+same way. The icon is the application icon drawn with rectangles at the
+size the tray gives. Without a tray manager nothing is shown; the hotkey and
+notifications work as before.
+
+A click (any button) opens a popup menu: an override-redirect window that
+grabs pointer and keyboard while open, closes on Escape or a click outside,
+and supports Up/Down/Return. Rows:
+
+- the hotkey reminder;
+- "Detach from TITLE" for each attached game (window title from
+  `_NET_WM_NAME`, else `WM_NAME`), or "No game attached";
+- "Style for newly attached games": "Each game's saved style" (no
+  `--preset`) or one of the nine included styles; this changes the `--preset`
+  given to overlays started afterwards, not running ones;
+- "Start at login", checked when the autostart entry exists; toggling writes
+  it with the current hotkey and style, or removes it;
+- "Quit GlyphShift", which ends the daemon and its overlays (status 0).
+
+The tray must be destroyed before the display connection closes; the first
+test run of Quit exited nonzero because it was destroyed afterwards.
+
+Verification on 2026-10-18:
+
+- New smoke `tests/smoke/overlay_tray.py` (part of the GLX smoke; no XTest,
+  synthetic events through `XSendEvent`, a stand-in tray manager in
+  `tests/smoke/tray_panel.py` on its own connection, with a save-set like real
+  panels): the icon docks when the manager appears after the daemon, after the
+  manager's connection closes and a new one starts (fresh icon, no orphaned
+  window left) and after a manager destroyed it; the icon shows its two
+  colors each time; the menu opens on a click; choosing Comic changes the
+  style for new attachments; "Start at login" writes an entry with
+  `--hotkey ctrl+alt+shift+F12 --preset art-comic` and removes it again;
+  Escape and a click outside close the menu; Quit ends the daemon with status
+  0. It is skipped when a real tray manager or another daemon runs. While the
+  menu is open the daemon briefly grabs pointer and keyboard. The first run
+  failed because the color allocation returned (254, 208, 102) for #ffd166;
+  colors are now compared within 2 levels.
+- `overlay_daemon.py` (XTest) gained a step: with a game attached by the
+  hotkey, "Detach from" in the tray menu (opened and chosen with synthetic
+  events) ended its overlay and the screen matched the game again. Passed on
+  the Release build.
+- Captures of the menu and the docked icon were inspected.
+- Debug `ctest --preset dev` 14/14; Release `ctest --preset release` 16/16
+  with the persistent validation layer (112 s), the tray phase included.
+- Not verified: a real panel's tray (this polybar configuration has no
+  `tray` module, and no other tray manager runs), hover drawing under a real
+  pointer, and the menu's look on other fonts or HiDPI screens. To run the
+  tray tests, the user's own daemon was stopped (SIGTERM) with their
+  permission.
+
+```bash
+python3 tests/smoke/overlay_tray.py --build build/dev --output /tmp/glyphshift-overlay-tray
 ```
 
 #### M6 technical debt (tracked)
