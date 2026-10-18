@@ -278,9 +278,9 @@ The art itself (settings, presets, characters, the glyph pipeline design and
 the editor) lives in a portable core that knows none of them. X11 and Wayland
 are window systems, not renderers: the same OpenGL or Vulkan pipeline serves
 both. The capture overlay is the mode meant for every platform; injected
-rendering through the launcher stays a Linux feature. Some Linux-specific code
-still sits in shared modules and will be moved out before Wayland and Windows
-work starts. See
+rendering through the launcher stays a Linux feature. The Linux- and
+X11-specific code has been moved out of the shared modules into its own
+layers, ready for Wayland and Windows work. See
 [Platform architecture](docs/implementation/README.md#platform-architecture)
 for the layers, dependency rules and migration plan.
 

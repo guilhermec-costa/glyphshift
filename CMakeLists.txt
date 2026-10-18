@@ -99,6 +99,16 @@ target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core gly
 set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/display/x11/glx_exports.map")
 target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
 set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
+# The Vulkan glyph pipeline, independent of the loader layer: device-function
+# table, resources, analysis/composition passes and editor drawing.
+add_library(glyphshift_vk_pipeline STATIC src/render/vulkan/resources.cpp
+    src/render/vulkan/pipeline.cpp)
+set_target_properties(glyphshift_vk_pipeline PROPERTIES POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+target_include_directories(glyphshift_vk_pipeline SYSTEM PRIVATE third_party/imgui)
+target_include_directories(glyphshift_vk_pipeline PUBLIC ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(glyphshift_vk_pipeline PUBLIC glyphshift_core glyphshift_editor)
+# The Vulkan loader layer (Linux injection module) around that pipeline.
 add_library(glyphshift_vk SHARED
     src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp src/render/vulkan/renderer.cpp)
 set_target_properties(glyphshift_vk PROPERTIES
@@ -107,7 +117,7 @@ target_include_directories(glyphshift_vk SYSTEM PRIVATE third_party/imgui)
 target_compile_definitions(glyphshift_vk PRIVATE VK_USE_PLATFORM_XLIB_KHR)
 target_include_directories(glyphshift_vk PRIVATE ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(glyphshift_vk PRIVATE Threads::Threads glyphshift_core glyphshift_editor
-    glyphshift_x11_input)
+    glyphshift_vk_pipeline glyphshift_x11_input)
 set(vulkan_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/vulkan/exports.map")
 target_link_options(glyphshift_vk PRIVATE "LINKER:--version-script=${vulkan_exports}")
 set_property(TARGET glyphshift_vk APPEND PROPERTY LINK_DEPENDS "${vulkan_exports}")
@@ -185,7 +195,7 @@ foreach(stage vert frag)
             "-DOUTPUT=${GLYPH_GENERATED}/glyph_${stage}_spv.hpp" "-DNAME=glyph_${stage}_spv"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
         DEPENDS "shaders/glyph/glyph.${stage}" cmake/embed_spirv.cmake VERBATIM)
-    target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/glyph_${stage}_spv.hpp")
+    target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_${stage}_spv.hpp")
 endforeach()
 add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_analysis_spv.hpp"
     COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 -DANALYSIS
@@ -195,7 +205,7 @@ add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_analysis_spv.hpp"
         "-DOUTPUT=${GLYPH_GENERATED}/glyph_analysis_spv.hpp" "-DNAME=glyph_analysis_spv"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
     DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
-target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/glyph_analysis_spv.hpp")
+target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_analysis_spv.hpp")
 foreach(stage vert frag)
     add_custom_command(OUTPUT "${GLYPH_GENERATED}/editor_${stage}_spv.hpp"
         COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0
@@ -205,7 +215,7 @@ foreach(stage vert frag)
             "-DOUTPUT=${GLYPH_GENERATED}/editor_${stage}_spv.hpp" "-DNAME=editor_${stage}_spv"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
         DEPENDS "shaders/editor/editor.${stage}" cmake/embed_spirv.cmake VERBATIM)
-    target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/editor_${stage}_spv.hpp")
+    target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/editor_${stage}_spv.hpp")
 endforeach()
 target_include_directories(glyphshift_gl PRIVATE "${GLYPH_GENERATED}")
 target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
@@ -227,7 +237,7 @@ target_link_libraries(glyphshift_x11_overlay PUBLIC X11::X11 OpenGL::GL
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/daemon.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
     glyphshift_x11_input glyphshift_x11_overlay glyphshift_x11_tray)
-target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
+target_include_directories(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}")
 
 add_executable(glyphshift-glx-fixture tests/fixtures/glx.cpp)
 target_link_libraries(glyphshift-glx-fixture PRIVATE fixture_window OpenGL::GL)

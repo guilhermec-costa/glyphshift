@@ -36,6 +36,13 @@ notifications when started without a terminal, and a system tray icon whose
 menu detaches games, picks the style for new attachments, toggles start at
 login and quits.
 
+The platform architecture migration (roadmap item 5) is done: the six
+couplings listed under [Current state and migration](#current-state-and-migration)
+were removed one step at a time, with the existing tests and the focused
+XTest drivers passing after each step (see the
+[migration record](#migration-record)). The remaining Linux/X11-specific
+places it did not cover are listed there.
+
 ## Roadmap
 
 Agreed order of the next work, recorded on 2026-10-18. Each item still starts
@@ -63,11 +70,11 @@ only when the user requests it.
    see Rendering and editor controls) and automatic exposure for dark games,
    which needs its parameters moved from push constants (at the 128-byte
    Vulkan 1.0 ceiling) to a uniform buffer.
-5. **Platform architecture migration.** In progress since 2026-10-18 (see
-   [Current state and migration](#current-state-and-migration)). Remove the
-   couplings listed under [Platform architecture](#platform-architecture), so
-   platform, window system and renderer are independent layers. Prerequisite
-   for items 6 and 7.
+5. **Platform architecture migration.** Done on 2026-10-18 (see
+   [Current state and migration](#current-state-and-migration)): the couplings
+   listed under [Platform architecture](#platform-architecture) were removed,
+   so platform, window system and renderer are independent layers.
+   Prerequisite for items 6 and 7.
 6. **Wayland.** First check the current overlay under XWayland with X11 games
    (cheap, unverified); then add a Wayland window-system adapter
    (portal/PipeWire capture).
@@ -1018,8 +1025,9 @@ renderers when the interop allows.
 
 ### Current state and migration
 
-The rules above are the target. The code still has these couplings, to be
-removed incrementally, each step verified by the existing tests:
+The rules above are the target. The code had these couplings, removed
+incrementally (all six done on 2026-10-18), each step verified by the existing
+tests:
 
 1. Done (see [Migration record](#migration-record)): `src/editor/x11_input.cpp`
    lived in the editor library and the editor entry point took an `x11_input`
@@ -1037,9 +1045,8 @@ removed incrementally, each step verified by the existing tests:
    `display::Overlay`, next to the tracker. `daemon.cpp` was split into
    `display::GlobalHotkey` (X11 grab) and `platform::Process` (fork,
    `PR_SET_PDEATHSIG`).
-6. The Vulkan renderer exists only inside the layer and has its own pipeline
-   code; it is extracted into a reusable `render::Pipeline` so the overlay can
-   use it.
+6. Done: the Vulkan renderer existed only inside the layer with its own
+   pipeline code; it is now a reusable `vulkan::Pipeline` the overlay can use.
 
 This migration is a roadmap prerequisite for Wayland and M7 and is done
 before them, not mixed into feature work.
@@ -1193,6 +1200,52 @@ permission, the focused XTest drivers passed on the Release build:
 `overlay_game.py` on native SuperTux and on Windows SuperTux through
 GE-Proton in `test_env.py run --offline` (attach by hotkey, input reaching the
 game, editor, following a resize, detach, game exit, daemon exit 0).
+
+**Step 6, Vulkan pipeline (2026-10-18).** The layer's `GlyphRenderer` mixed the
+glyph pipeline with swapchain handling. It is split into:
+
+- `vulkan::Pipeline` (`src/render/vulkan/pipeline.{hpp,cpp}`, static library
+  `glyphshift_vk_pipeline`, built without any window-system define): the atlas,
+  ramp and font textures, both cell grids and their history, the analysis and
+  composition passes, editor drawing and its per-target geometry buffers. A
+  target pairs a sampled source view with an output view; `record(command,
+  target, settings, ui)` expects the source in shader-read layout and the
+  output in color-attachment layout and leaves the output in the final layout
+  given at construction.
+- `src/render/vulkan/resources.{hpp,cpp}`: the device-function table
+  (`load_render_api` from any `vkGetDeviceProcAddr`), the `Device` description
+  and helpers for memory, textures, views and barriers.
+- `renderer.cpp` keeps the layer's part: queue and format checks, swapchain
+  images, the capture copy and its barriers, command buffers, fences,
+  semaphores, `vkSetDeviceLoaderData`, and submission after the application's
+  semaphores.
+
+The command stream changed in order only: the one-time atlas upload and the
+output image's transition to color-attachment layout are now recorded before
+the analysis pass instead of around it (they touch independent images). The
+wait-semaphore limit is now checked before recording rather than after.
+
+Verification: Debug 15/15; Release 17/17 with the Vulkan smoke under Khronos
+core and synchronization validation (no `Vulkan validation` line). The Vulkan
+smoke of the previous commit, built in a separate worktree, produced 60
+captures; 52 were byte-identical to the new build's, and the 8 others (editor
+open) differ only in the panel's "CPU render / submit" time, confined to that
+text line. Exports of all three libraries are unchanged and
+`libglyphshift_vk.so` still does not link the Vulkan loader. With the user's
+permission, `editor_apps.py` passed on the Release build for
+`vulkan-fixture`, `vkcube` and offline Windows SuperTux through
+GE-Proton/DXVK with `--level` (the layer logged "Vulkan glyph renderer
+initialized" for each of its swapchains; validation was requested with
+`VK_INSTANCE_LAYERS`, and no validation message appeared). The capture
+overlay still renders with OpenGL; using the Vulkan pipeline there needs
+GLX/Vulkan or dmabuf interop and is left to the Wayland or M7 work.
+
+**After the migration.** Still Linux- or X11-specific outside the six items:
+the overlay's and daemon's event loops read Xlib events and wait on the X
+connection (`apps/overlay/`); the Vulkan layer tracks Xlib surfaces
+(`layer.cpp`) and, like the GLX module, uses the X11 editor input — both are
+Linux injection modules by design; `presets.cpp` saves atomically through POSIX
+directory descriptors and the editor writes diagnostics with `write(2)`.
 
 ### Repository layout (target)
 
