@@ -39,10 +39,37 @@ int main() {
         std::cerr << "Interposer changed errno\n";
         return 1;
     }
-    if (missing)
-        return calls ? 1 : 0;
+    // Toolkit presentation hooks (SDL) forward through the first definition.
+    using Present = int (*)(void*);
+    auto gl_swap = reinterpret_cast<Present>(dlsym(RTLD_DEFAULT, "SDL_GL_SwapWindow"));
+    auto present = reinterpret_cast<Present>(dlsym(RTLD_DEFAULT, "SDL_RenderPresent"));
+    if (!gl_swap || !present) {
+        std::cerr << "Missing SDL interposers\n";
+        return 1;
+    }
+    errno = EDOM;
+    const int swapped = gl_swap(reinterpret_cast<void*>(0x1234));
+    const int swap_errno = errno;
+    errno = EDOM;
+    const int presented = present(reinterpret_cast<void*>(0x5678));
+    const int present_errno = errno;
+    if (missing) {
+        // Without SDL, the hooks report failure and leave errno alone.
+        if (calls || swapped != -1 || presented != 0 || swap_errno != EDOM ||
+            present_errno != EDOM) {
+            std::cerr << "Unresolved SDL hooks misbehaved\n";
+            return 1;
+        }
+        return 0;
+    }
     if (!calls || !bad || calls() != 8000 || bad()) {
         std::cerr << "Incorrect forwarding count/arguments\n";
+        return 1;
+    }
+    auto sdl_ok = reinterpret_cast<bool (*)()>(dlsym(RTLD_DEFAULT, "fake_sdl_ok"));
+    if (swapped != 7 || presented != 9 || swap_errno != ERANGE || present_errno != ERANGE ||
+        !sdl_ok || !sdl_ok()) {
+        std::cerr << "Incorrect SDL forwarding, return value, errno or flush order\n";
         return 1;
     }
     return 0;

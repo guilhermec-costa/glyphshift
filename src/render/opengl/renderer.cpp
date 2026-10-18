@@ -777,6 +777,16 @@ void render(Display* display, GLXDrawable drawable) noexcept {
     }
 }
 
+void render_current() noexcept {
+    const auto& x = glx();
+    if (!x.drawable || !x.display)
+        return;
+    const auto drawable = x.drawable();
+    Display* display = x.display();
+    if (drawable && display)
+        render(display, drawable);
+}
+
 void before_context_change(GLXContext next) noexcept {
     const auto& x = glx();
     if (!x.context)

@@ -518,6 +518,48 @@ modules passed `spirv-val`. DoG, crisp and static-stability smoke captures were
 identical between GLX and Vulkan. Focused editor tests and SuperTux were not
 run for this step.
 
+## SDL applications (native SuperTux)
+
+Launching Arch's native SuperTux 0.7.0 (`sdl2-compat` 2.32.72 over SDL 3.4.16,
+NVIDIA GLX) showed no effect and no editor: `GLYPHSHIFT_LOG=1` printed nothing,
+although `/proc/PID/maps` showed `libglyphshift_gl.so` loaded. SDL loads libGL
+itself and resolves `glXSwapBuffers` with `dlsym` on that handle, bypassing
+symbol interposition. In its default `sdl` video mode SuperTux also presents
+through SDL's 2D renderer, which swaps inside SDL3.
+
+Overriding `dlsym` globally was rejected: this glibc (2.44) exports no `_dl_sym`
+that would preserve the caller-relative semantics of `RTLD_NEXT`, and layers
+such as Steam's overlay that define `glXSwapBuffers` and look up the next one
+could then resolve to themselves. Instead, the GL library now also exports the
+toolkit calls the application itself makes:
+
+- `SDL_GL_SwapWindow` renders into the current GLX drawable, then forwards.
+- `SDL_RenderPresent` first flushes SDL's batched 2D commands into the GL back
+  buffer (`SDL_RenderFlush` in SDL2, `SDL_FlushRenderer` in SDL3, taken from
+  the same library as the present call), renders, then forwards.
+
+SDL2 and SDL3 differ in return types (int/void versus bool); the integer return
+register is forwarded unchanged. Without a current GLX drawable (software, EGL
+or Vulkan renderers) the hooks only forward; Vulkan remains covered by the
+layer. A thread-local flag stops `glXSwapBuffers` from rendering a second time
+if an SDL build presents through the exported GLX symbol. GLX context
+lifecycle hooks are still bypassed for such toolkits, so per-context resources
+are released only at process exit; single-context SDL games are the tested
+case. GLFW and other toolkits that resolve GLX privately are not covered yet.
+
+Verified on 2026-10-18: native SuperTux with `--renderer sdl` and `--renderer
+opengl` each logged its interposed path and the editor's X11 input surface,
+and window captures showed the Newsprint effect in both. The interposer unit
+test now preloads fake SDL entry points and checks argument, return value and
+errno forwarding, flush-before-present ordering, and safe behavior when SDL is
+absent; removing the flush made it fail. Debug CTest passed 12/12 and the GLX
+smoke passed. The editor was not opened through real input in the game.
+
+```bash
+./build/dev/glyphshift --profile supertux -- /usr/bin/supertux2
+./build/dev/glyphshift --profile supertux -- /usr/bin/supertux2 --renderer opengl
+```
+
 ## Ink & Edges (art direction, phase 5, step 3)
 
 A style in the spirit of the reference: crisp white letters on black, the

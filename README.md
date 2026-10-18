@@ -170,7 +170,9 @@ The launcher enables the GLX module and Vulkan layer for that run, without a
 system-wide installation. Keep the executable, shared libraries and `layers/`
 directory together in the build tree.
 
-Verified applications include the native GLX/Vulkan fixtures, glxgears,
+SDL2/SDL3 OpenGL games are covered through their presentation calls, including
+the SDL 2D renderer; native SuperTux 0.7.0 renders the effect with both its
+`sdl` and `opengl` video modes. Verified applications include the native GLX/Vulkan fixtures, glxgears,
 vkcube, and offline SuperTux 0.7.0 for Windows through GE-Proton/DXVK, including
 the editor in those tested setups. Hardware validation used NVIDIA on X11;
 Mesa llvmpipe GLX was also tested. AMD/Intel hardware, Mesa Vulkan and arbitrary

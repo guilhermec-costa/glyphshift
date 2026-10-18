@@ -24,7 +24,10 @@ for missing, recurse, logging in [(False, False, False), (False, False, True),
     if logging:
         expected.append('glyphshift: cannot resolve next glXSwapBuffers; presentation skipped'
                         if missing else 'glyphshift: GLX pass-through initialized')
+        if not missing:
+            expected += ['glyphshift: SDL GL presentation interposed',
+                         'glyphshift: SDL renderer presentation interposed']
         if recurse:
             expected.append('glyphshift: recursive glXSwapBuffers suppressed')
     assert sorted(result.stderr.splitlines()) == sorted(expected), result
-print('Interposer: 8 concurrent threads, 8000 forwards, recursion and missing symbol passed.')
+print('Interposer: 8 concurrent threads, 8000 forwards, recursion, missing symbols and SDL presentation hooks passed.')

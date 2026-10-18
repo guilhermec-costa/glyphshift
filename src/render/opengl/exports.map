@@ -8,5 +8,6 @@
     glXMakeCurrent;
     glXMakeContextCurrent;
     glXDestroyContext;
+    SDL_GL_SwapWindow; SDL_RenderPresent;
   local: *;
 };

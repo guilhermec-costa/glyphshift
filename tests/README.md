@@ -83,6 +83,19 @@ In this session, it was extracted to
 `/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d`.
 `--validation` fails explicitly if the layer is unavailable.
 
+## Native SuperTux (Arch package)
+
+The simplest real-game test: install `supertux` and launch the native build.
+
+```bash
+./build/dev/glyphshift --profile supertux -- /usr/bin/supertux2
+```
+
+Press **Insert** for the editor and **F10** to compare. SuperTux presents
+through SDL; add `--renderer opengl` or `--renderer sdl` to try both of its
+video paths. If nothing changes, run with `GLYPHSHIFT_LOG=1` and look for
+`SDL ... presentation interposed` in the output.
+
 ## Windows SuperTux through GE-Proton, without Steam
 
 This command uses portable files **already prepared on this machine**:

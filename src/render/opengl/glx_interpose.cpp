@@ -13,6 +13,8 @@
 namespace {
 using SwapBuffers = void (*)(Display*, GLXDrawable);
 thread_local bool in_swap = false;
+// Set while a toolkit-level present (SDL) has already rendered this frame.
+thread_local bool toolkit_presenting = false;
 std::atomic_flag recursion_reported = ATOMIC_FLAG_INIT;
 
 void log(const char* text, std::size_t size) noexcept {
@@ -82,11 +84,104 @@ extern "C" __attribute__((visibility("default"))) void glXSwapBuffers(Display* d
     }
     const SwapGuard guard;
     const auto& next = dispatch();
-    if (next.swap)
+    if (next.swap && !toolkit_presenting)
         glyphshift::opengl::render(display, drawable);
     errno = saved_errno;
     if (next.swap)
         next.swap(display, drawable);
+}
+
+// SDL loads libGL itself and resolves glXSwapBuffers with dlsym on that
+// handle, which bypasses symbol interposition. The application, however, calls
+// SDL_GL_SwapWindow through its own symbol binding, so render there, then let
+// SDL present. SDL2 returns int and SDL3 bool; both come back in the integer
+// return register, which is forwarded unchanged.
+extern "C" __attribute__((visibility("default"))) int SDL_GL_SwapWindow(void* window) {
+    static const auto next =
+        reinterpret_cast<int (*)(void*)>(dlsym(RTLD_NEXT, "SDL_GL_SwapWindow"));
+    if (!next)
+        return -1;
+    const int saved_errno = errno;
+    if (in_swap || toolkit_presenting) {
+        errno = saved_errno;
+        return next(window);
+    }
+    static const bool announced = [] {
+        const char* setting = std::getenv("GLYPHSHIFT_LOG");
+        if (setting && std::strcmp(setting, "1") == 0)
+            log("glyphshift: SDL GL presentation interposed\n");
+        return true;
+    }();
+    (void)announced;
+    toolkit_presenting = true;
+    glyphshift::opengl::render_current();
+    errno = saved_errno;
+    const int result = next(window);
+    toolkit_presenting = false;
+    return result;
+}
+
+namespace {
+using RendererCall = int (*)(void*);
+
+struct RendererDispatch {
+    RendererCall present = nullptr, flush = nullptr;
+};
+
+// SDL batches 2D renderer commands until present, so flush them into the GL
+// back buffer before capturing it. The flush entry point must come from the
+// same library as the present call: SDL2 names it SDL_RenderFlush, SDL3
+// SDL_FlushRenderer, and their renderer handles are not interchangeable.
+const RendererDispatch& renderer_dispatch() noexcept {
+    static const RendererDispatch next = [] {
+        RendererDispatch result;
+        result.present = reinterpret_cast<RendererCall>(dlsym(RTLD_NEXT, "SDL_RenderPresent"));
+        Dl_info present{};
+        if (!result.present || !dladdr(reinterpret_cast<void*>(result.present), &present))
+            return result;
+        for (const char* name : {"SDL_RenderFlush", "SDL_FlushRenderer"}) {
+            const auto flush = reinterpret_cast<RendererCall>(dlsym(RTLD_NEXT, name));
+            Dl_info owner{};
+            if (flush && dladdr(reinterpret_cast<void*>(flush), &owner) &&
+                owner.dli_fbase == present.dli_fbase) {
+                result.flush = flush;
+                break;
+            }
+        }
+        return result;
+    }();
+    return next;
+}
+}  // namespace
+
+// The SDL 2D renderer presents inside SDL, where neither glXSwapBuffers nor
+// SDL_GL_SwapWindow is reached through interposable symbols. Applications
+// call SDL_RenderPresent themselves. SDL2 returns void and SDL3 bool; the
+// integer return register is forwarded unchanged. Without a current GLX
+// drawable (software, EGL or Vulkan renderers) this only forwards.
+extern "C" __attribute__((visibility("default"))) int SDL_RenderPresent(void* renderer) {
+    const auto& next = renderer_dispatch();
+    if (!next.present)
+        return 0;
+    const int saved_errno = errno;
+    if (in_swap || toolkit_presenting || !next.flush) {
+        errno = saved_errno;
+        return next.present(renderer);
+    }
+    static const bool announced = [] {
+        const char* setting = std::getenv("GLYPHSHIFT_LOG");
+        if (setting && std::strcmp(setting, "1") == 0)
+            log("glyphshift: SDL renderer presentation interposed\n");
+        return true;
+    }();
+    (void)announced;
+    toolkit_presenting = true;
+    next.flush(renderer);
+    glyphshift::opengl::render_current();
+    errno = saved_errno;
+    const int result = next.present(renderer);
+    toolkit_presenting = false;
+    return result;
 }
 
 extern "C" __attribute__((visibility("default"))) Bool glXMakeCurrent(Display* display,
