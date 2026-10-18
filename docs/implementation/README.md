@@ -21,18 +21,24 @@ GE-Proton/DXVK. Mesa llvmpipe GLX passed; Mesa Vulkan and the Mesa offscreen
 oracle remain unverified for the environment-specific reasons recorded below.
 These are existing results, not new tests performed by this documentation split.
 
-M6 (standalone capture overlay) has steps 1–4 complete: capture, window
-tracking, editor with per-game presets, and the background daemon with a
-global attach hotkey.
+M6 (standalone capture overlay) is complete within its recorded scope:
+capture, window tracking, editor with per-game presets, the background daemon
+with a global attach hotkey, and its closing validation. The hotkey attached
+the overlay to native SuperTux and to Windows SuperTux through GE-Proton
+(offline), with game input, editor, resize tracking, detach and clean exit
+checked; latency and GPU cost were measured against the launcher (see
+[Closing M6](#closing-m6-real-games-latency-and-gpu-cost)). Game and validation
+test assets now live in a persistent test environment
+(`tests/smoke/test_env.py`) instead of `/tmp`.
 
 ## Roadmap
 
 Agreed order of the next work, recorded on 2026-10-18. Each item still starts
 only when the user requests it.
 
-1. **Close M6.** Attach through the hotkey to native SuperTux and an offline
-   Proton game; measure end-to-end latency and GPU cost of the overlay against
-   the launcher.
+1. **Close M6.** Done on 2026-10-18: attached through the hotkey to native
+   SuperTux and an offline Proton game; measured end-to-end latency and GPU
+   cost of the overlay against the launcher.
 2. **M6 step 5: background app packaging.** A `glyphshift.desktop` entry and
    icon installed by `cmake --install`, optional autostart
    (`~/.config/autostart`), and a single instance: a second launch reports that
@@ -75,8 +81,10 @@ Only implement work explicitly requested by the user.
 - [ ] Add explicit aspect correction beyond independent cell dimensions.
 - [ ] Validate visual quality and motion across longer gameplay sessions and
   multiple scene types, including fine HUD/text readability.
-- [ ] Measure GPU execution cost and gameplay performance. The editor currently
-  reports CPU preparation/submission time, not GPU execution time.
+- [ ] Measure GPU execution cost and gameplay performance more broadly. The
+  GL paths (injected and overlay) report GPU time with `GLYPHSHIFT_GPU_TIMING=1`
+  ([Closing M6](#closing-m6-real-games-latency-and-gpu-cost)); the Vulkan layer is
+  not instrumented, and the editor still shows CPU preparation/submission time.
 
 ### Compatibility and validation
 
@@ -3042,6 +3050,170 @@ step; latency was not measured.
 ```bash
 python3 tests/smoke/overlay_daemon.py --build build/dev --output /tmp/glyphshift-overlay-daemon
 ```
+
+#### Closing M6: real games, latency and GPU cost
+
+Roadmap item 1, done on 2026-10-18 on the existing setup (Arch, i3 with picom,
+NVIDIA RTX 3060 Ti, driver 615.71.09, one 1920×1080 monitor at 254.87 Hz, so a
+display refresh is 3.9 ms). Release build throughout.
+
+**Persistent test environment.** Earlier records used GE-Proton, Windows
+SuperTux, a seccomp network wrapper and the Khronos layer extracted under
+`/tmp`; a reboot removed them. `tests/smoke/test_env.py setup` now downloads
+pinned, SHA-256-checked copies once (GE-Proton11-9 and SuperTux 0.7.0 from
+their GitHub releases, whose published digests matched; validation layers
+1.4.363.0-1, mesa-utils 9.0.0-7 and vulkan-tools 1.4.363.0-1 from the Arch
+archive, whose package signatures verified) into `~/.local/share/glyphshift-test`,
+with the Proton prefix and SuperTux test profiles. Nothing is installed
+system-wide. `test_env.py run -- CMD` adds the layer to `VK_LAYER_PATH`;
+`run --offline` replaces the seccomp wrapper with `unshare --user
+--map-current-user --net`, a kernel network namespace with no interfaces. A
+probe there got `ENETUNREACH`, X11 still worked through its Unix socket, and
+all capability sets were empty. The Proton drivers refuse to start Proton when
+a test connection is not refused that way. `editor_apps.py` uses these paths
+instead of `/tmp`; the `/tmp` paths in the sections above are historical.
+
+**Hotkey attach on real games.** New focused driver
+`tests/smoke/overlay_game.py` (real XTest input, run with the user's
+permission) starts SuperTux on its own on `welcome_antarctica` at 800×600 and
+the daemon with a monochrome, strength-1 live config, then presses Ctrl+Alt+G
+on the focused game. Both runs passed:
+
+| Check | Native SuperTux 0.7.0 (Arch, SDL/GL) | Windows SuperTux 0.7.0, GE-Proton11-9, offline |
+| --- | --- | --- |
+| Before attaching, share of the screen over the game neither black nor white | 0.62% | 0.61% |
+| After Ctrl+Alt+G: one overlay child, share of non-black/white pixels | 0.010% (only compositor corner pixels) | 0.010% |
+| Holding Right for 2.5 s changes the game's own image (idle 1 s: 0%) | 42% (Tux walks, the camera scrolls) | 42% |
+| Insert / Escape over the game | editor panel shown, then glyphs only again | same |
+| Game resized to 640×480 | overlay at the same root geometry (40, 40, 640, 480) | same |
+| Ctrl+Alt+G again / a third time | original image back / attached again | same |
+| Game closed | game status 0, overlay ended, daemon kept running; SIGTERM: daemon status 0 | same |
+
+The Proton run created its prefix on first use (`Upgrading prefix from None
+to GE-Proton11-9`) and attached to the Wine client window. Captures of the
+game's own image and of the screen were inspected: the level scrolled under
+the overlay's glyphs. Under Wine the hotkey, the editor input surface and
+tracking needed no change. The first runs of the driver failed for the test's
+own reasons and are not counted: a color-count criterion tripped on eight
+anti-aliased corner pixels per gray level, focusing the game through i3
+before `RealInput` mapped its sentinel made i3 move focus to the sentinel
+after the hotkey (the order `overlay_daemon.py` already uses fixed it), and
+the level introduction ends on its own, so Enter was no evidence of input;
+the driver now holds Right instead.
+
+**GPU time.** `GLYPHSHIFT_GPU_TIMING=1` enables `GpuTimer`
+(`src/render/opengl/gpu_timer.{hpp,cpp}`, renderer layer, GL only): a pair of
+`GL_TIMESTAMP` queries around GlyphShift's own work per frame, read up to
+eight frames later only when available, so it never waits; a frame is skipped
+rather than stalled if the GPU is further behind. Every 600 samples it prints
+the frame rate, mean, median, p95 and maximum to stderr. The injected GLX
+renderer times the back-buffer capture and glyph passes; the overlay times
+the pixmap bind and glyph passes. The editor is excluded. The query entry
+points are optional in the GL table, so their absence only disables timing.
+In the injected path, query results would be written into a bound
+`GL_QUERY_BUFFER` (GL 4.4), so that binding is cleared and restored around the
+read. The Vulkan layer is not instrumented.
+
+`tests/smoke/overlay_measure.py cost` ran native SuperTux on its animated
+title screen (SuperTux renders about 65 frames per second) with Comic, an
+illustrated style with DoG contours, for 20 s per mode after 5 s of warm-up.
+GlyphShift's GPU time is the last 600-frame report; the whole-GPU columns are
+`nvidia-smi` means (utilization, board power, graphics clock) over the same
+20 s:
+
+| Window | Mode | GlyphShift GPU time per frame, median / p95 | Whole GPU busy | Power | Graphics clock |
+| --- | --- | --- | --- | --- | --- |
+| 1280×720 | game alone | — | 29.4% | 37.0 W | 1065 MHz |
+| 1280×720 | launcher (injected GL) | 1.88 / 3.29 ms | 31.9% | 46.8 W | 1294 MHz |
+| 1280×720 | overlay | 2.10 / 3.02 ms | 37.3% | 48.8 W | 1313 MHz |
+| 1920×1080 | game alone | — | 25.0% | 38.7 W | 1077 MHz |
+| 1920×1080 | launcher (injected GL) | 3.02 / 4.01 ms | 39.0% | 52.0 W | 1326 MHz |
+| 1920×1080 | overlay | 2.62 / 3.62 ms | 38.6% | 62.1 W | 1678 MHz |
+
+The glyph passes cost about the same in both modes: the overlay replaces the
+back-buffer blit with a pixmap bind and runs the same pipeline. The GPU's
+clock follows its load, so milliseconds measured at different clocks are not
+strictly comparable; at 1080p the overlay ran at a higher clock, which is
+part of its lower time. Whole-GPU figures include what the overlay adds
+outside GlyphShift's passes (one more full-window surface for picom to
+composite), which shows as about 10 W more than the launcher at 1080p. The
+cost is per game frame: the overlay renders only on XDamage, here at the
+game's ~65 frames per second (0.31–0.35 ms of overlay CPU per frame including
+the swap). With the monochrome classic config of the hotkey test at 800×600,
+the overlay measured 0.12 ms median. The GLX smoke also passed with
+`GLYPHSHIFT_GPU_TIMING=1` (hostile-state probe and GL debug output enabled, no
+`GL debug:` line), so the queries leave the application's GL state intact.
+
+**End-to-end latency.** With `GLYPHSHIFT_FIXTURE_LATENCY=FILE` the GLX
+fixture clears whole frames black or white, alternating every 30 frames
+(60 fps), and logs `CLOCK_MONOTONIC` just before the first swap of each phase.
+`tests/smoke/overlay_measure.py latency` reads an 8×8 block at the window's
+center from the composited screen (`XGetImage` on the root, about every
+0.07 ms) and times each phase change from its swap: directly without
+GlyphShift, through the launcher and with the overlay attached by window ID.
+This is swap-to-composited-screen time; scanout and the monitor are not
+included, and the screen is read on the CPU.
+
+Right after each change the screen read sometimes returns the previous phase
+for one compositor refresh before the new one stays: before each swap both
+compositor buffers had shown the old phase for 500 ms, so this is most likely
+the read returning the other buffer of a page flip, not the display. The
+reported latency is therefore the first poll showing the new phase. "Stable"
+is the start of the first run of the new phase lasting at least 30 ms;
+directly and through the launcher it waits for the fixture's next frame
+(16.7 ms later), so it reflects that read effect rather than latency.
+
+120 flashes per mode (the overlay matched 105 with Comic, at least the
+required 80%), at 800×600:
+
+| Config | Direct (no GlyphShift) median / p95 | Launcher median / p95 | Overlay median / p95 |
+| --- | --- | --- | --- |
+| defaults (classic) | 4.49 / 6.84 ms | 5.05 / 8.68 ms | 8.07 / 9.91 ms |
+| Comic (illustrated) | 5.01 / 7.02 ms | 6.31 / 8.81 ms | 7.45 / 9.37 ms |
+
+The overlay adds about 2.5–3.6 ms at the median over the direct path, and
+1.1–3.0 ms over the launcher: roughly one refresh of this 254.87 Hz display,
+consistent with its one extra vsync-paced swap before picom composites it.
+The bound recorded at step 1 ("about one display frame with vsync") holds; at
+60 Hz the same extra swap would cost up to about 16.7 ms. The launcher adds
+0.6–1.3 ms over the direct path. Minimum overlay latency was 5.25 ms in both
+configurations. Not measured: photon latency at the monitor, other refresh
+rates, games other than the fixture for latency, and Vulkan or Proton
+latency.
+
+Verification on 2026-10-18 (commands below): Debug built without warnings and
+passed `ctest --preset dev` 12/12; Release built without warnings. The first
+Release `ctest --preset release` with the persistent validation layer and
+`VK_LAYER_VALIDATE_SYNC=1` failed `smoke-vulkan` (13/14) right after the
+measurement runs; its output was not captured, so the cause is unknown. Run
+alone it passed, and a second full run passed 14/14 (101 s). Format and
+`git diff --check` passed. `overlay_daemon.py` and the editor drivers were not
+rerun; their code paths are unchanged except `editor_apps.py`'s application
+paths, which were only syntax-checked. The launcher ran the GLX fixture for 60
+frames inside `test_env.py run --offline` (injected, status 0); the manual
+Proton-through-launcher command in the test guide was not run.
+
+```bash
+python3 tests/smoke/test_env.py setup
+python3 tests/smoke/overlay_game.py --build build/release --application supertux \
+  --output /tmp/glyphshift-overlay-supertux
+python3 tests/smoke/test_env.py run --offline -- python3 tests/smoke/overlay_game.py \
+  --build build/release --application supertux-proton --output /tmp/glyphshift-overlay-proton
+python3 tests/smoke/overlay_measure.py latency --build build/release \
+  --config presets/art-comic.conf --samples 120 --output /tmp/glyphshift-latency
+python3 tests/smoke/overlay_measure.py cost --build build/release \
+  --config presets/art-comic.conf --size 1920x1080 --output /tmp/glyphshift-cost
+GLYPHSHIFT_GPU_TIMING=1 python3 tests/smoke/test_env.py run -- \
+  python3 tests/smoke/run.py --build build/release --api glx --output /tmp/glyphshift-smoke-timing
+VK_LAYER_VALIDATE_SYNC=1 python3 tests/smoke/test_env.py run -- ctest --preset release
+```
+
+The M6 exit condition is met for the tested games and setup: an
+independently started game window is transformed live, input reaches the
+game, the overlay follows the window and detaches cleanly, and latency and
+cost are documented. Proton coverage is one game (SuperTux; which graphics path
+it used under Proton in this run was not checked); other Proton games,
+other GPUs and compositors, and Wayland remain unverified.
 
 #### M6 technical debt (tracked)
 

@@ -5,6 +5,7 @@
 #include <GL/glxext.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -20,6 +21,9 @@ public:
     decltype(&glXSwapBuffers) swap = &glXSwapBuffers;
     GLuint program = 0, vao = 0;
     std::unique_ptr<fixture::GlStateProbe> probe;
+    // Latency probe: whole frames alternate black/white every 30 frames, and
+    // the monotonic time just before each phase's first swap is recorded.
+    std::ofstream flashes;
 
     ~Renderer() {
         if (context) {
@@ -145,6 +149,11 @@ public:
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
         glUseProgram(program);
+        if (const char* path = std::getenv("GLYPHSHIFT_FIXTURE_LATENCY")) {
+            flashes.open(path);
+            if (!flashes)
+                throw std::runtime_error("Cannot write latency log");
+        }
         if (std::getenv("GLYPHSHIFT_FIXTURE_STATE_CHECK")) {
             probe = std::make_unique<fixture::GlStateProbe>();
             glBindVertexArray(vao);
@@ -157,11 +166,25 @@ public:
         glViewport(0, 0, static_cast<GLsizei>(window.width), static_cast<GLsizei>(window.height));
         glUniform2f(size, static_cast<float>(window.width), static_cast<float>(window.height));
         glUniform1f(time, glyphshift::fixture_time(frame, opts));
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        const unsigned phase = (frame / 30) % 2;
+        if (flashes.is_open()) {
+            glClearColor(static_cast<float>(phase),
+                static_cast<float>(phase),
+                static_cast<float>(phase),
+                1);
+            glClear(GL_COLOR_BUFFER_BIT);
+        } else
+            glDrawArrays(GL_TRIANGLES, 0, 3);
         if (const auto error = glGetError(); error != GL_NO_ERROR)
             throw std::runtime_error("OpenGL error: " + std::to_string(error));
         if (probe)
             probe->before();
+        if (flashes.is_open() && frame % 30 == 0)
+            flashes << phase << ' '
+                    << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count()
+                    << std::endl;
         swap(window.display, window.handle);
         if (probe)
             probe->after(program, vao);

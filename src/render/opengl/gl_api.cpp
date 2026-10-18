@@ -41,6 +41,16 @@ const GlApi& api() {
             get(reinterpret_cast<const GLubyte*>("glBlendFuncSeparatei")));
         result.BlendEquationSeparatei = reinterpret_cast<decltype(result.BlendEquationSeparatei)>(
             get(reinterpret_cast<const GLubyte*>("glBlendEquationSeparatei")));
+        result.GenQueries = reinterpret_cast<decltype(result.GenQueries)>(
+            get(reinterpret_cast<const GLubyte*>("glGenQueries")));
+        result.DeleteQueries = reinterpret_cast<decltype(result.DeleteQueries)>(
+            get(reinterpret_cast<const GLubyte*>("glDeleteQueries")));
+        result.QueryCounter = reinterpret_cast<decltype(result.QueryCounter)>(
+            get(reinterpret_cast<const GLubyte*>("glQueryCounter")));
+        result.GetQueryObjectiv = reinterpret_cast<decltype(result.GetQueryObjectiv)>(
+            get(reinterpret_cast<const GLubyte*>("glGetQueryObjectiv")));
+        result.GetQueryObjectui64v = reinterpret_cast<decltype(result.GetQueryObjectui64v)>(
+            get(reinterpret_cast<const GLubyte*>("glGetQueryObjectui64v")));
         result.available = true;
 #define LOAD(member, name)                                                                       \
     result.member =                                                                              \

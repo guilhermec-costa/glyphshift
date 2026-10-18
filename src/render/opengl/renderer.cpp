@@ -19,6 +19,7 @@
 
 #include "gl_api.hpp"
 #include "gl_state.hpp"
+#include "gpu_timer.hpp"
 #include "pipeline.hpp"
 
 namespace glyphshift::opengl {
@@ -36,9 +37,10 @@ struct Drawable {
 
 struct Context {
     std::unique_ptr<Pipeline> pipeline;
+    std::unique_ptr<GpuTimer> timer;
     unsigned clip_count = 0, tf_bindings = 0;
     bool disabled = false, caps_ready = false, viewport_array = false, clip_control = false;
-    bool indexed_blend = false;
+    bool indexed_blend = false, query_buffer = false;
     unsigned draw_buffers = 0;
     std::atomic<bool> bound{true}, retired{false};
     std::unordered_map<GLXDrawable, Drawable> drawables;
@@ -54,6 +56,7 @@ struct Context {
             drawable.cells.release();
         }
         drawables.clear();
+        timer.reset();
         pipeline.reset();
     }
 
@@ -77,6 +80,7 @@ struct Context {
         viewport_array = major > 4 || (major == 4 && minor >= 1);
         indexed_blend = major >= 4;
         clip_control = major > 4 || (major == 4 && minor >= 5);
+        query_buffer = major > 4 || (major == 4 && minor >= 4);
         gl.GetIntegerv(GL_NUM_EXTENSIONS, &extensions);
         for (GLint i = 0; i < extensions; ++i) {
             const auto* name =
@@ -87,6 +91,8 @@ struct Context {
                 indexed_blend = true;
             if (name && std::strcmp(name, "GL_ARB_clip_control") == 0)
                 clip_control = true;
+            if (name && std::strcmp(name, "GL_ARB_query_buffer_object") == 0)
+                query_buffer = true;
         }
         if ((viewport_array && (!gl.ViewportIndexedf || !gl.ScissorIndexed)) ||
             (clip_control && !gl.ClipControl))
@@ -201,9 +207,15 @@ struct Context {
         if (!pipeline)
             pipeline = std::make_unique<Pipeline>(Caps{viewport_array, indexed_blend});
         if (settings.enabled) {
+            if (!timer && GpuTimer::requested())
+                timer = std::make_unique<GpuTimer>("injected OpenGL");
+            if (timer)
+                timer->begin(query_buffer);
             auto& drawable = drawables[handle];
             capture(drawable, width, height);
             pipeline->draw(drawable.cells, drawable.image, width, height, false, settings, 0);
+            if (timer)
+                timer->end();
         }
         if (ui)
             pipeline->draw_editor(*ui, width, height, 0);

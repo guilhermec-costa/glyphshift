@@ -57,7 +57,7 @@ target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Thread
 # Glyph pipeline shared by every GL path: the injected renderer, the capture
 # overlay and the preview tool. GL is resolved at run time (no libGL link).
 add_library(glyphshift_gl_pipeline STATIC src/render/opengl/gl_api.cpp
-    src/render/opengl/pipeline.cpp)
+    src/render/opengl/pipeline.cpp src/render/opengl/gpu_timer.cpp)
 set_target_properties(glyphshift_gl_pipeline PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_definitions(glyphshift_gl_pipeline PUBLIC GL_GLEXT_PROTOTYPES)

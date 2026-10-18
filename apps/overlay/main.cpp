@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 
+#include "../../src/render/opengl/gpu_timer.hpp"
 #include "../../src/render/opengl/pipeline.hpp"
 #include "daemon.hpp"
 #include "tracker.hpp"
@@ -147,6 +148,8 @@ public:
         create_window(screen, target);
         create_context(screen);
         pipeline_ = std::make_unique<glyphshift::opengl::Pipeline>(glyphshift::opengl::Caps{});
+        if (glyphshift::opengl::GpuTimer::requested())
+            timer_ = std::make_unique<glyphshift::opengl::GpuTimer>("overlay");
         glGenTextures(1, &source_);
         glBindTexture(GL_TEXTURE_2D, source_);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -164,6 +167,7 @@ public:
             glXMakeCurrent(display_, window_, context_);
         release_pixmap();
         cells_.release();
+        timer_.reset();
         pipeline_.reset();
         if (source_)
             glDeleteTextures(1, &source_);
@@ -222,6 +226,7 @@ private:
     BindTexImage bind_ = nullptr;
     ReleaseTexImage release_ = nullptr;
     std::unique_ptr<glyphshift::opengl::Pipeline> pipeline_;
+    std::unique_ptr<glyphshift::opengl::GpuTimer> timer_;
     glyphshift::opengl::Target cells_;
     std::unique_ptr<Tracker> tracker_;
     Tracker::State state_{};
@@ -440,6 +445,8 @@ private:
         // the context, so reset them instead of saving host state.
         glDisable(GL_BLEND);
         glDisable(GL_SCISSOR_TEST);
+        if (timer_)
+            timer_->begin();
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_);
         bind_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, nullptr);
@@ -453,6 +460,8 @@ private:
             original.glyph_strength = 0;
             pipeline_->draw(cells_, source_, width_, height_, top_down_, original, 0);
         }
+        if (timer_)
+            timer_->end();
         if (ui)
             pipeline_->draw_editor(*ui, width_, height_, 0);
         glActiveTexture(GL_TEXTURE0);

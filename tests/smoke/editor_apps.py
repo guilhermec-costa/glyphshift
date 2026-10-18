@@ -9,6 +9,7 @@ import subprocess
 import time
 
 from real_input import RealInput
+import test_env
 from x11 import X11
 
 
@@ -16,10 +17,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', type=Path, default=Path('build/dev'))
     parser.add_argument('--application', choices=['glx-fixture', 'vulkan-fixture', 'glxgears', 'vkcube', 'supertux', 'overlay-fixture'], required=True)
-    parser.add_argument('--apps', type=Path, default=Path('/tmp/glyphshift-m5-apps'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--illustrated', action='store_true', help='Enable the new rendering mode through the actual panel')
-    parser.add_argument('--level', action='store_true', help='Use the previously prepared offline SuperTux test level')
+    parser.add_argument('--level', action='store_true', help='Start SuperTux on the prepared test level')
     parser.add_argument('--presets', action='store_true', help='Select every included style and save personal copies through the overlay')
     args = parser.parse_args()
     args.build = args.build.resolve()
@@ -46,25 +46,20 @@ def main():
         if app == 'vulkan-fixture':
             target.append('--validation')
     elif app == 'glxgears':
-        target = [str(args.apps / 'root/usr/bin/glxgears'), '-geometry', '800x600+40+40']
+        target = [str(test_env.GLXGEARS), '-geometry', '800x600+40+40']
         title = 'glxgears'
     elif app == 'vkcube':
-        target = [str(args.apps / 'root/usr/bin/vkcube'), '--wsi', 'xlib', '--validate', '--width', '800', '--height', '600']
+        target = [str(test_env.VKCUBE), '--wsi', 'xlib', '--validate', '--width', '800', '--height', '600']
         title = None
     else:
-        # Run this script inside the documented, authorized network-blocking
-        # wrapper. It neither downloads software nor weakens that restriction.
-        env.update(STEAM_COMPAT_DATA_PATH='/tmp/glyphshift-m5-proton-prefix',
-                   STEAM_COMPAT_CLIENT_INSTALL_PATH='/tmp/glyphshift-m5-steam-empty',
-                   PROTONFIXES_DISABLE='1', WINEDEBUG='-all', PROTON_LOG='0',
-                   SteamGameId='0', SDL_AUDIODRIVER='dummy')
-        target = ['/usr/bin/python3', str(args.apps / 'GE-Proton11-9-x86_64/proton'), 'run',
-                  str(args.apps / 'supertux/SuperTux-portable/bin/supertux2.exe'),
-                  '--userdir', r'Z:\tmp\glyphshift-m5-supertux-user',
-                  '--window', '--geometry', '800x600', '--disable-sound', '--disable-music']
+        # Proton runs only without network access: run this script through
+        # `test_env.py run --offline`. It neither downloads software nor
+        # weakens that restriction.
+        test_env.proton_env(env)
+        target = test_env.supertux_proton('--geometry', '800x600')
         if args.level:
-            target.append('glyphshift-m5-test.stl')
-        title = 'SuperTux v0.7.0'
+            target.append(test_env.LEVEL)
+        title = test_env.SUPERTUX_TITLE
     command = target if overlay_mode else [str(args.build / 'glyphshift'), '--profile', 'editor-' + app, '--', *target]
     overlay = None
     overlay_log = out / 'overlay.log'
@@ -301,7 +296,7 @@ def main():
                 overlay.wait(timeout=10)
             if process.poll() is None:
                 if app == 'supertux':
-                    subprocess.run([str(args.apps / 'GE-Proton11-9-x86_64/files/bin/wineserver'), '-k'], env=dict(env, WINEPREFIX=env['STEAM_COMPAT_DATA_PATH'] + '/pfx'), check=True)
+                    subprocess.run([str(test_env.PROTON / 'files/bin/wineserver'), '-k'], env=dict(env, WINEPREFIX=env['STEAM_COMPAT_DATA_PATH'] + '/pfx'), check=True)
                 else:
                     process.terminate()
                 process.wait(timeout=15)

@@ -78,10 +78,34 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   ./build/dev/glyphshift -- ./build/dev/glyphshift-vulkan-fixture --validation
 ```
 
-If the layer is in an external directory, add `VK_LAYER_PATH` to `env`.
-In this session, it was extracted to
-`/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d`.
+If the layer is not installed system-wide, use the one kept by the
+[persistent test environment](#persistent-test-environment): prefix the command
+with `python3 tests/smoke/test_env.py run --`, which adds it to `VK_LAYER_PATH`.
 `--validation` fails explicitly if the layer is unavailable.
+
+## Persistent test environment
+
+The game and validation tests use files that are not part of the checkout:
+GE-Proton11-9, SuperTux 0.7.0 for Windows, the Khronos validation layer
+1.4.363, glxgears and vkcube. One command downloads pinned, checksummed copies
+once and keeps them, a Proton prefix and SuperTux test profiles in
+`~/.local/share/glyphshift-test` (or `$GLYPHSHIFT_TEST_ENV`), so they survive
+reboots. Nothing is installed system-wide and Steam is not used. Running it
+again only checks what is already there.
+
+```bash
+python3 tests/smoke/test_env.py setup
+python3 tests/smoke/test_env.py status
+```
+
+`test_env.py run -- COMMAND` runs a command with the validation layer added to
+`VK_LAYER_PATH`. `test_env.py run --offline -- COMMAND` also runs it in a new
+user and network namespace with no network interfaces (`unshare --user
+--map-current-user --net`; X11 works through its Unix socket). Proton is only
+started that way, and the test drivers refuse to start it when the network is
+reachable. The SuperTux test profiles disable networking, release checks,
+Discord integration, audio and pausing on focus loss; they are separate from
+your own SuperTux profile.
 
 ## Native SuperTux (Arch package)
 
@@ -98,41 +122,28 @@ video paths. If nothing changes, run with `GLYPHSHIFT_LOG=1` and look for
 
 ## Windows SuperTux through GE-Proton, without Steam
 
-This command uses portable files **already prepared on this machine**:
-
-- GE-Proton11-9 at `/tmp/glyphshift-m5-apps/GE-Proton11-9-x86_64`;
-- SuperTux 0.7.0 for Windows at `/tmp/glyphshift-m5-apps/supertux/SuperTux-portable`;
-- Proton prefix at `/tmp/glyphshift-m5-proton-prefix`;
-- empty Steam directory at `/tmp/glyphshift-m5-steam-empty`;
-- game test data at `/tmp/glyphshift-m5-supertux-user`;
-- network-blocking wrapper at `/tmp/glyphshift-offline`.
-
-These files are not part of the checkout and may disappear after a reboot or
-cleanup of `/tmp`. The command does not download or install Steam, Proton, or
-the game. The SuperTux test configuration was prepared with networking,
-update checks, and Discord integration disabled. Use only this offline run,
-with no active anti-cheat or online services.
+This uses the [persistent test environment](#persistent-test-environment), with
+no network access. Use only this offline run, with no active anti-cheat or
+online services.
 
 The command below starts with **Illustrated rendering**, 6×10 cells, glyph
 strength 1, scene-colored ink on light paper, outline shape glyphs and a smooth
 paper wash, using `presets/illustrated.conf`.
 
 ```bash
-setpriv --inh-caps=-all --ambient-caps=-all -- \
-  env \
+python3 tests/smoke/test_env.py run --offline -- env \
   GLYPHSHIFT_CONFIG="$PWD/presets/illustrated.conf" \
-  STEAM_COMPAT_DATA_PATH=/tmp/glyphshift-m5-proton-prefix \
-  STEAM_COMPAT_CLIENT_INSTALL_PATH=/tmp/glyphshift-m5-steam-empty \
-  PROTONFIXES_DISABLE=1 \
-  WINEDEBUG=-all \
-  SteamGameId=0 \
-  /tmp/glyphshift-offline \
+  STEAM_COMPAT_DATA_PATH="$HOME/.local/share/glyphshift-test/proton-prefix" \
+  STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/glyphshift-test/steam-empty" \
+  PROTONFIXES_DISABLE=1 WINEDEBUG=-all SteamGameId=0 \
   ./build/dev/glyphshift --profile proton-supertux -- \
-  /usr/bin/python3 /tmp/glyphshift-m5-apps/GE-Proton11-9-x86_64/proton run \
-  /tmp/glyphshift-m5-apps/supertux/SuperTux-portable/bin/supertux2.exe \
-  --userdir 'Z:\tmp\glyphshift-m5-supertux-user' \
+  /usr/bin/python3 "$HOME/.local/share/glyphshift-test/GE-Proton11-9-x86_64/proton" run \
+  "$HOME/.local/share/glyphshift-test/SuperTux-portable/bin/supertux2.exe" \
+  --userdir 'Z:\home\YOU\.local\share\glyphshift-test\supertux-proton-user' \
   --window --geometry 800x600 --disable-sound --disable-music
 ```
+
+Replace `YOU` with your user name in the Windows-style `--userdir` path.
 
 Close any running SuperTux instance and relaunch with this command to select
 the illustrated config. In **Insert → Illustration**, confirm that
@@ -294,10 +305,11 @@ available. Native Wayland input is not supported. Smoke tests return skip code
 77 when they cannot access the display; a skip does not establish rendering
 coverage.
 
-### Game or wrapper not found
+### Game or validation layer not found
 
-Check the `/tmp` paths listed in the SuperTux section. They belong to the test
-environment prepared during development and are not installed by CMake.
+Run `python3 tests/smoke/test_env.py status`, then `setup` for anything
+missing. These files belong to the persistent test environment and are not
+installed by CMake.
 The fixtures can be tested independently of these files.
 
 ## Automated checks
@@ -316,12 +328,10 @@ setpriv --inh-caps=-all --ambient-caps=-all -- \
   cmake --build --preset dev --target smoke
 ```
 
-With this machine's temporary validation layer, use:
+With the validation layer of the persistent test environment, use:
 
 ```bash
-setpriv --inh-caps=-all --ambient-caps=-all -- \
-  env VK_LAYER_PATH=/tmp/glyphshift-m4-validation/root/usr/share/vulkan/explicit_layer.d \
-  cmake --build --preset dev --target smoke
+python3 tests/smoke/test_env.py run -- cmake --build --preset dev --target smoke
 ```
 
 PPM captures and logs are saved under `build/dev/smoke-evidence/`. The tests cover
@@ -338,8 +348,8 @@ cmake --build --preset release
 setpriv --inh-caps=-all --ambient-caps=-all -- ctest --preset release
 ```
 
-If the Khronos layer is not installed system-wide, insert the same
-`env VK_LAYER_PATH=...` shown above before `ctest`.
+If the Khronos layer is not installed system-wide, run
+`VK_LAYER_VALIDATE_SYNC=1 python3 tests/smoke/test_env.py run -- ctest --preset release`.
 
 Observed results (historical runs and the character-selection suite: 11 Debug
 tests, 13 Release tests, Mesa GLX, and Mesa
@@ -363,8 +373,8 @@ python3 tests/smoke/editor_apps.py --build build/dev \
   --application vulkan-fixture --output /tmp/glyphshift-editor-vulkan
 ```
 
-The Vulkan fixture needs the validation layer, including VK_LAYER_PATH when
-using the temporary extraction. Use the same capability-dropping prefix as
+The Vulkan fixture needs the validation layer; prefix the command with
+`python3 tests/smoke/test_env.py run --` when it is not installed system-wide. Use the same capability-dropping prefix as
 above if required by your environment. Both fixtures resolve their event
 functions privately in this test, so the legacy Xlib hooks cannot supply editor
 input. The driver checks mouse/keyboard edits, character-set selection, saved
@@ -372,18 +382,18 @@ preset contents, hotkeys,
 resize while open, focus loss, title-bar close, ordinary host input restoration
 and clean exit. Captures and application logs are saved under `--output`.
 
-With the M5 applications still available, `--application glxgears` and
-`--application vkcube` exercise real native applications. To test the authorized
-Windows SuperTux offline, preserving the existing network restriction:
+`--application glxgears` and `--application vkcube` exercise real native
+applications from the [persistent test environment](#persistent-test-environment).
+To test Windows SuperTux, without network access:
 
 ```bash
-setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
+python3 tests/smoke/test_env.py run --offline -- python3 \
   tests/smoke/editor_apps.py --build build/dev --application supertux \
   --output /tmp/glyphshift-editor-supertux
 ```
 
-These tests require the `/tmp` application paths documented above; they do not
-download or install dependencies. They are opt-in because they use desktop focus.
+These tests do not download or install anything; run `test_env.py setup` once
+first. They are opt-in because they use desktop focus.
 
 The capture overlay has two focused drivers. `--application overlay-fixture`
 runs the editor script above on a GLX fixture with the overlay attached.
@@ -398,6 +408,41 @@ python3 tests/smoke/editor_apps.py --build build/dev \
 python3 tests/smoke/overlay_daemon.py --build build/dev \
   --output /tmp/glyphshift-overlay-daemon
 ```
+
+`overlay_game.py` does the same on a real game started on its own: SuperTux on
+a level, natively or through Proton, with a monochrome config. It presses
+Ctrl+Alt+G to attach, holds Right to check that the game still receives input
+(its own image must change far more than while idle), opens and closes the
+editor, resizes the game and checks that the overlay follows, detaches and
+attaches again, and closes the game.
+
+```bash
+python3 tests/smoke/overlay_game.py --build build/release --application supertux \
+  --output /tmp/glyphshift-overlay-supertux
+python3 tests/smoke/test_env.py run --offline -- python3 tests/smoke/overlay_game.py \
+  --build build/release --application supertux-proton \
+  --output /tmp/glyphshift-overlay-proton
+```
+
+### Overlay latency and GPU cost
+
+`overlay_measure.py` needs no keyboard or pointer input; keep its windows
+visible while it runs. `latency` makes the GLX fixture alternate black and white
+frames and polls the composited screen to time each change from the swap that
+started it, directly, through the launcher and with the overlay. `cost` runs
+native SuperTux on its title screen alone, through the launcher and with the
+overlay, with `GLYPHSHIFT_GPU_TIMING=1` and `nvidia-smi` samples.
+
+```bash
+python3 tests/smoke/overlay_measure.py latency --build build/release \
+  --config presets/art-comic.conf --output /tmp/glyphshift-latency
+python3 tests/smoke/overlay_measure.py cost --build build/release \
+  --config presets/art-comic.conf --size 1920x1080 --output /tmp/glyphshift-cost
+```
+
+`GLYPHSHIFT_GPU_TIMING=1` also works by hand with the launcher or the overlay:
+every 600 processed frames it prints the GPU time of GlyphShift's own passes
+(capture and glyph passes, not the editor) to stderr.
 
 Add `--level` to the SuperTux test to use the previously prepared test level.
 After checking the editor, it sends Enter to advance the introduction, verifies
@@ -527,7 +572,7 @@ focused editor workflow, add `--illustrated`:
 ```bash
 python3 tests/smoke/editor_apps.py --build build/dev \
   --application glx-fixture --illustrated --output /tmp/glyphshift-art-editor-glx
-setpriv --inh-caps=-all -- /tmp/glyphshift-offline /usr/bin/python3 \
+python3 tests/smoke/test_env.py run --offline -- python3 \
   tests/smoke/editor_apps.py --build build/release --application supertux \
   --level --illustrated --output /tmp/glyphshift-art-supertux
 ```

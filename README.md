@@ -147,8 +147,11 @@ the combination is taken. Stop it with Ctrl+C; attached overlays end with it.
 Saved presets are kept per game. To attach to one window without the
 background hotkey, pass its ID:
 `./build/dev/glyphshift-overlay --window "$(xdotool search --name "Game title")"`.
-The overlay adds about one frame of latency; launching through `glyphshift`
-(above) remains the lowest-latency option.
+The overlay adds about one display refresh of latency (measured about 3 ms
+on a 255 Hz monitor; up to about 17 ms at 60 Hz) and costs about the same GPU
+time as the injected effect; launching through `glyphshift` (above) remains
+the lowest-latency option. It was tested on native SuperTux and on Windows
+SuperTux through Proton, attached with the hotkey.
 
 ## Choose a starting style
 
@@ -241,7 +244,8 @@ for the layers, dependency rules and migration plan.
 ## Development and documentation
 
 - [Test guide](tests/README.md): manual demos, offline SuperTux, troubleshooting
-  and automated graphics tests.
+  and automated graphics tests. `python3 tests/smoke/test_env.py setup` prepares
+  the game and validation-layer test environment once, outside `/tmp`.
 - [Implementation and TODOs](docs/implementation/README.md): architecture,
   remaining work, milestone acceptance criteria and recorded validation results.
 - [Repository instructions](AGENTS.md): guidance for implementation agents.

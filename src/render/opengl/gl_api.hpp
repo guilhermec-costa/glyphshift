@@ -84,6 +84,12 @@ struct GlApi {
     decltype(&::glClipControl) ClipControl = nullptr;
     decltype(&::glBlendFuncSeparatei) BlendFuncSeparatei = nullptr;
     decltype(&::glBlendEquationSeparatei) BlendEquationSeparatei = nullptr;
+    // Optional GPU timing (GpuTimer); absent entry points only disable it.
+    decltype(&::glGenQueries) GenQueries = nullptr;
+    decltype(&::glDeleteQueries) DeleteQueries = nullptr;
+    decltype(&::glQueryCounter) QueryCounter = nullptr;
+    decltype(&::glGetQueryObjectiv) GetQueryObjectiv = nullptr;
+    decltype(&::glGetQueryObjectui64v) GetQueryObjectui64v = nullptr;
     bool available = false;
 };
 
