@@ -28,17 +28,16 @@ Only implement work explicitly requested by the user.
 
 ### Rendering and editor controls
 
-- [ ] Art direction phase 3: automatic ink/paper polarity per cell, saturation,
-  optional phosphor glow and recalibrated included styles. Source-color
-  styles still fill bright scenes with dense glyphs, and directional texture
-  (SuperTux ice) still produces contour strokes at the shipped thresholds.
-- [ ] Measure the GPU cost of the phase 2 analysis pass. Shape matching reads
-  16 descriptor texels per matchable glyph in each high-contrast cell.
+- [ ] Measure the GPU cost of the phase 2 analysis pass and the phase 3 glow.
+  Shape matching reads 16 descriptor texels per matchable glyph in each
+  high-contrast cell; glow reads nine neighboring cells per pixel.
+- [ ] Contour thresholds are calibrated per style on one SuperTux frame.
+  Outlined cartoon textures (SuperTux ice) separate from silhouettes by
+  contrast only; other games and scene types are not calibrated.
 - [ ] Add configurable temporal glyph stability/hysteresis. The current
   illustrated renderer filters spatially and has no previous-frame glyph state.
   The phase 2 cell texture is intended to carry the previous frame's choice.
 - [ ] Add explicit aspect correction beyond independent cell dimensions.
-- [ ] Add saturation control; exposure, contrast and gamma already exist.
 - [ ] Validate visual quality and motion across longer gameplay sessions and
   multiple scene types, including fine HUD/text readability.
 - [ ] Measure GPU execution cost and gameplay performance. The editor currently
@@ -189,7 +188,7 @@ Settings, presets and validation round-trip the new key.
 
 The lookup texture grows from 4 to 21 rows of 256 bytes. Row 4, texel 0 holds
 the matchable glyph count minus one; rows 5..20 hold the descriptors. Push
-constants stay at 96 bytes and the art parameters are unchanged.
+constants stayed at 96 bytes in this phase; phase 3 grows them to 112.
 
 Backend resources:
 
@@ -253,6 +252,80 @@ setpriv --inh-caps=-all --ambient-caps=-all -- env \
   VK_LAYER_VALIDATE_SYNC=1 ctest --preset release
 spirv-val --target-env vulkan1.0 build/release/generated/glyph.analysis.spv
 ```
+
+## Ink, paper and light (art direction, phase 3)
+
+After phase 2, source-color styles still drew bright scenes as fields of dense
+glyphs: ink was always the cell's hue at full brightness, so light areas could
+only be expressed by heavy characters. Raising `scene_paper` added color but
+brought back the per-cell tile mosaic the user originally objected to.
+
+Source-color ink now takes its **hue** from the scene and its **luminance cap**
+from `foreground`: `ink = hue * min(1, luma(foreground) / luma(hue))`. Bright
+foregrounds keep the previous behavior (every shipped source-color style uses
+foreground luminance of at least 0.95). A dark foreground prints dark ink of the
+scene's hue. When paper (`background`) is lighter than ink, silhouette
+matching inverts in source color as it already did in monochrome: the glyph
+covers the dark group, painted with its color, over the light group's paper.
+The tonal ramp still uses `glyph_reverse` for that polarity, unchanged. The
+analytic oracle's source-color silhouette case uses black ink on white paper
+and still reproduces the source pixels exactly through the inverted path.
+
+New live settings, persisted in presets, validated, and shown in **Illustration**
+below every control the focused editor tests click:
+
+| Setting | Range | Effect |
+| --- | --- | --- |
+| `saturation` | 0..2, default 1 | Source-color ink and paper, including matched groups. |
+| `glow` | 0..1, default 0 | Composition pulls each pixel toward the ink of the 3×3 neighboring cells, weighted by glyph coverage and distance: phosphor glow on dark paper, ink bleed on light paper. Requires fill. |
+| `paper_wash` | bool, default false | Composition interpolates paper bilinearly between cell centers, so scene-colored paper reads as a wash instead of tiles. |
+
+They occupy a fifth art vec4: GL uploads `art[5]`, and Vulkan push constants
+grow from 96 to 112 bytes, within Vulkan 1.0's guaranteed 128. No atlas or GPU
+resource is rebuilt when they change. Mosaic and the silhouette oracle keep
+`paper_wash` off, since both rely on constant per-cell paper.
+
+Calibration used the same captured SuperTux frame through `glyphshift-preview`.
+The ice's chunks have real dark-blue outlines with luminance contrast near 0.4,
+while sprite and terrain silhouettes are near-black, around 0.8. With
+`edge_strength` 0.6, an `edge_threshold` around 0.42–0.45 keeps silhouettes
+and drops most ice contours. Values near 0.6 lost block and tree outlines.
+
+- `illustrated.conf` becomes scene-colored ink on light paper: dark ink
+  (foreground 0.18), reversed ramp, ASCII shape glyphs, `scene_paper` 0.35 with
+  `paper_wash`, saturation 1.6 and glow 0.25, at 6×10. At 6×10, Tux remained a
+  readable outline (`/#=#\` with `>`); 8×12 lost it.
+- Newsprint: `edge_threshold` 0.42, glow 0.15. Green terminal: 0.45, glow 0.3.
+  Blueprint: 0.6 (it uses `edge_strength` 1), glow 0.45. Amber Braille: glow
+  0.2. `illustrated-ink.conf`: 0.45, glow 0.15. Soft color and Mosaic configs
+  are unchanged; their regenerated previews differ from phase 2 by normalized
+  RMSE 0.00017 (the 0.96 foreground luminance cap) and 0, respectively.
+- A dark-paper source-color style with glow was tried and stayed too busy on
+  this bright scene; it was not shipped. Lowering Green terminal's exposure
+  flattened its shading and was rejected.
+
+The gallery, [shape-color](../shape-color.png) and [shape-ink](../shape-ink.png)
+were regenerated. The [live editor capture](../shape-live-editor.png) predates
+these phases.
+
+### Phase 3 verification
+
+Verified on 2026-10-17 on the existing Arch/X11/i3/NVIDIA RTX 3060 Ti setup.
+Debug built without compiler warnings and passed 12/12 CPU tests, now including
+parsing, persistence, shader-parameter placement and rejection of invalid
+`saturation`, `glow` and `paper_wash`. All 16 shipped configs parsed without
+warnings in `glyphshift-preview`. The Debug smoke target passed on GLX
+(including the unchanged analytic oracle) and Vulkan with Khronos core and
+synchronization validation, with no `GL debug:` or `Vulkan validation:`
+output. The smoke now also requires glow, saturation and paper wash each to
+change the live image on both APIs. Their GLX and Vulkan captures matched with
+normalized RMSE at most 0.0000093. Release built without warnings and passed
+14/14 CTest tests including both graphics smokes with validation (99 seconds).
+All six glyph SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
+
+The focused XTest editor tests, SuperTux and GPU timing were not run; the new
+sliders and checkbox were not exercised through real input, and calibration
+covers one captured frame of one game.
 
 ## Ready-to-use style collection
 
@@ -321,7 +394,8 @@ The lookup texture now has four 256-byte rows: legacy ordering, illustrated
 tone, structural patterns, and tonal fill excluding partial blocks. GLX, Vulkan
 and the preview tool all upload the same data. The existing four vec4 art
 parameters carry the controls in previously reserved components, keeping Vulkan
-push constants at 96 bytes. Atlas regeneration remains limited to character/font
+push constants at 96 bytes (112 since [phase 3](#ink-paper-and-light-art-direction-phase-3)).
+Atlas regeneration remains limited to character/font
 changes; changing these art controls does not rebuild GPU resources.
 
 The recommended color/ink presets now use 6×10 cells to preserve smaller objects,

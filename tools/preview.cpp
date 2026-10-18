@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
             glUniform1ui(glGetUniformLocation(current, "source_color"), settings.source_color);
             glUniform1ui(glGetUniformLocation(current, "ramp_count"), characters.count);
             glUniform1f(glGetUniformLocation(current, "glyph_strength"), settings.glyph_strength);
-            glUniform4fv(glGetUniformLocation(current, "art[0]"), 4, art.data());
+            glUniform4fv(glGetUniformLocation(current, "art[0]"), 5, art.data());
         }
         glDisable(GL_DITHER);
         if (!settings.enabled) {

@@ -13,7 +13,7 @@ layout(push_constant) uniform Parameters {
     uint ramp_count;
     uint output_srgb;
     float glyph_strength;
-    vec4 art[4];
+    vec4 art[5];
 } params;
 layout(set=0, binding=0) uniform sampler2D source_image;
 layout(set=0, binding=1) uniform sampler2D atlas_image;
@@ -36,7 +36,7 @@ uniform vec2 cell;
 uniform uint source_color;
 uniform uint ramp_count;
 uniform float glyph_strength;
-uniform vec4 art[4];
+uniform vec4 art[5];
 #define SIZE size
 #define CELL cell
 #define SOURCE_COLOR source_color
@@ -58,6 +58,7 @@ vec3 sample_source(vec2 pixel) {
     return texelFetch(source_image, at, 0).rgb;
 }
 float luma(vec3 rgb) { return dot(rgb, vec3(.2126,.7152,.0722)); }
+vec3 saturate_color(vec3 rgb) { return clamp(mix(vec3(luma(rgb)),rgb,ART[4].x),0.0,1.0); }
 // Cell palettes travel as 10-bit unorm RGB in one uint: an integer target is
 // never blended, whatever blend state the host application left enabled.
 uint pack_rgb(vec3 rgb) {
@@ -139,12 +140,21 @@ void main() {
     tone = pow(tone,1.0/ART[0].z);
     uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ART[2].w >= 0.0 ? 3 : 1),0).r;
     float peak = max(max(average.r,average.g),average.b);
-    // Tone controls density; normalized chroma supplies ink color without
-    // multiplying the source darkness into sparse glyphs a second time.
-    vec3 ink = (SOURCE_COLOR != 0u && peak > .005) ? average / peak : ART[2].rgb;
-    if (SOURCE_COLOR != 0u)
+    // Paper lighter than ink selects dark-ink-on-paper polarity in both color
+    // modes: silhouettes then draw the dark group, as tonal ramps already do
+    // through glyph_reverse.
+    bool invert = luma(ART[2].rgb) < luma(ART[3].rgb);
+    vec3 ink = ART[2].rgb, paper = ART[3].rgb;
+    if (SOURCE_COLOR != 0u) {
+        // Tone controls density. The scene supplies the ink's hue, and the
+        // foreground color caps its luminance: bright ink glows on dark paper,
+        // dark ink of the same hue prints on light paper. Normalized chroma
+        // avoids multiplying source darkness into sparse glyphs a second time.
+        vec3 hue = saturate_color(peak > .005 ? average / peak : vec3(1));
+        ink = hue * min(1.0, luma(ART[2].rgb) / max(luma(hue), .02));
         ink = mix(ink,min(average*1.4,vec3(1)),ART[3].w);
-    vec3 paper = SOURCE_COLOR != 0u ? mix(ART[3].rgb,average,ART[3].w) : ART[3].rgb;
+        paper = saturate_color(mix(ART[3].rgb,average,ART[3].w));
+    }
     bool shape = false;
     if (ART[2].w >= 0.0 && ART[1].w > .5 && light-dark > max(ART[2].w,.0001)) {
         // Split the regions into a light and a dark group, then pick the
@@ -157,8 +167,6 @@ void main() {
             if (levels[r] > midpoint) { light_color += regions[r]; light_count += 1.0; }
             else { dark_color += regions[r]; dark_count += 1.0; }
         }
-        // Dark monochrome ink on light paper draws the dark group instead.
-        bool invert = SOURCE_COLOR == 0u && luma(ART[2].rgb) < luma(ART[3].rgb);
         int matchable = int(texelFetch(ramp_image,ivec2(0,4),0).r) + 1;
         float best = 1e9;
         uint shaped = 0u;
@@ -175,8 +183,10 @@ void main() {
         shape = best <= shape_fit * 16.0;
         if (shape) glyph = shaped;
         if (shape && SOURCE_COLOR != 0u) {
-            ink = light_color / light_count;
-            paper = mix(ART[3].rgb,dark_color/dark_count,ART[3].w);
+            // The glyph covers the light group, or the dark group when inverted.
+            vec3 light_mean = light_color / light_count, dark_mean = dark_color / dark_count;
+            ink = saturate_color(invert ? dark_mean : light_mean);
+            paper = saturate_color(mix(ART[3].rgb,invert ? light_mean : dark_mean,ART[3].w));
         }
     }
     // A matched silhouette already owns its boundary; drawing another
@@ -227,9 +237,23 @@ void main() {
         uint glyph = texelFetch(ramp_image,ivec2(int(index),0),0).r;
         result = (SOURCE_COLOR != 0u ? average : vec3(1)) * glyph_mask(glyph,pixel-origin,false);
     } else {
-        uvec4 data = texelFetch(cell_image, ivec2(floor(pixel / CELL)), 0);
+        ivec2 index = ivec2(floor(pixel / CELL));
+        uvec4 data = texelFetch(cell_image, index, 0);
         vec3 ink = unpack_rgb(data.x), paper = unpack_rgb(data.y);
         uint glyph = data.z;
+        if (ART[4].z > .5) {
+            // Paper wash: bilinear paper between cell centers, so scene color
+            // reads as a soft wash under the ink instead of a tile mosaic.
+            vec2 at = pixel / CELL - .5;
+            ivec2 base = ivec2(floor(at));
+            vec2 f = at - vec2(base);
+            ivec2 last = ivec2(ceil(SIZE / CELL)) - 1;
+            vec3 p00 = unpack_rgb(texelFetch(cell_image, clamp(base, ivec2(0), last), 0).y);
+            vec3 p10 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(1,0), ivec2(0), last), 0).y);
+            vec3 p01 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(0,1), ivec2(0), last), 0).y);
+            vec3 p11 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(1,1), ivec2(0), last), 0).y);
+            paper = mix(mix(p00,p10,f.x),mix(p01,p11,f.x),f.y);
+        }
         float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
         result = mix(paper,ink,fill_mask);
         if (data.w != 0u) {
@@ -246,6 +270,26 @@ void main() {
             } else {
                 result = mix(ART[3].rgb,ART[2].rgb,mask);
             }
+        }
+        if (ART[4].y > 0.0 && ART[1].w > .5) {
+            // Glow on dark paper, ink bleed on light paper: pull each pixel
+            // toward the ink of nearby glyphs, weighted by their coverage.
+            ivec2 last = ivec2(ceil(SIZE / CELL)) - 1;
+            vec3 bleed = vec3(0);
+            float covered = 0.0, total = 0.0;
+            for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
+                ivec2 near = clamp(index + ivec2(x,y), ivec2(0), last);
+                uvec4 cell_near = texelFetch(cell_image, near, 0);
+                ivec2 corner = ivec2(int(cell_near.z)%16,int(cell_near.z)/16)*ivec2(17,25)+ivec2(16,24);
+                vec2 offset = (pixel - (vec2(near)+.5)*CELL) / CELL;
+                float weight = exp(-1.5*dot(offset,offset));
+                float coverage = texelFetch(atlas_image,corner,0).r/(255.0*16.0*24.0) * weight;
+                bleed += unpack_rgb(cell_near.x) * coverage;
+                covered += coverage;
+                total += weight;
+            }
+            if (covered > 0.0)
+                result = mix(result, bleed/covered, clamp(2.0*ART[4].y*covered/total,0.0,1.0));
         }
     }
     vec3 scene = sample_source(pixel);

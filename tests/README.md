@@ -101,8 +101,8 @@ update checks, and Discord integration disabled. Use only this offline run,
 with no active anti-cheat or online services.
 
 The command below starts with **Illustrated rendering**, 6×10 cells, glyph
-strength 1, local shape matching, scene-colored paper and contours over fill,
-using `presets/illustrated.conf`.
+strength 1, scene-colored ink on light paper, outline shape glyphs and a smooth
+paper wash, using `presets/illustrated.conf`.
 
 ```bash
 setpriv --inh-caps=-all --ambient-caps=-all -- \
@@ -380,7 +380,8 @@ The color and ink presets now use 6×10 cells and **Match local shapes** to reta
 small silhouettes such as Tux. **Shape threshold** controls the minimum local
 contrast: lower values match more texture; higher values reserve shape matching
 for stronger features. **Scene-colored paper** reduces black holes in source
-color mode; it does not change monochrome ink/paper. Strength 1 still draws
+color mode; it does not change monochrome ink/paper. **Smooth paper wash**
+blends that paper between cell centers instead of tiling it per cell. Strength 1 still draws
 only cell palettes and glyph masks, without blending original per-pixel detail.
 Partial blocks in the selected set are reserved for silhouette matching rather
 than repeated surface shading. Remove them to match using only your text glyphs.
@@ -421,6 +422,20 @@ shape_characters="/\\|_()<>^v`',.-LJ7[]T"
 A shape glyph is used only where it closely fits the cell; busy texture keeps
 the calm tonal ramp. Newsprint, Green terminal and `illustrated-ink.conf` use
 this.
+
+In source color mode, **Ink / contours** sets the ink's brightness while the
+scene supplies its hue: white ink glows on dark paper; a dark ink with a light
+**Paper** prints dark scene-colored glyphs, and silhouettes invert to match.
+Use **Reverse dark / light** for the tonal ramp in that case, as the ink
+presets do. **Saturation** (0..2) affects source color only. **Glow / ink
+bleed** pulls nearby paper toward the ink of surrounding glyphs: a phosphor
+glow on dark paper, a soft bleed on light paper. Compare 0 and 0.5 with F10.
+
+```ini
+saturation=1.6
+glow=0.25
+paper_wash=true
+```
 
 The old mode remains available as `render_style=classic`. At 4×4, filtering
 preserves average ink, but letters may still be too small to recognize. The

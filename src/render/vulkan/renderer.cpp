@@ -77,10 +77,11 @@ struct Parameters {
     float width, height, cell_width, cell_height;
     uint32_t source_color, ramp_count, output_srgb;
     float glyph_strength;
-    std::array<float, 16> art;
+    std::array<float, 20> art;
 };
 
-static_assert(sizeof(Parameters) == 96);
+// Vulkan 1.0 guarantees 128 bytes of push constants.
+static_assert(sizeof(Parameters) == 112);
 }  // namespace
 
 void initialize_renderer_api(DeviceDispatch& state) {

@@ -7,11 +7,12 @@ glyph art on Linux. Mix characters, solid blocks and directional contours,
 choose your palette, and shape the result while the application is running.
 An in-game editor lets you experiment and save a different style for each game.
 
-![SuperTux rendered with local shape matching](docs/shape-color.png)
+![SuperTux drawn as scene-colored ASCII ink on a paper wash](docs/shape-color.png)
 
-*Shape-aware illustrated color preset applied by the GPU shader to a captured SuperTux
-frame. The [live editor capture](docs/shape-live-editor.png) shows the
-effect running in the game through Proton.*
+*The default illustrated preset applied by the GPU shader to a captured SuperTux
+frame: scene-colored ink, outline characters for silhouettes and a soft paper
+wash. The [live editor capture](docs/shape-live-editor.png) shows an earlier
+version of the effect running in the game through Proton.*
 
 ## Make it your own
 
@@ -21,6 +22,9 @@ effect running in the game through Proton.*
   a cell to retain small silhouettes, with scene-colored paper to avoid black gaps.
   Add outline characters such as `/\|_()^` to draw edges with text, used only
   where they actually fit the scene.
+- **Ink, paper and light:** scene-colored ink that glows on dark paper or
+  prints dark on light paper, adjustable saturation, a smooth watercolor paper
+  wash and a phosphor glow / ink bleed.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
   or up to 256 custom Unicode characters, with local TTF/OTF fonts. Characters
   keep their typographic position (`_` on the floor, `'` at the top) and an
@@ -124,7 +128,7 @@ Change the `GLYPHSHIFT_CONFIG` path in the launch command:
 
 | Preset | Look |
 | --- | --- |
-| [illustrated.conf](presets/illustrated.conf) | Colored shading, local shape matching and scene-colored paper; 6×10. |
+| [illustrated.conf](presets/illustrated.conf) | Scene-colored ink drawing with outline characters on a watercolor paper wash; 6×10. |
 | [illustrated-blocks.conf](presets/illustrated-blocks.conf) | Coarser text and blocks; 10×14. |
 | [illustrated-ink.conf](presets/illustrated-ink.conf) | Sparse dark ink on warm paper, with local silhouette matching; 6×10. |
 | [readable.conf](presets/readable.conf) | Editable classic renderer preset for experimenting with scene/glyph blending. |

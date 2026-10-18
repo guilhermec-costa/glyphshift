@@ -259,11 +259,19 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
                 key.starts_with("edge_") || key == "shape_threshold" || key == "scene_paper";
             if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
                 parsed.warnings |= invalid_art;
-        } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching") {
+        } else if (key == "saturation" || key == "glow") {
+            const bool glow = key == "glow";
+            float& target = glow ? parsed.value.art.glow : parsed.value.art.saturation;
+            target = glow ? defaults.art.glow : defaults.art.saturation;
+            if (!number(value, target, 0, glow ? 1 : 2))
+                parsed.warnings |= invalid_art;
+        } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching" ||
+                   key == "paper_wash") {
             auto& target = key == "fill_enabled"     ? parsed.value.art.fill
                            : key == "shape_matching" ? parsed.value.art.shape_matching
+                           : key == "paper_wash"     ? parsed.value.art.paper_wash
                                                      : parsed.value.art.contour_overlay;
-            target = key != "shape_matching";
+            target = key != "shape_matching" && key != "paper_wash";
             if (value != "false" && value != "0" && value != "true" && value != "1")
                 parsed.warnings |= invalid_art;
             else
@@ -337,6 +345,8 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
 }
 
 bool valid_art(const ArtSettings& a) noexcept {
+    if (!std::isfinite(a.saturation) || a.saturation < 0 || a.saturation > 2)
+        return false;
     for (const float v : {a.exposure, a.contrast, a.gamma})
         if (!std::isfinite(v) || v < .25F || v > 4)
             return false;
@@ -344,6 +354,7 @@ bool valid_art(const ArtSettings& a) noexcept {
              a.edge_threshold,
              a.shape_threshold,
              a.scene_paper,
+             a.glow,
              a.foreground[0],
              a.foreground[1],
              a.foreground[2],

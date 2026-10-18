@@ -401,6 +401,11 @@ void controls(State& state,
                 1,
                 "%.2f",
                 ImGuiSliderFlags_AlwaysClamp);
+            ImGui::Checkbox("Smooth paper wash", &art.paper_wash);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Blend scene-colored paper smoothly between cells, like a "
+                    "watercolor wash under the glyphs.");
             ImGui::TextWrapped(
                 "Shape matching uses your selected glyphs to preserve small silhouettes. "
                 "Include quadrant blocks for finer shapes. Scene-colored paper affects source "
@@ -431,7 +436,29 @@ void controls(State& state,
                 "%.2f",
                 ImGuiSliderFlags_AlwaysClamp);
             ImGui::ColorEdit3("Ink / contours", art.foreground.data(), ImGuiColorEditFlags_Float);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Mono: ink color. Source color: caps ink brightness; paper "
+                    "lighter than ink prints dark scene-colored ink.");
             ImGui::ColorEdit3("Paper", art.background.data(), ImGuiColorEditFlags_Float);
+            ImGui::SliderFloat("Saturation",
+                &art.saturation,
+                0,
+                2,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Source color only: 0 gray, 1 scene, 2 vivid.");
+            ImGui::SliderFloat("Glow / ink bleed",
+                &art.glow,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Spreads glyph ink into nearby paper: a phosphor glow on dark "
+                    "paper, ink bleed on light paper.");
             ImGui::InputText("Contour glyphs", state.draft.edges.data(), state.draft.edges.size());
             ImGui::InputText("Shape glyphs", state.draft.shapes.data(), state.draft.shapes.size());
             if (ImGui::IsItemHovered())

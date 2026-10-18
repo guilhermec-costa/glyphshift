@@ -167,6 +167,13 @@ try:
         assert max(paper[0::3])-min(paper[0::3])==0 and all(abs(a-b)<=1 for a,b in zip(paper[:3],[51,77,102])),'background compositing incorrect'
         characters(art+'edge_strength=0\ntone_exposure=2\ntone_contrast=1.3\ntone_gamma=0.7\n')
         assert image(window,'illustrated-tone')!=filled,'tone controls missing'
+        characters(art+'glow=0.8\n')
+        assert image(window,'illustrated-glow')!=illustrated,'glow did not change image'
+        characters(art+'saturation=0\n')
+        assert image(window,'illustrated-saturation')!=illustrated,'saturation did not change image'
+        characters(art+'scene_paper=0.6\n');tiled=image(window,'illustrated-paper-tiles')
+        characters(art+'scene_paper=0.6\npaper_wash=true\n')
+        assert image(window,'illustrated-paper-wash')!=tiled,'paper wash did not change image'
         structure=art+'character_set=custom\ncharacters=" .:-+*#@█▘▝▀▖▌▞▛▗▚▐▜▄▙▟"\nscene_paper=0.9\n'
         characters(structure);tonal=image(window,'shape-tonal-only')
         characters(structure+'shape_matching=true\nshape_threshold=0.001\n')

@@ -351,7 +351,7 @@ struct Context {
         gl.Uniform1ui(uniforms.source_color, settings.source_color ? 1 : 0);
         gl.Uniform1f(uniforms.glyph_strength, settings.glyph_strength);
         const auto art = art_parameters(settings);
-        gl.Uniform4fv(uniforms.art, 4, art.data());
+        gl.Uniform4fv(uniforms.art, 5, art.data());
     }
 
     void viewport(unsigned width, unsigned height) {

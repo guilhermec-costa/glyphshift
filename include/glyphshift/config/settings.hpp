@@ -9,9 +9,13 @@ struct ArtSettings {
     bool illustrated = false;
     bool fill = true, contour_overlay = true;
     bool shape_matching = false;
+    // Interpolate cell paper between cell centers: a wash instead of tiles.
+    bool paper_wash = false;
     float shape_threshold = 0.2F, scene_paper = 0.0F;
     float exposure = 1.0F, contrast = 1.0F, gamma = 1.0F;
     float edge_strength = 1.0F, edge_threshold = 0.18F;
+    // Source-color saturation (0..2) and glow/ink bleed from neighboring glyphs (0..1).
+    float saturation = 1.0F, glow = 0.0F;
     std::array<float, 3> foreground{1, 1, 1}, background{0, 0, 0};
     bool operator==(const ArtSettings&) const = default;
 };
@@ -29,8 +33,8 @@ struct Settings {
     bool operator==(const Settings&) const = default;
 };
 
-// Four vec4s, shared by the GL uniforms and Vulkan push constants.
-inline std::array<float, 16> art_parameters(const Settings& s) {
+// Five vec4s, shared by the GL uniforms and Vulkan push constants.
+inline std::array<float, 20> art_parameters(const Settings& s) {
     const auto& a = s.art;
     return {a.exposure,
         a.contrast,
@@ -47,7 +51,11 @@ inline std::array<float, 16> art_parameters(const Settings& s) {
         a.background[0],
         a.background[1],
         a.background[2],
-        a.scene_paper};
+        a.scene_paper,
+        a.saturation,
+        a.glow,
+        a.paper_wash ? 1.0F : 0.0F,
+        0};
 }
 
 enum SettingWarning : std::uint32_t {
