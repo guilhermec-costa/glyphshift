@@ -131,7 +131,14 @@ For dark ink on warm paper, change the config path to
 rendering example, use `$PWD/presets/readable.conf`.
 
 For six additional finished styles, see the [preset gallery](../presets/README.md).
-To compare them without restarting SuperTux, first copy a style to a live file:
+After restarting through the rebuilt launcher, use **Insert → Preset → Included
+styles** to switch them directly over the running game. Hover a style for its
+description. **Save preset** stores edits as a personal copy; saved names remain
+available in the same menu. To restore the last choice on a later launch, remove
+the `GLYPHSHIFT_CONFIG` line from the command and omit any explicit `--preset`.
+
+External-file switching is still available as an alternative. First copy a style
+to a live file:
 
 ```bash
 cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
@@ -150,9 +157,8 @@ cp presets/art-mosaic.conf /tmp/glyphshift-style.conf
 cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
 ```
 
-These copies update only the temporary live config. To keep a style in the
-editor's preset dropdown, load it, name it and click **Save preset**; supplied
-config files are not automatically installed in that dropdown.
+These copies update only the temporary live config. The six included styles
+already appear in the dropdown; **Save preset** adds your own named variation.
 
 The wrapper blocks IPv4/IPv6 socket creation in the process and its children,
 while allowing Unix/X11 sockets. It does not isolate the filesystem. If the

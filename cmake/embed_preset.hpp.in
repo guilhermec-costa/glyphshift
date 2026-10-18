@@ -1,0 +1,5 @@
+#pragma once
+#include <string_view>
+namespace glyphshift::included {
+inline constexpr std::string_view @PRESET_NAME@ = R"glyphshift_conf(@PRESET_CONTENT@)glyphshift_conf";
+}

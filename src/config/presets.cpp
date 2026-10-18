@@ -200,11 +200,15 @@ bool PresetStore::load(std::string_view name, Settings& settings, std::string& e
         return false;
     }
     const File dir{open_directory(directory_, false, error)};
-    if (dir.fd < 0)
-        return false;
     std::string text;
-    if (!read_file(dir.fd, std::string(name) + ".conf", text, error))
-        return false;
+    if (dir.fd < 0 || !read_file(dir.fd, std::string(name) + ".conf", text, error)) {
+        // A saved per-game copy takes precedence. Corrupt or unreadable saved
+        // files must report their error rather than silently loading another style.
+        const auto* included = builtin_preset(name);
+        if (!error.empty() || !included)
+            return false;
+        text = included->config;
+    }
     const auto parsed = parse_settings(text);
     if (parsed.warnings) {
         error = "invalid preset contents; using defaults";
@@ -282,6 +286,8 @@ std::string PresetStore::selected(std::string& error) const {
 
 std::vector<std::string> PresetStore::names() const {
     std::vector<std::string> result{"default"};
+    for (const auto& preset : builtin_presets())
+        result.emplace_back(preset.name);
     std::error_code ec;
     for (std::filesystem::directory_iterator it(directory_, ec), end; !ec && it != end;
         it.increment(ec)) {
@@ -290,6 +296,7 @@ std::vector<std::string> PresetStore::names() const {
             result.push_back(name);
     }
     std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
     return result;
 }
 }  // namespace glyphshift

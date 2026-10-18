@@ -32,7 +32,20 @@ set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_options(glyphshift_imgui PRIVATE -w)
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/editor/x11_input.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp)
+add_library(glyphshift_editor SHARED src/editor/editor.cpp src/editor/x11_input.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp src/config/builtin_presets.cpp)
+# Embed the shipped styles so the overlay works outside the source checkout.
+# Changes to a config trigger reconfiguration; the .conf files remain the source.
+set(BUILTIN_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/presets")
+file(MAKE_DIRECTORY "${BUILTIN_GENERATED}")
+foreach(style newsprint green-terminal blueprint amber-braille mosaic soft-color)
+    set(preset_source "${CMAKE_CURRENT_SOURCE_DIR}/presets/art-${style}.conf")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${preset_source}")
+    file(READ "${preset_source}" PRESET_CONTENT)
+    string(REPLACE "-" "_" PRESET_NAME "${style}")
+    configure_file(cmake/embed_preset.hpp.in
+        "${BUILTIN_GENERATED}/${PRESET_NAME}.hpp" @ONLY)
+endforeach()
+target_include_directories(glyphshift_editor PRIVATE "${BUILTIN_GENERATED}")
 set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
 set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")

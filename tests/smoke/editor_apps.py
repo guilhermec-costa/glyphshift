@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--illustrated', action='store_true', help='Enable the new rendering mode through the actual panel')
     parser.add_argument('--level', action='store_true', help='Use the previously prepared offline SuperTux test level')
+    parser.add_argument('--presets', action='store_true', help='Select all six included styles and save personal copies through the overlay')
     args = parser.parse_args()
     args.build = args.build.resolve()
     out = args.output.resolve()
@@ -97,6 +98,53 @@ def main():
             capture('closed', False)
             control.key(0xff63)
             capture('opened', True)
+            if args.presets:
+                profile_dir = out / 'config/glyphshift/profiles' / ('editor-' + app)
+                def choose(position, expected):
+                    control.click(140, 95)
+                    time.sleep(.2)
+                    if position == 1:
+                        capture('included-preset-menu', True)
+                    if position < 0:
+                        capture('personal-preset-menu', True)
+                        saved_count = len(list(profile_dir.glob('*.conf')))
+                        control.click(100, 340 + (saved_count-1)*23)
+                    else:
+                        # The grouped popup has one default row, a heading,
+                        # then six selectable rows at the normal ImGui pitch.
+                        control.click(100, 123 if position == 0 else 174 + (position-1)*23)
+                    time.sleep(.35)
+                    assert (profile_dir / 'active').read_text() == expected + '\n', (expected, (profile_dir / 'active').read_text())
+                names = ['art-soft-color', 'art-newsprint', 'art-green-terminal', 'art-blueprint', 'art-amber-braille', 'art-mosaic']
+                seen = []
+                for index, name in enumerate(names, 1):
+                    choose(index, name)
+                    capture(name + '-selected', True)
+                    w, h, rgb = x.image(window)
+                    # Compare only the scene to the right of the panel, so
+                    # changed labels alone cannot satisfy live-render checks.
+                    scene = b''.join(rgb[(y*w+400)*3:(y*w+w)*3] for y in range(h))
+                    assert all(scene != previous for previous in seen), name
+                    seen.append(scene)
+                    control.click(290, 124)
+                    saved_copy = profile_dir / (name + '-copy.conf')
+                    assert saved_copy.exists(), 'Included style did not propose a personal copy'
+                    expected = dict(line.split('=', 1) for line in (Path(__file__).resolve().parents[2] / 'presets' / (name + '.conf')).read_text().splitlines() if '=' in line and not line.startswith('#'))
+                    actual = dict(line.split('=', 1) for line in saved_copy.read_text().splitlines() if '=' in line)
+                    for key, value in expected.items():
+                        if value != actual[key]:
+                            assert all(abs(float(a)-float(b)) < 1e-6 for a,b in zip(value.split(','),actual[key].split(','))), (name,key,value,actual[key])
+                # Included styles and the six saved copies coexist in the list.
+                choose(-1, 'art-soft-color-copy')
+                capture('personal-copy-selected', True)
+                choose(0, 'default')
+                # A changed external config must still override an explicit
+                # selection; an unchanged one must not undo it every frame.
+                config.write_text('color_mode=mono\nglyph_strength=1\ncell_width=9\n')
+                time.sleep(.35)
+                config.write_text('color_mode=mono\nglyph_strength=1\n')
+                time.sleep(.35)
+                print(f'{app}: six included styles, distinct live scene images and saved copies passed', flush=True)
             if args.illustrated:
                 control.click(100, 388)  # Illustration section, after Reset.
                 capture('illustration-controls', True)

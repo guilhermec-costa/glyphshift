@@ -111,6 +111,10 @@ Use **Save preset** to retain your applied settings.
 Try the [ready-to-use style collection](presets/README.md): Newsprint, Green
 terminal, Blueprint, Amber Braille, Mosaic and Soft color. The gallery compares
 all six on the same scene and explains how to switch them live without restarting.
+They are available directly under **Insert → Preset → Included styles**. Choose
+one to apply it immediately; personal presets remain under **Saved presets**.
+No config-file copying is needed. Restart through the rebuilt launcher once to
+load this version of the overlay.
 
 Change the `GLYPHSHIFT_CONFIG` path in the launch command:
 

@@ -2,10 +2,19 @@
 #include <array>
 #include <filesystem>
 #include <glyphshift/config/settings.hpp>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace glyphshift {
+struct BuiltinPreset {
+    std::string_view name, title, description, config;
+};
+
+__attribute__((visibility("default"))) std::span<const BuiltinPreset> builtin_presets() noexcept;
+__attribute__((visibility("default"))) const BuiltinPreset* builtin_preset(
+    std::string_view name) noexcept;
+
 constexpr bool preset_name_valid(std::string_view name) noexcept {
     if (name.empty() || name.size() > 64 || name == "." || name == "..")
         return false;

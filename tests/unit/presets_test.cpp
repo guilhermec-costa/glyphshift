@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <glyphshift/config/presets.hpp>
@@ -26,6 +27,22 @@ int main() {
         PresetStore first(path, "game-a"), other(path, "game-b");
         std::string error;
         Settings actual;
+        check(builtin_presets().size() == 6 && !builtin_preset("not-included"),
+            "six included styles with explicit lookup");
+        for (const auto& preset : builtin_presets()) {
+            check(first.load(preset.name, actual, error) && error.empty(),
+                "included styles load without installed files");
+            check(actual == parse_settings(preset.config).value &&
+                      !parse_settings(preset.config).warnings && valid_art(actual.art),
+                "embedded style contents are valid");
+            const auto atlas = build_character_atlas(actual.glyphs);
+            check(!atlas.diagnostic[0], "included style atlas has no fallback");
+            const auto names = first.names();
+            check(std::count(names.begin(), names.end(), preset.name) == 1,
+                "included style listed exactly once");
+        }
+        check(!std::filesystem::exists(first.directory()),
+            "browsing included styles does not write to the profile");
         check(first.selected(error) == "default" && error.empty(), "missing default");
         const Settings expected{21, 19, false, false, 0.37F};
         check(first.save("night", expected, error) && first.select("night", error),
@@ -43,6 +60,20 @@ int main() {
         waitpid(child, &status, 0);
         check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "presets survive process restart");
         check(!other.load("night", actual, error) && error.empty(), "per-game isolation");
+        check(first.select("art-newsprint", error) && first.selected(error) == "art-newsprint",
+            "included style selection remembered");
+        check(first.save("art-newsprint", expected, error) &&
+                  first.load("art-newsprint", actual, error) && actual == expected,
+            "saved personal settings take precedence over included fallback");
+        const auto names = first.names();
+        check(std::count(names.begin(), names.end(), "art-newsprint") == 1,
+            "personal override does not duplicate the included entry");
+        check(other.load("art-newsprint", actual, error) && actual.art.illustrated &&
+                  actual != expected,
+            "personal override does not change the included style for other games");
+        std::ofstream(first.directory() / "art-newsprint.conf") << "cell_width=invalid\n";
+        check(!first.load("art-newsprint", actual, error) && !error.empty(),
+            "broken personal override is reported rather than silently replaced");
         check(serialize_settings(expected).starts_with(
                   "enabled=false\ncell_width=21\ncell_height=19\ncolor_mode="
                   "mono\nglyph_strength=0.37\ncharacter_set=classic\ncharacters=\" "

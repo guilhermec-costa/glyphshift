@@ -20,7 +20,30 @@ not six new live gameplay tests. Except for Soft color, the styles use strength 
 all visible detail comes from cell palettes and glyph masks. Blueprint deliberately
 omits most surface detail; Mosaic deliberately uses blocks instead of letters.
 
-## Try a style
+## Choose directly in the overlay
+
+Restart the application through the rebuilt launcher to load the updated shared
+libraries. Press **Insert**, open **Preset**, and choose any of the six names
+under **Included styles**. The running scene updates immediately; hover a name
+for a short description. Your own saved presets appear under **Saved presets**.
+No file copying or additional installation is required.
+
+The included styles are embedded from these configs at build time, so they also
+work when launching outside the checkout. After editing a shipped `.conf`,
+rebuild to update its included version; an external live config still reloads
+directly from disk.
+
+To retain edits, use the suggested `art-STYLE-copy` name or type another name,
+then click **Save preset**. Saving creates a per-game copy and leaves the source
+config unchanged. If you explicitly save under an included style's exact ID,
+that per-game file takes precedence over the included version for that profile.
+
+The selected name is remembered per profile. To restore it on the next launch,
+omit `GLYPHSHIFT_CONFIG` and `--preset`: explicit startup overrides take
+precedence. Selecting another style in the overlay still works while an external
+config is set; editing that external file reapplies its settings.
+
+## Load a config from the command line
 
 For the native demo:
 
@@ -66,13 +89,14 @@ file automatically; the tracked presets stay unchanged. This switches settings,
 so it does not require a rebuild or application restart if the current libraries
 are already loaded.
 
-## Keep a favorite in the editor
+The included styles can also be selected at startup with `--preset`, for example:
 
-The supplied files are live configs, not automatically installed entries in the
-editor's preset dropdown. Load one, open the editor, give it a name and click
-**Save preset**. Repeat for other favorites, then launch the same `--profile`
-without `GLYPHSHIFT_CONFIG` to use saved presets through the dropdown. An external
-live config takes precedence at startup and whenever that file changes.
+```bash
+./build/dev/glyphshift --preset art-newsprint -- ./build/dev/glyphshift-glx-fixture
+```
+
+This uses the same embedded style that appears in the overlay. Omit the explicit
+startup overrides to resume your last selected preset for the same profile.
 
 The existing [illustrated](illustrated.conf), [ink](illustrated-ink.conf), and
 [coarse blocks](illustrated-blocks.conf) configs remain available too.

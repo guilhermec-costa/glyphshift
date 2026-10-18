@@ -75,6 +75,9 @@ struct Runtime {
         } catch (const std::exception& failure) {
             std::snprintf(error.data(), error.size(), "Presets unavailable: %s", failure.what());
             presets.reset();
+            preset_names.emplace_back("default");
+            for (const auto& preset : builtin_presets())
+                preset_names.emplace_back(preset.name);
         }
         if (error[0]) {
             const char prefix[] = "glyphshift: presets: ";
@@ -88,11 +91,17 @@ struct Runtime {
     }
 
     void load(const std::string& name) {
-        if (!presets)
-            return;
         Settings value;
         std::string message;
-        if (!presets->load(name, value, message) && (name != "default" || !message.empty())) {
+        bool loaded = false;
+        if (presets)
+            loaded = presets->load(name, value, message);
+        else if (const auto* included = builtin_preset(name)) {
+            const auto parsed = parse_settings(included->config);
+            value = parsed.value;
+            loaded = !parsed.warnings;
+        }
+        if (!loaded && (name != "default" || !message.empty())) {
             std::snprintf(error.data(),
                 error.size(),
                 "%s",
@@ -105,8 +114,14 @@ struct Runtime {
             (void)key;
             state.settings = value;
         }
-        std::snprintf(preset_name.data(), preset_name.size(), "%s", active.c_str());
-        if (!presets->select(name, message))
+        // Start edits as a personal copy instead of encouraging replacement of
+        // the included style's remembered per-game version.
+        std::snprintf(preset_name.data(),
+            preset_name.size(),
+            "%s%s",
+            active.c_str(),
+            builtin_preset(active) ? "-copy" : "");
+        if (presets && !presets->select(name, message))
             std::snprintf(error.data(), error.size(), "%s", message.c_str());
         else
             error[0] = 0;
@@ -227,14 +242,42 @@ void controls(State& state,
                 ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::Text("%s  |  %s", api, version);
         ImGui::Text("CPU render / submit: %.3f ms", state.milliseconds);
-        if (runtime.presets) {
+        {
             ImGui::SetNextItemWidth(-70);
-            if (ImGui::BeginCombo("Preset", runtime.active.c_str())) {
+            const auto* included = builtin_preset(runtime.active);
+            const char* title = included ? included->title.data() : runtime.active.c_str();
+            if (ImGui::BeginCombo("Preset", title, ImGuiComboFlags_HeightLarge)) {
+                if (ImGui::Selectable("default", runtime.active == "default"))
+                    runtime.load("default");
+                if (runtime.active == "default")
+                    ImGui::SetItemDefaultFocus();
+                ImGui::SeparatorText("Included styles");
+                for (const auto& preset : builtin_presets()) {
+                    const bool selected = preset.name == runtime.active;
+                    if (ImGui::Selectable(preset.title.data(), selected))
+                        runtime.load(std::string(preset.name));
+                    if (selected)
+                        ImGui::SetItemDefaultFocus();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s", preset.description.data());
+                }
+                bool heading = false;
                 for (const auto& name : runtime.preset_names)
-                    if (ImGui::Selectable(name.c_str(), name == runtime.active))
-                        runtime.load(name);
+                    if (name != "default" && !builtin_preset(name)) {
+                        if (!heading) {
+                            ImGui::SeparatorText("Saved presets");
+                            heading = true;
+                        }
+                        if (ImGui::Selectable(name.c_str(), name == runtime.active))
+                            runtime.load(name);
+                        if (name == runtime.active)
+                            ImGui::SetItemDefaultFocus();
+                    }
                 ImGui::EndCombo();
             }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Choose a style to apply it immediately to the running scene.");
+            ImGui::BeginDisabled(!runtime.presets);
             ImGui::SetNextItemWidth(-105);
             ImGui::InputText("##preset-name",
                 runtime.preset_name.data(),
@@ -242,10 +285,12 @@ void controls(State& state,
             ImGui::SameLine();
             if (ImGui::Button("Save preset"))
                 runtime.save(state.settings);
-            ImGui::TextUnformatted(
-                state.settings != runtime.saved ? "Unsaved changes" : "Saved settings");
-        } else
-            ImGui::TextUnformatted("Presets unavailable (session only)");
+            ImGui::EndDisabled();
+            ImGui::TextUnformatted(state.settings != runtime.saved ? "Unsaved changes"
+                                   : builtin_preset(runtime.active)
+                                       ? "Included style - save a personal copy"
+                                       : "Saved settings");
+        }
         ImGui::Separator();
         ImGui::Checkbox("Glyph effect (F10)", &state.settings.enabled);
         int cell_width = static_cast<int>(state.settings.cell_width);
