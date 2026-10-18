@@ -7,10 +7,6 @@
 // notifications. Platform layer: implemented per operating system (Linux:
 // XDG autostart and freedesktop notifications through notify-send).
 namespace glyphshift::platform {
-// The user's configuration directory: absolute XDG_CONFIG_HOME, else
-// HOME/.config. Throws when neither is usable.
-std::filesystem::path config_home();
-
 // Quotes one argument for a desktop entry's Exec key (Desktop Entry
 // Specification: reserved characters quoted, then string escaping).
 std::string desktop_exec_argument(const std::string& argument);

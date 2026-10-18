@@ -53,10 +53,10 @@ target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_
 set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
 target_include_directories(glyphshift_editor PUBLIC include)
 # Platform layer, Linux: desktop integration (autostart, notifications),
-# process facilities and font discovery (Fontconfig). Operating-system
+# process facilities, XDG paths and font discovery (Fontconfig). Operating-system
 # interfaces only; the shared editor library links it as well.
 add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
-    src/platform/linux/process.cpp src/platform/linux/fonts.cpp)
+    src/platform/linux/process.cpp src/platform/linux/fonts.cpp src/platform/linux/paths.cpp)
 set_target_properties(glyphshift_platform PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_platform PUBLIC include)

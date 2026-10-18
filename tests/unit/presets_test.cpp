@@ -134,6 +134,28 @@ int main() {
         check(profile_id("/one/game") == profile_id("/one/game") &&
                   profile_id("/one/game") != profile_id("/two/game"),
             "stable path profile");
+        // The default store resolves the user's configuration directory and
+        // the profile from the environment, else from the executable's path.
+        setenv("XDG_CONFIG_HOME", (path / "xdg").c_str(), 1);
+        setenv("GLYPHSHIFT_PROFILE", "env-game", 1);
+        check(PresetStore().directory() == path / "xdg/glyphshift/profiles/env-game",
+            "XDG_CONFIG_HOME and GLYPHSHIFT_PROFILE used");
+        setenv("XDG_CONFIG_HOME", "relative", 1);
+        setenv("HOME", (path / "home").c_str(), 1);
+        unsetenv("GLYPHSHIFT_PROFILE");
+        const auto own = profile_id(std::filesystem::read_symlink("/proc/self/exe").string());
+        check(PresetStore().directory() ==
+                  path / "home/.config/glyphshift/profiles" / std::string(own.data()),
+            "relative XDG_CONFIG_HOME ignored; profile from the executable");
+        unsetenv("XDG_CONFIG_HOME");
+        unsetenv("HOME");
+        bool refused = false;
+        try {
+            PresetStore unavailable;
+        } catch (const std::runtime_error&) {
+            refused = true;
+        }
+        check(refused, "no configuration directory refused");
         std::filesystem::remove_all(path);
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

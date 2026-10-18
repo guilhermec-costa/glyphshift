@@ -1027,8 +1027,8 @@ removed incrementally, each step verified by the existing tests:
    neutral events.
 2. Done: `src/config/characters.cpp` called Fontconfig directly; it is now the
    Linux `platform::Fonts`. FreeType rasterization stays in core.
-3. `src/config/presets.cpp` resolves `XDG_CONFIG_HOME`/`HOME`; it becomes the
-   Linux `platform::Paths`.
+3. Done: `src/config/presets.cpp` resolved `XDG_CONFIG_HOME`/`HOME`; it now
+   uses the Linux `platform::Paths`.
 4. The OpenGL renderer library resolves GLX entry points (`gl_api.cpp`) and the
    injected renderer is bound to GLX. GL function loading stays in the
    renderer; GLX context handling moves to the X11 adapter.
@@ -1095,14 +1095,30 @@ Release 17/17. `glyphshift-preview` of Comic, Newsprint, `illustrated.conf`
 and `characters-ascii.conf` (all with discovered fonts; Hack Bold here) was
 byte-identical between the previous Release build and the new Debug build.
 
+**Step 3, paths (2026-10-18).** `platform::config_home()` moved from
+`desktop.hpp` to its own `include/glyphshift/platform/paths.hpp`
+(`src/platform/linux/paths.cpp`). `PresetStore` resolves its directory through
+it, and the per-executable profile through `platform::executable_path()`
+instead of reading `/proc/self/exe` itself; the duplicate rule in
+`presets.cpp` is gone. Without a usable directory the diagnostic is now
+"Presets unavailable: needs an absolute XDG_CONFIG_HOME or HOME". Still
+operating-system specific in the configuration code, outside this list: the
+atomic preset save uses POSIX directory descriptors (`openat`, `fsync`,
+`renameat`), and the editor writes diagnostics with `write(2)`; a Windows
+port needs platform equivalents.
+
+Verification: Debug 15/15 (the preset test now checks the default store's
+directory with an absolute `XDG_CONFIG_HOME`, a relative one falling back to
+`HOME/.config`, the profile from `GLYPHSHIFT_PROFILE` and from the executable,
+and refusal without either variable); Release 17/17.
+
 Code added since this list was written already follows the rules: the X11
 window-system layer exists as `src/display/x11/` (the tray, static library
 `glyphshift_x11_tray`), the Linux
 platform layer as `src/platform/linux/` (static library
 `glyphshift_platform`, headers in `include/glyphshift/platform/`) with XDG
-autostart, notifications, `config_home()` and `executable_path()`. Step 3
-above should resolve preset paths through its `config_home()`, which
-duplicates the rule in `presets.cpp` for now. The daemon's single-instance
+autostart, notifications, `config_home()` and `executable_path()`. The
+daemon's single-instance
 selection (`claim_instance` in `daemon.cpp`) moves with its hotkey grab into
 the X11 `display::GlobalHotkey` in step 5.
 

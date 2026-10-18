@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
+#include <glyphshift/platform/paths.hpp>
+#include <glyphshift/platform/process.hpp>
 #include <stdexcept>
 
 namespace glyphshift {
@@ -23,23 +25,13 @@ struct File {
     }
 };
 
-std::filesystem::path config_home() {
-    if (const char* value = std::getenv("XDG_CONFIG_HOME");
-        value && *value && std::filesystem::path(value).is_absolute())
-        return value;
-    if (const char* value = std::getenv("HOME");
-        value && *value && std::filesystem::path(value).is_absolute())
-        return std::filesystem::path(value) / ".config";
-    throw std::runtime_error("presets need absolute XDG_CONFIG_HOME or HOME");
-}
-
 std::string profile() {
     if (const char* value = std::getenv("GLYPHSHIFT_PROFILE")) {
         if (!preset_name_valid(value))
             throw std::runtime_error("invalid GLYPHSHIFT_PROFILE");
         return value;
     }
-    return profile_id(std::filesystem::read_symlink("/proc/self/exe").string()).data();
+    return profile_id(platform::executable_path().string()).data();
 }
 
 int open_directory(const std::filesystem::path& path, bool create, std::string& error) {
@@ -127,7 +119,7 @@ bool atomic_file(int dir, const std::string& name, std::string_view text, std::s
 }
 }  // namespace
 
-PresetStore::PresetStore() : PresetStore(config_home(), profile()) {}
+PresetStore::PresetStore() : PresetStore(platform::config_home(), profile()) {}
 
 PresetStore::PresetStore(std::filesystem::path home, std::string id) {
     if (!home.is_absolute() || !preset_name_valid(id))

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <glyphshift/platform/desktop.hpp>
+#include <glyphshift/platform/paths.hpp>
 #include <stdexcept>
 #include <string_view>
 
@@ -12,15 +13,6 @@
 // notifications. Only operating-system and desktop-standard interfaces; no
 // window system or GPU API.
 namespace glyphshift::platform {
-std::filesystem::path config_home() {
-    if (const char* value = std::getenv("XDG_CONFIG_HOME");
-        value && *value && std::filesystem::path(value).is_absolute())
-        return value;
-    if (const char* home = std::getenv("HOME"); home && std::filesystem::path(home).is_absolute())
-        return std::filesystem::path(home) / ".config";
-    throw std::runtime_error("needs an absolute XDG_CONFIG_HOME or HOME");
-}
-
 std::string desktop_exec_argument(const std::string& argument) {
     constexpr std::string_view reserved = " \t\"'\\><~|&;$*?#()`";
     if (argument.find_first_of("\n\r") != std::string::npos)

@@ -4,6 +4,7 @@
 #include <fstream>
 #include <glyphshift/platform/desktop.hpp>
 #include <glyphshift/platform/fonts.hpp>
+#include <glyphshift/platform/paths.hpp>
 #include <glyphshift/platform/process.hpp>
 #include <iostream>
 #include <sstream>
