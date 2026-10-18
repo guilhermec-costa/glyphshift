@@ -4,60 +4,36 @@ Run commands from the repository root. These configs work with the current
 illustrated renderer; no additional fonts or downloads are needed beyond the
 project's normal monospace font requirement.
 
-| Config | Style | Cell size | Glyph strength | Preview |
-| --- | --- | --- | --- | --- |
-| [art-soft-color.conf](art-soft-color.conf) | Gentle color treatment with original detail blended in; start here for gameplay. | 6×10 | 0.65 | [Image](../docs/presets/art-soft-color.png) |
-| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 8×12 | 1 | [Image](../docs/presets/art-newsprint.png) |
-| [art-green-terminal.conf](art-green-terminal.conf) | Green terminal letters with ASCII outline silhouettes on a dark background. | 8×12 | 1 | [Image](../docs/presets/art-green-terminal.png) |
-| [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | 1 | [Image](../docs/presets/art-blueprint.png) |
-| [art-amber-braille.conf](art-amber-braille.conf) | Amber Braille dots on dark paper; deliberately dense and textured. | 6×10 | 1 | [Image](../docs/presets/art-amber-braille.png) |
-| [art-mosaic.conf](art-mosaic.conf) | Source-colored quadrant blocks for a geometric pixel mosaic. | 8×12 | 1 | [Image](../docs/presets/art-mosaic.png) |
+Every included style redraws the whole scene in glyphs (strength 1); none
+blends the original image back in. Light-paper styles come first, then
+dark-paper styles.
 
-![Six styles rendered from the same SuperTux frame](../docs/presets/overview.png)
+| Config | Style | Cell size | Preview |
+| --- | --- | --- | --- |
+| [art-comic.conf](art-comic.conf) | Bold scene-colored inks over a vivid watercolor wash. | 8×12 | [Image](../docs/presets/art-comic.png) |
+| [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 7×11 | [Image](../docs/presets/art-sepia.png) |
+| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 8×12 | [Image](../docs/presets/art-newsprint.png) |
+| [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 8×12 | [Image](../docs/presets/art-chalk.png) |
+| [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | [Image](../docs/presets/art-blueprint.png) |
+| [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 7×11 | [Image](../docs/presets/art-midnight.png) |
+| [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 7×12 | [Image](../docs/presets/art-crt.png) |
+| [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 8×12 | [Image](../docs/presets/art-digital-rain.png) |
+
+![Eight styles rendered from the same SuperTux frame](../docs/presets/overview.png)
 
 These are GPU previews of the same [captured frame](../docs/illustration-original.png),
-not six new live gameplay tests. Except for Soft color, the styles use strength 1:
-all visible detail comes from cell palettes and glyph masks. Blueprint deliberately
-omits most surface detail; Mosaic deliberately uses blocks instead of letters.
-
-## More styles
-
-Six more included styles use the newer ink, paper wash, glow and outline-glyph
-controls. Like the first six, they appear under **Insert → Preset → Included
-styles** and can also be loaded from these files.
-
-| Config | Style | Cell size |
-| --- | --- | --- |
-| [art-comic.conf](art-comic.conf) | Bold scene-colored inks over a vivid watercolor wash. | 8×12 |
-| [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 7×11 |
-| [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 8×12 |
-| [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 7×11 |
-| [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 7×12 |
-| [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 8×12 |
-
-![Six more styles rendered from the same SuperTux frame](../docs/presets/overview-more.png)
-
-Like the gallery above, these are GPU previews of the same captured frame, not
-live gameplay tests. Dark-paper styles (Chalk, Midnight, CRT, Digital rain)
-use low exposure so a bright scene does not fill the screen with characters;
-raise **Exposure** for darker games.
-
-```bash
-cp presets/art-comic.conf /tmp/glyphshift-style.conf
-setpriv --inh-caps=-all --ambient-caps=-all -- \
-  env GLYPHSHIFT_CONFIG=/tmp/glyphshift-style.conf \
-  ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
-# In a second terminal, switch live:
-cp presets/art-sepia.conf /tmp/glyphshift-style.conf
-```
+not live gameplay tests. Dark-paper styles (Chalk, Blueprint, Midnight, CRT,
+Digital rain) use low exposure or sparse ramps so a bright scene does not fill
+the screen with characters; raise **Exposure** for darker games.
 
 ## Choose directly in the overlay
 
 Restart the application through the rebuilt launcher to load the updated shared
-libraries. Press **Insert**, open **Preset**, and choose any of the twelve names
+libraries. Press **Insert**, open **Preset**, and choose any of the eight names
 under **Included styles**. The running scene updates immediately; hover a name
 for a short description. Your own saved presets appear under **Saved presets**.
-No file copying or additional installation is required.
+No file copying or additional installation is required. Press **F10** for the
+original image; **Reset to defaults** returns to the base classic look.
 
 The included styles are embedded from these configs at build time, so they also
 work when launching outside the checkout. After editing a shipped `.conf`,
@@ -94,7 +70,7 @@ Press **F10** to compare with the original scene and **Insert** to adjust the st
 First prepare one live config:
 
 ```bash
-cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
+cp presets/art-comic.conf /tmp/glyphshift-style.conf
 ```
 
 Launch the demo using that file:
@@ -110,9 +86,9 @@ launch command instead. Once the application is running, copy another style
 onto the same live file from a second terminal:
 
 ```bash
-cp presets/art-newsprint.conf /tmp/glyphshift-style.conf
-cp presets/art-green-terminal.conf /tmp/glyphshift-style.conf
-cp presets/art-mosaic.conf /tmp/glyphshift-style.conf
+cp presets/art-sepia.conf /tmp/glyphshift-style.conf
+cp presets/art-midnight.conf /tmp/glyphshift-style.conf
+cp presets/art-digital-rain.conf /tmp/glyphshift-style.conf
 ```
 
 Run one copy command at a time and inspect the result. GlyphShift reloads the

@@ -130,7 +130,7 @@ For dark ink on warm paper, change the config path to
 `$PWD/presets/illustrated-blocks.conf`. To return to the earlier classic
 rendering example, use `$PWD/presets/readable.conf`.
 
-For twelve finished styles, see the [preset gallery](../presets/README.md).
+For eight finished styles, see the [preset gallery](../presets/README.md).
 After restarting through the rebuilt launcher, use **Insert → Preset → Included
 styles** to switch them directly over the running game. Hover a style for its
 description. **Save preset** stores edits as a personal copy; saved names remain
@@ -141,7 +141,7 @@ External-file switching is still available as an alternative. First copy a style
 to a live file:
 
 ```bash
-cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
+cp presets/art-comic.conf /tmp/glyphshift-style.conf
 ```
 
 Set `GLYPHSHIFT_CONFIG=/tmp/glyphshift-style.conf` in the complete launch command
@@ -149,15 +149,17 @@ above and start the game. In a second terminal, run one of these commands at a
 time to switch the running effect:
 
 ```bash
+cp presets/art-sepia.conf /tmp/glyphshift-style.conf
 cp presets/art-newsprint.conf /tmp/glyphshift-style.conf
-cp presets/art-green-terminal.conf /tmp/glyphshift-style.conf
+cp presets/art-chalk.conf /tmp/glyphshift-style.conf
 cp presets/art-blueprint.conf /tmp/glyphshift-style.conf
-cp presets/art-amber-braille.conf /tmp/glyphshift-style.conf
-cp presets/art-mosaic.conf /tmp/glyphshift-style.conf
-cp presets/art-soft-color.conf /tmp/glyphshift-style.conf
+cp presets/art-midnight.conf /tmp/glyphshift-style.conf
+cp presets/art-crt.conf /tmp/glyphshift-style.conf
+cp presets/art-digital-rain.conf /tmp/glyphshift-style.conf
+cp presets/art-comic.conf /tmp/glyphshift-style.conf
 ```
 
-These copies update only the temporary live config. The twelve included styles
+These copies update only the temporary live config. The eight included styles
 already appear in the dropdown; **Save preset** adds your own named variation.
 
 The wrapper blocks IPv4/IPv6 socket creation in the process and its children,
@@ -420,7 +422,7 @@ shape_characters="/\\|_()<>^v`',.-LJ7[]T"
 ```
 
 A shape glyph is used only where it closely fits the cell; busy texture keeps
-the calm tonal ramp. Newsprint, Green terminal and `illustrated-ink.conf` use
+the calm tonal ramp. Newsprint and `illustrated-ink.conf` use
 this.
 
 In source color mode, **Ink / contours** sets the ink's brightness while the

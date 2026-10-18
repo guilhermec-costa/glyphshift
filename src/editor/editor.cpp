@@ -247,10 +247,8 @@ void controls(State& state,
             const auto* included = builtin_preset(runtime.active);
             const char* title = included ? included->title.data() : runtime.active.c_str();
             if (ImGui::BeginCombo("Preset", title, ImGuiComboFlags_HeightLargest)) {
-                if (ImGui::Selectable("default", runtime.active == "default"))
-                    runtime.load("default");
-                if (runtime.active == "default")
-                    ImGui::SetItemDefaultFocus();
+                // Only styles that redraw the scene are offered; F10 shows the
+                // original image and Reset to defaults restores the base look.
                 ImGui::SeparatorText("Included styles");
                 for (const auto& preset : builtin_presets()) {
                     const bool selected = preset.name == runtime.active;

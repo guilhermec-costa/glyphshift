@@ -421,23 +421,27 @@ python3 tests/smoke/temporal.py --build build/dev --output /tmp/glyphshift-tempo
 
 ## Ready-to-use style collection
 
-Six complete live configs are available in the [preset gallery](../../presets/README.md):
-Newsprint, Green terminal, Blueprint, Amber Braille, Mosaic and Soft color.
-Five use pure glyph output; Soft color deliberately blends original detail at
-strength 0.65. They use existing renderer controls and do not add a milestone,
-backend or installation step. A later change embeds them at build time and lists
-them under **Insert → Preset → Included styles**.
+Eight embedded styles are listed under **Insert → Preset → Included styles**,
+light paper first: Comic, Sepia, Newsprint, Chalk, Blueprint, Midnight, CRT and
+Digital rain. All render at strength 1 and redraw the whole scene with the
+phase 1–4 controls; see the [preset gallery](../../presets/README.md).
 
-Six more included styles (Comic, Sepia, Chalk, Midnight, CRT, Digital rain)
-use the phase 1–4 controls. They were calibrated with `glyphshift-preview` on
-the same SuperTux frame and are embedded and listed like the first six. The
-preset combo now uses ImGui's largest popup height. The focused `--presets`
-editor test selects all twelve rows and checks distinct live images, but saves
-personal copies of only the first and last styles, so the saved section stays
-inside the popup without scrolling. On 2026-10-17 that focused test passed on the
-GLX fixture (Debug, NVIDIA/X11): all twelve rows applied with distinct live
-images, saved copies reloaded, and hotkeys, resize, focus loss and clean exit
-passed. Vulkan and SuperTux were not rerun for this menu change.
+History: six styles (Newsprint, Green terminal, Blueprint, Amber Braille,
+Mosaic, Soft color) shipped first as live configs and were later embedded in
+the menu. Six more (Comic, Sepia, Chalk, Midnight, CRT, Digital rain) were
+calibrated with `glyphshift-preview` on the same SuperTux frame. At the user's
+request, the collection was then narrowed to styles that change the art
+deeply: Soft color (which blended 65% of the original image back in), Mosaic
+(colored blocks, effectively pixelation), Amber Braille and Green terminal were
+removed with their configs and images. The menu's "default" row was removed as
+well; a fresh profile still starts from the built-in defaults, F10 shows the
+original image and **Reset to defaults** restores the base look.
+
+The preset combo uses ImGui's largest popup height. The focused `--presets`
+editor test selects every included row and checks distinct live images, but
+saves personal copies of only the first and last styles, so the saved section
+stays inside the popup without scrolling. Row positions are derived from the
+style count.
 
 ```bash
 python3 tests/smoke/editor_apps.py --build build/dev --application glx-fixture \

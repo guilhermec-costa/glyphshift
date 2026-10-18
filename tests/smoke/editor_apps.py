@@ -109,16 +109,16 @@ def main():
                         capture('personal-preset-menu', True)
                         saved_count = len(list(profile_dir.glob('*.conf')))
                         # The "Saved presets" heading follows the last included row.
-                        first_saved = 174 + (len(names)-1)*23 + 51
+                        first_saved = 151 + (len(names)-1)*23 + 51
                         control.click(100, first_saved + (saved_count-1)*23)
                     else:
-                        # The grouped popup has one default row, a heading,
+                        # The popup starts with the "Included styles" heading,
                         # then one selectable row per included style.
-                        control.click(100, 123 if position == 0 else 174 + (position-1)*23)
+                        control.click(100, 151 + (position-1)*23)
                     time.sleep(.35)
                     assert (profile_dir / 'active').read_text() == expected + '\n', (expected, (profile_dir / 'active').read_text())
-                names = ['art-soft-color', 'art-newsprint', 'art-green-terminal', 'art-blueprint', 'art-amber-braille', 'art-mosaic',
-                         'art-comic', 'art-sepia', 'art-chalk', 'art-midnight', 'art-crt', 'art-digital-rain']
+                names = ['art-comic', 'art-sepia', 'art-newsprint', 'art-chalk', 'art-blueprint', 'art-midnight',
+                         'art-crt', 'art-digital-rain']
                 seen = []
                 for index, name in enumerate(names, 1):
                     choose(index, name)
@@ -142,10 +142,9 @@ def main():
                         if value != actual[key]:
                             assert all(abs(float(a)-float(b)) < 1e-6 for a,b in zip(value.split(','),actual[key].split(','))), (name,key,value,actual[key])
                 # Included styles and the saved copies coexist in the list; the
-                # last saved row alphabetically is the soft color copy.
-                choose(-1, 'art-soft-color-copy')
+                # last saved row alphabetically is the digital rain copy.
+                choose(-1, 'art-digital-rain-copy')
                 capture('personal-copy-selected', True)
-                choose(0, 'default')
                 # A changed external config must still override an explicit
                 # selection; an unchanged one must not undo it every frame.
                 config.write_text('color_mode=mono\nglyph_strength=1\ncell_width=9\n')
