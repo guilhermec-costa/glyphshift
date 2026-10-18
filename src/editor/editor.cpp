@@ -12,12 +12,8 @@
 #include <map>
 #include <memory>
 
-#include "x11_input.hpp"
-
 namespace glyphshift::editor {
 namespace {
-constexpr unsigned insert = 0xff63, escape = 0xff1b, f10 = 0xffc7;
-
 struct State {
     Settings settings{}, external{};
     CharacterSelection draft{}, draft_base{};
@@ -30,6 +26,7 @@ struct State {
     std::array<Input, 256> events{};
     unsigned count = 0;
     ImGuiContext* context = nullptr;
+    const InputSource* source = nullptr;
     double milliseconds = 0;
     std::chrono::steady_clock::time_point previous{};
 
@@ -159,52 +156,49 @@ Runtime& runtime() {
     return value;
 }
 
-ImGuiKey key(unsigned code) {
-    if (code >= 'a' && code <= 'z')
-        return static_cast<ImGuiKey>(ImGuiKey_A + code - 'a');
-    if (code >= 'A' && code <= 'Z')
-        return static_cast<ImGuiKey>(ImGuiKey_A + code - 'A');
-    if (code >= '0' && code <= '9')
-        return static_cast<ImGuiKey>(ImGuiKey_0 + code - '0');
-    switch (code) {
-        case 0xff09:
+ImGuiKey key(const Input& event) {
+    const char32_t c = event.character;
+    if (c >= 'a' && c <= 'z')
+        return static_cast<ImGuiKey>(ImGuiKey_A + (c - 'a'));
+    if (c >= 'A' && c <= 'Z')
+        return static_cast<ImGuiKey>(ImGuiKey_A + (c - 'A'));
+    if (c >= '0' && c <= '9')
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (c - '0'));
+    if (c == ' ')
+        return ImGuiKey_Space;
+    switch (event.key) {
+        case Key::tab:
             return ImGuiKey_Tab;
-        case 0xff0d:
+        case Key::enter:
             return ImGuiKey_Enter;
-        case 0xff08:
+        case Key::backspace:
             return ImGuiKey_Backspace;
-        case 0xffff:
+        case Key::del:
             return ImGuiKey_Delete;
-        case 0xff50:
+        case Key::home:
             return ImGuiKey_Home;
-        case 0xff57:
+        case Key::end:
             return ImGuiKey_End;
-        case 0xff51:
+        case Key::left:
             return ImGuiKey_LeftArrow;
-        case 0xff53:
+        case Key::right:
             return ImGuiKey_RightArrow;
-        case 0xff52:
+        case Key::up:
             return ImGuiKey_UpArrow;
-        case 0xff54:
+        case Key::down:
             return ImGuiKey_DownArrow;
-        case 0xff55:
+        case Key::page_up:
             return ImGuiKey_PageUp;
-        case 0xff56:
+        case Key::page_down:
             return ImGuiKey_PageDown;
-        case 0xffe1:
-        case 0xffe2:
+        case Key::shift:
             return ImGuiMod_Shift;
-        case 0xffe3:
-        case 0xffe4:
+        case Key::control:
             return ImGuiMod_Ctrl;
-        case 0xffe9:
-        case 0xffea:
+        case Key::alt:
             return ImGuiMod_Alt;
-        case 0xffeb:
-        case 0xffec:
+        case Key::super:
             return ImGuiMod_Super;
-        case ' ':
-            return ImGuiKey_Space;
         default:
             return ImGuiKey_None;
     }
@@ -574,7 +568,7 @@ Frame::Frame(void* display,
     unsigned height,
     const char* backend,
     const char* version,
-    bool x11_input)
+    const InputSource* source)
     : lock_(runtime().mutex) {
     auto& r = runtime();
     auto& state = r.states[{display, window}];
@@ -589,10 +583,10 @@ Frame::Frame(void* display,
         state.external = external;
         state.ready = true;
     }
-    // Targeted synthetic fixture tests retain the original Xlib queue adapter.
-    const bool platform = x11_input && !std::getenv("GLYPHSHIFT_FIXTURE_NO_FOCUS");
-    if (platform)
-        x11::poll(display, window, state.open);
+    if (!state.source)
+        state.source = source;
+    if (state.source)
+        state.source->poll(display, window, state.open);
     const bool initially_open = state.open;
     previous_ = ImGui::GetCurrentContext();
     if (state.open && width > 16 && height > 16) {
@@ -631,23 +625,21 @@ Frame::Frame(void* display,
                 event.kind == Kind::button_up)
                 io.AddMousePosEvent(event.x, event.y);
             if (event.kind == Kind::button_down || event.kind == Kind::button_up) {
-                if (event.code == 4 || event.code == 5) {
+                if (event.button == 4 || event.button == 5) {
                     if (event.kind == Kind::button_down)
-                        io.AddMouseWheelEvent(0, event.code == 4 ? 1.0F : -1.0F);
-                } else if (event.code >= 1 && event.code <= 3)
-                    io.AddMouseButtonEvent(event.code == 1 ? 0 : (event.code == 3 ? 1 : 2),
+                        io.AddMouseWheelEvent(0, event.button == 4 ? 1.0F : -1.0F);
+                } else if (event.button >= 1 && event.button <= 3)
+                    io.AddMouseButtonEvent(event.button == 1 ? 0 : (event.button == 3 ? 1 : 2),
                         event.kind == Kind::button_down);
             }
             if (event.kind == Kind::key_down || event.kind == Kind::key_up) {
-                const auto mapped = key(event.code);
+                const auto mapped = key(event);
                 if (mapped != ImGuiKey_None)
                     io.AddKeyEvent(mapped, event.kind == Kind::key_down);
-                const unsigned text_code =
-                    event.code >= 0x01000000 ? event.code & 0xffffff : event.code;
-                if (event.kind == Kind::key_down && !event.modified && text_code >= 32 &&
-                    text_code <= 0x10ffff && (event.code < 256 || event.code >= 0x01000000) &&
-                    !(text_code >= 0xd800 && text_code <= 0xdfff))
-                    io.AddInputCharacter(text_code);
+                const char32_t text = event.character;
+                if (event.kind == Kind::key_down && !event.modified && text >= 32 && text != 0x7f &&
+                    text <= 0x10ffff && !(text >= 0xd800 && text <= 0xdfff))
+                    io.AddInputCharacter(static_cast<unsigned>(text));
             }
             if (event.kind == Kind::focus_lost)
                 io.AddFocusEvent(false);
@@ -659,8 +651,8 @@ Frame::Frame(void* display,
         draw_data = state.open ? ImGui::GetDrawData() : nullptr;
     } else
         state.count = 0;
-    if (platform && initially_open != state.open)
-        x11::sync(display, window, state.open);
+    if (state.source && initially_open != state.open)
+        state.source->sync(display, window, state.open);
     settings = state.settings;
 }
 
@@ -683,7 +675,9 @@ void deactivate(void* display, std::uint64_t window) noexcept {
         const std::lock_guard lock(r.mutex);
         const auto found = r.states.find({display, window});
         if (found != r.states.end()) {
-            x11::forget(display, window);
+            if (found->second.source)
+                found->second.source->forget(display, window);
+            found->second.source = nullptr;
             if (r.detach)
                 r.detach(display, window);
             found->second.available = false;
@@ -717,7 +711,9 @@ void forget(void* display, std::uint64_t window) noexcept {
     try {
         auto& r = runtime();
         const std::lock_guard lock(r.mutex);
-        x11::forget(display, window);
+        const auto found = r.states.find({display, window});
+        if (found != r.states.end() && found->second.source)
+            found->second.source->forget(display, window);
         if (r.detach)
             r.detach(display, window);
         r.states.erase({display, window});
@@ -757,16 +753,17 @@ bool input(void* display, std::uint64_t window, const Input& event) noexcept {
             const bool repeat =
                 state.pressed[physical] || (event.time && event.time == state.released[physical]);
             state.pressed[physical] = true;
-            const bool hotkey = !event.modified && (event.code == insert || event.code == f10 ||
-                                                       (event.code == escape && state.open));
+            const bool hotkey =
+                !event.modified && (event.key == Key::insert || event.key == Key::f10 ||
+                                       (event.key == Key::escape && state.open));
             const bool consume = state.open || hotkey;
             if (consume)
                 state.captured[physical] = true;
             if (hotkey && !repeat) {
-                if (event.code == f10)
+                if (event.key == Key::f10)
                     state.settings.enabled = !state.settings.enabled;
                 else {
-                    state.open = event.code == insert ? !state.open : false;
+                    state.open = event.key == Key::insert ? !state.open : false;
                     state.count = 0;
                     if (state.context) {
                         auto* old = ImGui::GetCurrentContext();
@@ -782,13 +779,13 @@ bool input(void* display, std::uint64_t window, const Input& event) noexcept {
         }
         if (event.kind == Kind::button_down) {
             if (state.available && state.open) {
-                state.buttons[event.code % 8] = true;
+                state.buttons[event.button % 8] = true;
                 queue(state, event);
                 return true;
             }
         } else if (event.kind == Kind::button_up) {
-            const bool consume = state.buttons[event.code % 8];
-            state.buttons[event.code % 8] = false;
+            const bool consume = state.buttons[event.button % 8];
+            state.buttons[event.button % 8] = false;
             if (state.open)
                 queue(state, event);
             return consume;

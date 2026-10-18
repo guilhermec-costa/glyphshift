@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "../../display/x11/editor_input.hpp"
 #include "gl_api.hpp"
 #include "gl_state.hpp"
 #include "gpu_timer.hpp"
@@ -284,7 +285,7 @@ void render(Display* display, GLXDrawable drawable) noexcept {
             height,
             "OpenGL",
             reinterpret_cast<const char*>(gl.GetString(GL_VERSION)),
-            true);
+            display::x11::editor_input());
         if (frame.settings.enabled || frame.draw_data)
             state->draw(drawable, width, height, frame.settings, frame.draw_data);
         if (!frame.settings.enabled)

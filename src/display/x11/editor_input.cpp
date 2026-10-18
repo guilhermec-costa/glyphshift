@@ -1,4 +1,4 @@
-#include "x11_input.hpp"
+#include "editor_input.hpp"
 
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
@@ -12,8 +12,12 @@
 #include <map>
 #include <memory>
 
-namespace glyphshift::editor::x11 {
+#include "keys.hpp"
+
+namespace glyphshift::display::x11 {
 namespace {
+using editor::Input;
+using editor::Kind;
 template <class T>
 using Reply = std::unique_ptr<T, decltype(&std::free)>;
 
@@ -42,7 +46,7 @@ struct Connection {
     void error(const char* message) {
         if (!failed) {
             std::fprintf(stderr, "glyphshift: editor input: %s\n", message);
-            report(message);
+            editor::report(message);
         }
         failed = true;
         if (connection && top) {
@@ -311,7 +315,7 @@ struct Connection {
                 if (focus.event == overlay && focus.mode == XCB_NOTIFY_MODE_NORMAL &&
                     (focus.detail == XCB_NOTIFY_DETAIL_NONLINEAR ||
                         focus.detail == XCB_NOTIFY_DETAIL_NONLINEAR_VIRTUAL)) {
-                    input(display, window, {Kind::focus_lost});
+                    editor::input(display, window, {Kind::focus_lost});
                     hide();
                 }
             }
@@ -327,11 +331,12 @@ struct Connection {
                 value.kind = type == XCB_KEY_PRESS ? Kind::key_down : Kind::key_up;
                 value.physical = e.detail;
                 value.time = e.time;
-                value.code = xcb_key_symbols_get_keysym(symbols,
+                auto keysym = xcb_key_symbols_get_keysym(symbols,
                     e.detail,
                     (e.state & XCB_MOD_MASK_SHIFT) ? 1 : 0);
-                if ((e.state & XCB_MOD_MASK_LOCK) && value.code >= 'a' && value.code <= 'z')
-                    value.code -= 'a' - 'A';
+                if ((e.state & XCB_MOD_MASK_LOCK) && keysym >= 'a' && keysym <= 'z')
+                    keysym -= 'a' - 'A';
+                translate_keysym(keysym, value);
                 value.modified = e.state & (XCB_MOD_MASK_CONTROL | XCB_MOD_MASK_1 | XCB_MOD_MASK_4);
                 keys[e.detail] = type == XCB_KEY_PRESS;
             } else if (type == XCB_BUTTON_PRESS || type == XCB_BUTTON_RELEASE ||
@@ -340,7 +345,7 @@ struct Connection {
                 value.kind = type == XCB_MOTION_NOTIFY  ? Kind::motion
                              : type == XCB_BUTTON_PRESS ? Kind::button_down
                                                         : Kind::button_up;
-                value.code = e.detail;
+                value.button = e.detail;
                 if (type == XCB_BUTTON_PRESS && e.detail < 32)
                     buttons |= 1U << e.detail;
                 if (type == XCB_BUTTON_RELEASE && e.detail < 32)
@@ -356,12 +361,12 @@ struct Connection {
             } else {
                 continue;
             }
-            input(display, window, value);
+            editor::input(display, window, value);
         }
         const bool was_open = open;
         sync(open);
         if (was_open && !open)
-            input(display, window, {Kind::focus_lost});
+            editor::input(display, window, {Kind::focus_lost});
     }
 };
 
@@ -371,7 +376,6 @@ std::map<Key, Connection>& connections() {
     static std::map<Key, Connection> value;
     return value;
 }
-}  // namespace
 
 void poll(void* display, std::uint64_t window, bool& open) {
     if (!display || !window)
@@ -388,7 +392,7 @@ void sync(void* display, std::uint64_t window, bool& open) {
         const bool was_open = open;
         it->second.sync(open);
         if (was_open && !open)
-            input(display, window, {Kind::focus_lost});
+            editor::input(display, window, {Kind::focus_lost});
     }
 }
 
@@ -399,4 +403,11 @@ void forget(void* display, std::uint64_t window) {
         connections().erase(it);
     }
 }
-}  // namespace glyphshift::editor::x11
+
+constexpr editor::InputSource source{poll, sync, forget};
+}  // namespace
+
+const editor::InputSource* editor_input() {
+    return std::getenv("GLYPHSHIFT_FIXTURE_NO_FOCUS") ? nullptr : &source;
+}
+}  // namespace glyphshift::display::x11

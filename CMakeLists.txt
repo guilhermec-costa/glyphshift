@@ -32,7 +32,7 @@ set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_options(glyphshift_imgui PRIVATE -w)
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/editor/x11_input.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp src/config/builtin_presets.cpp)
+add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp src/config/builtin_presets.cpp)
 # Embed the shipped styles so the overlay works outside the source checkout.
 # Changes to a config trigger reconfiguration; the .conf files remain the source.
 set(BUILTIN_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/presets")
@@ -51,8 +51,16 @@ set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
 set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
 target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
 set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
-target_include_directories(glyphshift_editor PUBLIC include PRIVATE ${X11_INCLUDE_DIR})
-target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG PkgConfig::XCB_INPUT)
+target_include_directories(glyphshift_editor PUBLIC include)
+target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG)
+# Window-system layer, X11: the editor's input surface (own XCB connection).
+# Linked into each module that presents the editor; the first module to give a
+# window its input source keeps it, so one window never gets two connections.
+add_library(glyphshift_x11_input STATIC src/display/x11/editor_input.cpp)
+set_target_properties(glyphshift_x11_input PROPERTIES POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+target_include_directories(glyphshift_x11_input PRIVATE ${X11_INCLUDE_DIR})
+target_link_libraries(glyphshift_x11_input PUBLIC glyphshift_editor PRIVATE PkgConfig::XCB_INPUT)
 
 # Glyph pipeline shared by every GL path: the injected renderer, the capture
 # overlay and the preview tool. GL is resolved at run time (no libGL link).
@@ -66,14 +74,15 @@ target_include_directories(glyphshift_gl_pipeline PUBLIC ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl_pipeline PUBLIC ${CMAKE_DL_LIBS} glyphshift_editor)
 
 add_library(glyphshift_gl SHARED src/render/opengl/glx_interpose.cpp
-    src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp src/editor/x11_interpose.cpp)
+    src/render/opengl/renderer.cpp src/render/opengl/gl_state.cpp
+    src/display/x11/xlib_interpose.cpp)
 target_compile_definitions(glyphshift_gl PRIVATE GL_GLEXT_PROTOTYPES)
 set_target_properties(glyphshift_gl PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_gl SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_gl PRIVATE ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
 target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core glyphshift_editor
-    glyphshift_gl_pipeline Threads::Threads)
+    glyphshift_gl_pipeline glyphshift_x11_input Threads::Threads)
 set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/opengl/exports.map")
 target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
 set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
@@ -84,7 +93,8 @@ set_target_properties(glyphshift_vk PROPERTIES
 target_include_directories(glyphshift_vk SYSTEM PRIVATE third_party/imgui)
 target_compile_definitions(glyphshift_vk PRIVATE VK_USE_PLATFORM_XLIB_KHR)
 target_include_directories(glyphshift_vk PRIVATE ${Vulkan_INCLUDE_DIRS})
-target_link_libraries(glyphshift_vk PRIVATE Threads::Threads glyphshift_core glyphshift_editor)
+target_link_libraries(glyphshift_vk PRIVATE Threads::Threads glyphshift_core glyphshift_editor
+    glyphshift_x11_input)
 set(vulkan_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/render/vulkan/exports.map")
 target_link_options(glyphshift_vk PRIVATE "LINKER:--version-script=${vulkan_exports}")
 set_property(TARGET glyphshift_vk APPEND PROPERTY LINK_DEPENDS "${vulkan_exports}")
@@ -201,7 +211,7 @@ target_link_libraries(glyphshift_x11_tray PUBLIC X11::X11 PRIVATE PkgConfig::XFT
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp
     apps/overlay/daemon.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
-    glyphshift_x11_tray OpenGL::GL X11::X11
+    glyphshift_x11_input glyphshift_x11_tray OpenGL::GL X11::X11
     PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
@@ -260,6 +270,9 @@ if(BUILD_TESTING)
     target_include_directories(glyphshift-editor-tests SYSTEM PRIVATE third_party/imgui)
     target_link_libraries(glyphshift-editor-tests PRIVATE glyphshift_editor Threads::Threads)
     add_test(NAME editor COMMAND glyphshift-editor-tests)
+    add_executable(glyphshift-x11-keys-tests tests/unit/x11_keys_test.cpp)
+    target_link_libraries(glyphshift-x11-keys-tests PRIVATE glyphshift_editor)
+    add_test(NAME x11-keys COMMAND glyphshift-x11-keys-tests)
     add_executable(glyphshift-glyph-tests tests/unit/glyph_test.cpp)
     target_link_libraries(glyphshift-glyph-tests PRIVATE glyphshift_core glyphshift_editor Threads::Threads)
     add_test(NAME glyph-semantics COMMAND glyphshift-glyph-tests)

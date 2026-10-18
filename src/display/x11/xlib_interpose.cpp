@@ -7,6 +7,8 @@
 #include <map>
 #include <mutex>
 
+#include "keys.hpp"
+
 namespace {
 template <class T>
 T next(const char* name) {
@@ -78,8 +80,10 @@ bool consume(XEvent* event) {
             if (!lookup)
                 return false;
             input.kind = event->type == KeyPress ? Kind::key_down : Kind::key_up;
-            input.code = static_cast<unsigned>(
-                lookup(&event->xkey, (event->xkey.state & ShiftMask) ? 1 : 0));
+            glyphshift::display::x11::translate_keysym(
+                static_cast<unsigned>(
+                    lookup(&event->xkey, (event->xkey.state & ShiftMask) ? 1 : 0)),
+                input);
             input.physical = event->xkey.keycode;
             input.time = event->xkey.time;
             input.modified = (event->xkey.state & (ControlMask | Mod1Mask | Mod4Mask)) != 0;
@@ -88,7 +92,7 @@ bool consume(XEvent* event) {
         case ButtonPress:
         case ButtonRelease:
             input.kind = event->type == ButtonPress ? Kind::button_down : Kind::button_up;
-            input.code = event->xbutton.button;
+            input.button = event->xbutton.button;
             input.x = static_cast<float>(event->xbutton.x);
             input.y = static_cast<float>(event->xbutton.y);
             break;

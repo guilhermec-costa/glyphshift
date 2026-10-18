@@ -63,9 +63,11 @@ only when the user requests it.
    see Rendering and editor controls) and automatic exposure for dark games,
    which needs its parameters moved from push constants (at the 128-byte
    Vulkan 1.0 ceiling) to a uniform buffer.
-5. **Platform architecture migration.** Remove the couplings listed under
-   [Platform architecture](#platform-architecture), so platform, window system
-   and renderer are independent layers. Prerequisite for items 6 and 7.
+5. **Platform architecture migration.** In progress since 2026-10-18 (see
+   [Current state and migration](#current-state-and-migration)). Remove the
+   couplings listed under [Platform architecture](#platform-architecture), so
+   platform, window system and renderer are independent layers. Prerequisite
+   for items 6 and 7.
 6. **Wayland.** First check the current overlay under XWayland with X11 games
    (cheap, unverified); then add a Wayland window-system adapter
    (portal/PipeWire capture).
@@ -1019,9 +1021,10 @@ renderers when the interop allows.
 The rules above are the target. The code still has these couplings, to be
 removed incrementally, each step verified by the existing tests:
 
-1. `src/editor/x11_input.cpp` lives in the editor library and the editor entry
-   point takes an `x11_input` flag. It becomes the X11 `display::Input`, with
-   the editor model receiving neutral events.
+1. Done (see [Migration record](#migration-record)): `src/editor/x11_input.cpp`
+   lived in the editor library and the editor entry point took an `x11_input`
+   flag. It is now the X11 `display::Input`, with the editor model receiving
+   neutral events.
 2. `src/config/characters.cpp` calls Fontconfig directly; it becomes the Linux
    `platform::Fonts`. FreeType rasterization stays in core.
 3. `src/config/presets.cpp` resolves `XDG_CONFIG_HOME`/`HOME`; it becomes the
@@ -1040,6 +1043,42 @@ removed incrementally, each step verified by the existing tests:
 
 This migration is a roadmap prerequisite for Wayland and M7 and is done
 before them, not mixed into feature work.
+
+#### Migration record
+
+Each step is verified with Debug `ctest --preset dev` and the Release suite
+with GPU smoke and Khronos validation
+(`VK_LAYER_VALIDATE_SYNC=1 python3 tests/smoke/test_env.py run -- ctest
+--preset release`), on the NVIDIA/i3 setup recorded above.
+
+Before the first step, the Release suite on the unchanged tree failed once in
+`smoke-glx` (15/16): the overlay phase's `XGetImage` of the fixture window
+failed right after resizing it. Run alone, unchanged, it passed; the failure is
+recorded as intermittent, not caused by the migration.
+
+**Step 1, editor input (2026-10-18).** The editor model (`libglyphshift_editor.so`)
+no longer contains or links X11/XCB code:
+
+- `editor::Input` is neutral: a named `editor::Key` (Insert, Escape, F10,
+  editing, navigation and modifier keys), the Unicode `character` the key
+  produces (on press and release), a pointer `button`, a physical key id for
+  release tracking, the event time and pointer position. X11 keysyms are
+  translated by `src/display/x11/keys.hpp`, shared by both X11 adapters.
+- `editor::InputSource` (poll, sync, forget) replaces the `x11_input` flag of
+  `editor::Frame`. The first source given for a window stays with it until
+  `deactivate` or `forget`.
+- The XCB input surface moved to `src/display/x11/editor_input.cpp` (static
+  library `glyphshift_x11_input`, linked into the GL and Vulkan modules and
+  the overlay); `display::x11::editor_input()` returns the source, or null
+  under `GLYPHSHIFT_FIXTURE_NO_FOCUS`. The Xlib queue filter moved to
+  `src/display/x11/xlib_interpose.cpp`, still part of `libglyphshift_gl.so`.
+
+Verification: Debug 15/15 (new `x11-keys` test for the keysym translation;
+the editor test now also checks that a source is polled, kept, synced only on
+changes and forgotten); Release 17/17. The exported symbols of the GL and
+Vulkan modules are unchanged; the editor library's `Frame` constructor changed
+as intended. The focused XTest editor test (`editor_apps.py`, Release) passed
+on `glx-fixture`, `vulkan-fixture` and `overlay-fixture`.
 
 Code added since this list was written already follows the rules: the X11
 window-system layer exists as `src/display/x11/` (the tray, static library

@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "../../display/x11/editor_input.hpp"
 #include "dispatch.hpp"
 #include "editor_frag_spv.hpp"
 #include "editor_vert_spv.hpp"
@@ -1132,7 +1133,7 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue, const VkPresentIn
         state->extent.height,
         "Vulkan",
         device.version.data(),
-        true);
+        display::x11::editor_input());
     if (!editor_frame.settings.enabled && !editor_frame.draw_data) {
         {
             // Frames presented unprocessed break the cells' temporal continuity.

@@ -27,6 +27,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../src/display/x11/editor_input.hpp"
 #include "../../src/render/opengl/gpu_timer.hpp"
 #include "../../src/render/opengl/pipeline.hpp"
 #include "daemon.hpp"
@@ -457,7 +458,7 @@ private:
             state_.height,
             "Overlay (OpenGL)",
             version_.c_str(),
-            true);
+            glyphshift::display::x11::editor_input());
         const bool open = frame.draw_data != nullptr;
         if (frame.settings.enabled != enabled_ || open != editor_open_) {
             enabled_ = frame.settings.enabled;
