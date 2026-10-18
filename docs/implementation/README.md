@@ -3791,7 +3791,9 @@ wait for the user's explicit go-ahead.
   `libxdamage`, `libxfixes` (overlay, M6) and `libxft` (tray); added.
 - **CI.** `.github/workflows/ci.yml` runs in `archlinux:latest` containers as an
   unprivileged user (the launcher refuses root). Job `build`: format check,
-  Debug and Release builds and CPU tests. Job `graphics`: the GLX smoke on
+  Debug and Release builds and CPU tests, on every push and pull request. Job
+  `graphics` (manual only since 2026-10-18, at the user's request: it runs
+  when the workflow is started by hand from the Actions tab): the GLX smoke on
   Mesa llvmpipe and the Vulkan smoke on lavapipe with Khronos validation, in
   Xvfb, with `GLYPHSHIFT_SMOKE_SETTLE=2.5`, keeping `smoke-evidence` as an
   artifact. Software rendering takes longer than the smoke's fixed waits:
