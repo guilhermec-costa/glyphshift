@@ -30,6 +30,14 @@ struct Target {
     std::array<GLuint, 2> meters{}, meter_framebuffers{};
     bool metered = false;
     std::chrono::steady_clock::time_point meter_time{};
+    // World-anchored grid: the previous frame's luminance, the motion search
+    // costs, two camera states alternating with the grids, and the frame the
+    // camera state belongs to (size and cells), for continuity.
+    GLuint luma = 0, luma_framebuffer = 0, costs = 0, costs_framebuffer = 0;
+    std::array<GLuint, 2> cameras{}, camera_framebuffers{};
+    unsigned anchor_width = 0, anchor_height = 0;
+    bool anchored = false;
+    Settings anchor_settings{};
 
     // Deletes the grids; call with the owning context current.
     void release();
@@ -73,7 +81,7 @@ public:
 private:
     struct Program;
     Caps caps_;
-    std::unique_ptr<Program> compose_, analysis_, meter_;
+    std::unique_ptr<Program> compose_, analysis_, meter_, motion_, resolve_, luma_;
     double frame_interval_ = 0;
     GLuint vao_ = 0, atlas_ = 0, ramp_ = 0;
     GLuint ui_program_ = 0, ui_vao_ = 0, ui_vertices_ = 0, ui_indices_ = 0, ui_font_ = 0;
@@ -84,7 +92,10 @@ private:
 
     void update_atlas(const CharacterSelection& selection);
     void prepare(Target& target, unsigned columns, unsigned rows);
+    void require(std::unique_ptr<Program>& program, const char* fragment);
     void prepare_meter(Target& target);
+    void prepare_anchor(Target& target, unsigned width, unsigned height);
+    void pass(GLuint framebuffer, unsigned width, unsigned height, const Program& program) const;
     float adaptation(Target& target);
     void viewport(unsigned width, unsigned height) const;
     void bind_output(GLuint output) const;

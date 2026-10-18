@@ -507,6 +507,11 @@ void controls(State& state,
                 ImGui::SetTooltip(
                     "Follows the scene's brightness: dark games are brightened toward a "
                     "mid tone, bright ones toned down slightly. Exposure still applies.");
+            ImGui::Checkbox("World-anchored grid", &art.anchor_grid);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Moves the glyph grid with the camera in scrolling games, so glyphs "
+                    "travel with the scene instead of changing as it slides past.");
             ImGui::InputText("Contour glyphs", state.draft.edges.data(), state.draft.edges.size());
             ImGui::InputText("Shape glyphs", state.draft.shapes.data(), state.draft.shapes.size());
             if (ImGui::IsItemHovered())

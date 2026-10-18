@@ -20,4 +20,8 @@ struct FixtureOptions {
 FixtureOptions parse_fixture_options(std::span<const std::string_view> args,
     bool supports_validation);
 float fixture_time(std::uint64_t frame, const FixtureOptions& options);
+// GLYPHSHIFT_FIXTURE_SCROLL=N: a block texture holds for one second (60
+// frames, time for a test to place the window), scrolls left one pixel per
+// frame for N frames, then holds, for anchored-grid tests. -1 otherwise.
+float fixture_scroll(std::uint64_t frame);
 }  // namespace glyphshift

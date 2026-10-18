@@ -31,6 +31,20 @@ layout(set=0, binding=7) uniform sampler2D meter_current;
 #else
 #define METER_IMAGE meter_current
 #endif
+// World-anchored grid: binding 8 the previous frame's luminance, 9 the motion
+// search costs, 10 and 11 the camera state of the set's grid and of the
+// other one. Resolve reads the previous state (10 while the previous grid's
+// set is bound) and writes the current one, which analysis then reads as 11
+// and composition, with the current grid's set bound, as 10.
+layout(set=0, binding=8) uniform sampler2D luma_previous;
+layout(set=0, binding=9) uniform sampler2D motion_costs;
+layout(set=0, binding=10) uniform sampler2D camera_own;
+layout(set=0, binding=11) uniform sampler2D camera_other;
+#if defined(ANALYSIS)
+#define CAMERA_IMAGE camera_other
+#else
+#define CAMERA_IMAGE camera_own
+#endif
 #define SIZE params.size
 #define CELL params.cell
 #define SOURCE_COLOR params.source_color
@@ -47,6 +61,12 @@ uniform usampler2D cell_image;
 // frame's for analysis.
 uniform sampler2D meter_image;
 #define METER_IMAGE meter_image
+// Units 5..7: previous luminance, motion costs and the camera state (the
+// previous one for resolve, the current one for analysis and composition).
+uniform sampler2D luma_previous;
+uniform sampler2D motion_costs;
+uniform sampler2D camera_image;
+#define CAMERA_IMAGE camera_image
 // GL only: 1 when the source texture stores rows top-down (window captures);
 // 0, the default, for a captured GL back buffer, which is bottom-up.
 uniform uint source_top_down;
@@ -77,6 +97,28 @@ vec3 sample_source(vec2 pixel) {
     return texelFetch(source_image, at, 0).rgb;
 }
 float luma(vec3 rgb) { return dot(rgb, vec3(.2126,.7152,.0722)); }
+// The previous frame's luminance at image pixel `at` (rows top-down, like
+// sample_source); the luminance pass wrote it in framebuffer row order.
+float previous_luma(ivec2 at) {
+    at = clamp(at, ivec2(0), ivec2(SIZE) - 1);
+#ifndef VULKAN
+    at.y = int(SIZE.y) - 1 - at.y;
+#endif
+    return texelFetch(luma_previous, at, 0).r;
+}
+// World-anchored grid (ART[6].z): cell boundaries sit at pixel + offset =
+// multiples of the cell size, where the offset follows the camera. Texel 0 of
+// the camera state holds the offset and the whole cells the grid moved since
+// the previous frame; texel 1 the motion and whether it was trusted.
+vec2 grid_offset() {
+    return ART[6].z > .5 ? texelFetch(CAMERA_IMAGE, ivec2(0), 0).xy : vec2(0);
+}
+// The last grid texel for an offset: one more column/row than a fixed grid
+// covers the partial cells at the edges.
+ivec2 grid_last(vec2 offset) {
+    return ivec2(floor((SIZE - 1.0 + offset) / CELL));
+}
+const int search = 16;
 vec3 saturate_color(vec3 rgb) { return clamp(mix(vec3(luma(rgb)),rgb,ART[4].x),0.0,1.0); }
 // Cell palettes travel as 10-bit unorm RGB in one uint: an integer target is
 // never blended, whatever blend state the host application left enabled.
@@ -99,6 +141,68 @@ void main() {
     float measured = sum / 576.0;
     float previous = log(max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0));
     color = vec4(exp(ART[6].y >= 1.0 ? measured : mix(previous, measured, ART[6].y)));
+}
+#elif defined(MOTION)
+// Global motion search, one fragment per candidate shift d in [-16, 16]^2:
+// the mean truncated difference between this frame's luminance at 32x18
+// points and the previous frame's at the same points minus d. Truncation
+// keeps the HUD, sprites and new content from dominating. Each point is
+// jittered inside its grid cell (a fixed integer hash): on a regular lattice
+// whose spacing is a multiple of a texture's period, every point shares one
+// phase and standing still can cost as little as the true motion.
+void main() {
+    ivec2 d = ivec2(gl_FragCoord.xy) - search;
+    vec2 span = max(SIZE - 2.0 * float(search), vec2(1.0));
+    float cost = 0.0;
+    for (int y=0;y<18;++y) for (int x=0;x<32;++x) {
+        uint h = uint(x * 31 + y * 1009 + 7) * 2654435761u;
+        h = (h ^ (h >> 15)) * 2246822519u;
+        h ^= h >> 13;
+        vec2 jitter = vec2(float(h & 1023u), float((h >> 10) & 1023u)) / 1024.0;
+        vec2 p = float(search) + (vec2(x,y) + jitter) * span / vec2(32,18);
+        cost += min(abs(luma(sample_source(p)) - previous_luma(ivec2(p) - d)), .25);
+    }
+    color = vec4(cost / 576.0);
+}
+#elif defined(RESOLVE)
+// Chooses the motion and updates the grid offset, as two texels. The lowest
+// cost wins, slightly favoring last frame's motion (repeating tiles cost the
+// same at several shifts). It is trusted only when clearly better than the
+// average shift and than standing still; otherwise the grid stays. ART[6].w
+// is 0 without a usable previous frame (first frame, resize, cell change).
+void main() {
+    bool history = ART[6].w > .5;
+    vec4 state = history ? texelFetch(CAMERA_IMAGE, ivec2(0,0), 0) : vec4(0);
+    vec4 motion = history ? texelFetch(CAMERA_IMAGE, ivec2(1,0), 0) : vec4(0);
+    float best = 1e9, total = 0.0;
+    ivec2 found = ivec2(0);
+    for (int y=0;y<=2*search;++y) for (int x=0;x<=2*search;++x) {
+        float cost = texelFetch(motion_costs, ivec2(x,y), 0).r;
+        total += cost;
+        ivec2 d = ivec2(x,y) - search;
+        float score = cost + .002 * length(vec2(d) - motion.xy);
+        if (score < best) { best = score; found = d; }
+    }
+    float found_cost = texelFetch(motion_costs, found + search, 0).r;
+    float still = texelFetch(motion_costs, ivec2(search), 0).r;
+    float mean = total / float((2*search+1)*(2*search+1));
+    bool trusted = history && mean - found_cost > .02 &&
+                   (found == ivec2(0) || found_cost < .75 * still);
+    vec2 d = trusted ? vec2(found) : vec2(0);
+    // Content moved by d on screen: the camera moved by -d.
+    vec2 unwrapped = state.xy - d;
+    vec2 moved = floor(unwrapped / CELL);
+    vec2 offset = unwrapped - moved * CELL;
+    color = gl_FragCoord.x < 1.0 ? vec4(offset, moved) : vec4(d, trusted ? 1.0 : 0.0, 0.0);
+}
+#elif defined(LUMA)
+// This frame's luminance for the next frame's motion search.
+void main() {
+    vec2 pixel = gl_FragCoord.xy;
+#ifndef VULKAN
+    pixel.y = SIZE.y - pixel.y;
+#endif
+    color = vec4(luma(sample_source(pixel)));
 }
 #elif defined(ANALYSIS)
 // Largest mean squared descriptor error accepted for a shape glyph (mirrors
@@ -185,7 +289,8 @@ int contour(float v[9]) {
 }
 void main() {
     ivec2 index = ivec2(gl_FragCoord.xy);
-    vec2 origin = vec2(index) * CELL;
+    vec2 offset = grid_offset();
+    vec2 origin = vec2(index) * CELL - offset;
     if (ART[1].x < .5 || any(greaterThanEqual(origin, SIZE))) {
         cell_data = uvec4(0);
         return;
@@ -194,7 +299,18 @@ void main() {
     // previous decision. The renderer sets ART[4].w to the stability only when
     // that history matches the current grid and glyph set, else 0.
     float stability = ART[4].w;
-    uvec4 previous = stability > 0.0 ? texelFetch(cell_image, index, 0) : uvec4(0);
+    ivec2 before = index;
+    if (ART[6].z > .5) {
+        // An anchored grid that moved by whole cells finds this world cell's
+        // previous decision in a neighboring texel; cells entering at an
+        // edge have none.
+        vec4 state = texelFetch(CAMERA_IMAGE, ivec2(0,0), 0);
+        vec4 motion = texelFetch(CAMERA_IMAGE, ivec2(1,0), 0);
+        before = index + ivec2(state.zw);
+        ivec2 last = grid_last(state.xy + motion.xy + state.zw * CELL);
+        if (any(lessThan(before, ivec2(0))) || any(greaterThan(before, last))) stability = 0.0;
+    }
+    uvec4 previous = stability > 0.0 ? texelFetch(cell_image, before, 0) : uvec4(0);
     // z: glyph in bits 0..7, then the tone and internal contrast (8 bits each)
     // at which a tonal glyph was chosen.
     uint previous_glyph = previous.z & 255u, previous_contour = previous.w & 7u;
@@ -380,9 +496,9 @@ void main() {
 #ifndef VULKAN
     pixel.y = SIZE.y - pixel.y;
 #endif
-    vec2 origin = floor(pixel / CELL) * CELL;
     vec3 result;
     if (ART[1].x < .5) {
+        vec2 origin = floor(pixel / CELL) * CELL;
         vec3 average = (sample_source(origin + CELL * vec2(.25,.25)) +
                         sample_source(origin + CELL * vec2(.75,.25)) +
                         sample_source(origin + CELL * vec2(.25,.75)) +
@@ -391,7 +507,10 @@ void main() {
         uint glyph = texelFetch(ramp_image,ivec2(int(index),0),0).r;
         result = (SOURCE_COLOR != 0u ? average : vec3(1)) * glyph_mask(glyph,pixel-origin,false);
     } else {
-        ivec2 index = ivec2(floor(pixel / CELL));
+        // Illustrated cells may follow the camera (world-anchored grid).
+        vec2 offset = grid_offset();
+        ivec2 index = ivec2(floor((pixel + offset) / CELL));
+        vec2 origin = vec2(index) * CELL - offset;
         uvec4 data = texelFetch(cell_image, index, 0);
         vec3 ink = unpack_rgb(data.x), paper = unpack_rgb(data.y);
         uint glyph = data.z & 255u;
@@ -400,10 +519,10 @@ void main() {
         if ((flags & 1) != 0) {
             // Paper wash: bilinear paper between cell centers, so scene color
             // reads as a soft wash under the ink instead of a tile mosaic.
-            vec2 at = pixel / CELL - .5;
+            vec2 at = (pixel + offset) / CELL - .5;
             ivec2 base = ivec2(floor(at));
             vec2 f = at - vec2(base);
-            ivec2 last = ivec2(ceil(SIZE / CELL)) - 1;
+            ivec2 last = grid_last(offset);
             vec3 p00 = unpack_rgb(texelFetch(cell_image, clamp(base, ivec2(0), last), 0).y);
             vec3 p10 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(1,0), ivec2(0), last), 0).y);
             vec3 p01 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(0,1), ivec2(0), last), 0).y);
@@ -436,7 +555,7 @@ void main() {
         if (ART[4].y > 0.0 && ART[1].w > .5) {
             // Glow on dark paper, ink bleed on light paper: pull each pixel
             // toward the ink of nearby glyphs, weighted by their coverage.
-            ivec2 last = ivec2(ceil(SIZE / CELL)) - 1;
+            ivec2 last = grid_last(offset);
             vec3 bleed = vec3(0);
             float covered = 0.0, total = 0.0;
             for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
@@ -444,8 +563,8 @@ void main() {
                 uvec4 cell_near = texelFetch(cell_image, near, 0);
                 int near_glyph = int(cell_near.z & 255u);
                 ivec2 corner = ivec2(near_glyph%16,near_glyph/16)*ivec2(17,25)+ivec2(16,24);
-                vec2 offset = (pixel - (vec2(near)+.5)*CELL) / CELL;
-                float weight = exp(-1.5*dot(offset,offset));
+                vec2 away = (pixel + offset - (vec2(near)+.5)*CELL) / CELL;
+                float weight = exp(-1.5*dot(away,away));
                 float coverage = texelFetch(atlas_image,corner,0).r/(255.0*16.0*24.0) * weight;
                 bleed += unpack_rgb(cell_near.x) * coverage;
                 covered += coverage;

@@ -38,8 +38,9 @@ private:
     std::array<GLint, 4> scissor_{};
     std::array<GLboolean, 4> color_{};
     std::array<GLint, 2> polygon_{};
-    // Units 0..4: source, atlas, ramp, cell grid, exposure meter.
-    std::array<GLint, 5> textures_{}, samplers_{};
+    // Units 0..7: source, atlas, ramp, cell grid, exposure meter, and the
+    // anchored grid's luminance, motion costs and camera state.
+    std::array<GLint, 8> textures_{}, samplers_{};
     inline static constexpr std::array<GLenum, 11> capabilities_{GL_DEPTH_TEST,
         GL_STENCIL_TEST,
         GL_CULL_FACE,

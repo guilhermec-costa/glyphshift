@@ -66,7 +66,7 @@ only when the user requests it.
    the license (see Later Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
    package and a first tagged release.
-4. **Art in motion.** In progress since 2026-10-18 (see
+4. **Art in motion.** Done on 2026-10-18 (see
    [Art in motion](#art-in-motion-roadmap-item-4)). The world-anchored glyph
    grid (camera motion estimation, see Rendering and editor controls) and
    automatic exposure for dark games, which needs its parameters moved from
@@ -94,10 +94,9 @@ Only implement work explicitly requested by the user.
 - [ ] Contour thresholds are calibrated per style on one SuperTux frame.
   Outlined cartoon textures (SuperTux ice) separate from silhouettes by
   contrast only; other games and scene types are not calibrated.
-- [ ] Investigate a world-anchored glyph grid. Hysteresis (phase 4) removes
-  flicker from noise and lighting, but camera scrolling still moves content
-  across the screen-fixed grid, so glyphs crawl. Anchoring would need camera
-  motion estimation from the final image.
+- [x] World-anchored glyph grid: `anchor_grid`, with camera motion estimated
+  on the GPU (art in motion, step 3). Not yet validated in live gameplay;
+  parallax, a static HUD and 3D camera motion are not followed.
 - [ ] Add explicit aspect correction beyond independent cell dimensions.
 - [ ] Validate visual quality and motion across longer gameplay sessions and
   multiple scene types, including fine HUD/text readability.
@@ -660,6 +659,88 @@ all nine included styles (Ink & Edges with automatic exposure among them)
 through the editor, with distinct live images and saved copies. Not measured:
 the meter pass's GPU time (576 texel reads in one fragment per frame). Not
 verified: the new slider through real input, and a live dark game.
+
+**Step 3, world-anchored grid (2026-10-18).** A new live setting,
+`anchor_grid` (default false; editor **Illustration → World-anchored grid**,
+below every control the focused tests click), persisted in presets. With it,
+illustrated cells follow the camera, so glyphs travel with a scrolling scene
+instead of being re-chosen as content slides across a screen-fixed grid.
+Without it the image is byte-identical to before. Three passes run before
+analysis, all on the GPU (`glyph.frag` built with `MOTION`, `RESOLVE` and
+`LUMA`), with no readback:
+
+- **Motion search** (33×33 fragments into an R32F image): for every integer
+  shift d in [−16, 16]², the mean truncated (≤ 0.25) absolute luminance
+  difference between this frame at 32×18 points and the previous frame at
+  those points minus d. Truncation keeps the HUD, sprites and new content
+  from dominating. Each point is jittered inside its lattice cell by a fixed
+  integer hash: on a regular lattice whose spacing was a multiple of a
+  texture's period (800 pixels wide, 4-pixel blocks), all points shared one
+  phase and standing still cost as little as the real motion in three frames
+  of four, which the first live test exposed.
+- **Resolve** (2×1 RGBA32F, two images alternating with the cell grids): the
+  lowest cost wins, plus 0.002 per pixel of distance from last frame's
+  motion (repeating tiles cost the same at several shifts). It is trusted only
+  when at least 0.02 below the mean cost and, unless zero, below 0.75 of
+  standing still; otherwise the grid stays. The camera moved by −d; the grid
+  offset is that accumulated motion modulo the cell size, texel 0 holding the
+  offset and the whole cells it wrapped this frame, texel 1 the motion and
+  whether it was trusted. There is no previous state on the first frame,
+  after a resize or a cell-size change (offset 0).
+- **Luminance** (R8, full size): this frame's luminance for the next search.
+
+Analysis and composition place cell boundaries at `pixel + offset` =
+multiples of the cell size; grids get one more column and row for the partial
+edge cells (Vulkan's shared grids grow by one texel each way). Paper wash and
+glow use the same offset. With temporal stability, each world cell finds its
+previous decision where the grid moved it (the wrapped whole cells); cells
+entering at an edge have no history. Classic rendering is not anchored.
+GL: units 5–7 (previous luminance, costs, camera state), all preserved by
+`GlState`; the four optional programs (meter and the three above) are now
+linked on first use. Vulkan: bindings 8–11, set s pairing grid s with camera
+states s and s^1 like the meters; luminance, costs and camera images with
+their passes and pipelines, created with the swapchain renderer.
+
+New oracle `tests/smoke/anchor.py` (run by the GLX smoke; preview frames of a
+procedural scrolling scene with a known camera path: steady pans, a diagonal,
+a reversal and a 7-pixel step): on a fixed grid 97.6% of interior cells change
+per frame at the scene's new place; anchored, 0, in every frame after the
+first motion search, also with `stability=1`. A static scene renders the same
+anchored or not. A 4-pixel block texture 544 pixels wide (the lattice
+aliasing case) must be off the screen grid after 1–6 pixels of scrolling with
+7-pixel cells and back on it after 7. Mutations made it fail: never trusting
+the motion, ignoring the wrapped cells when reading history, and removing the
+jitter. Both API smokes gained a live check: with
+`GLYPHSHIFT_FIXTURE_SCROLL=N` the fixtures draw a 4-pixel block texture
+(integer hash, identical on both APIs) that holds for one second, scrolls N
+pixels and holds; with 7-pixel cells the anchored image equals the
+screen-grid image after 21 pixels and differs after 24. The GLX and Vulkan
+captures of those runs differ in about 40 pixels (normalized RMSE 0.00002),
+as their screen-grid captures do.
+
+On the captured SuperTux frame, synthetically panned 2 pixels per frame over
+20 frames (640×480 crops), the share of interior cells differing from the
+previous frame at the scene's new place was 0.897 → 0 (`illustrated.conf`),
+0.498 → 0 (Newsprint) and 0.938 → 0 (Comic). GPU time on the injected GLX
+fixture (Release, Comic, 800×600, scroll texture, 600-frame reports, two runs
+each) was within the run-to-run variation: medians 3.2–3.5 ms in all modes,
+p95 about 0.4–0.7 ms higher with anchoring.
+
+While testing, the bounded two-context GLX smoke run (which rebuilds the
+pipeline after every context switch) went from 11 to 28 seconds. The cause was
+outside GlyphShift: the user's NVIDIA shader disk cache had reached about
+1.1 GB, so changed shaders were no longer cached and every link recompiled
+(analysis about 190 ms); with an empty private cache both the previous commit
+and this one took about 1.1 s. `tests/smoke/run.py` now points
+`__GL_SHADER_DISK_CACHE_PATH` at `build/PRESET/shader-cache`, so the smoke's
+timeouts no longer depend on that cache.
+
+Verification: Debug 15/15 (parsing, persistence, invalid value, parameter
+slots 26/27); the Debug smoke target passed on GLX (hostile-state probe, GL
+debug) and Vulkan (core and synchronization validation); Release 17/17 with no
+`Vulkan validation` line; the nine glyph SPIR-V modules passed `spirv-val`.
+Not verified: live gameplay with real scrolling (parallax, animated sprites,
+the HUD), the new checkbox through real input, and the focused XTest tests.
 
 ## SDL applications (native SuperTux)
 

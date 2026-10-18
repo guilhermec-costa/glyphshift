@@ -36,7 +36,9 @@ version of the effect running in the game through Proton.*
 - **Pixel-crisp glyphs:** optional binary glyph masks and solid outline
   strokes, so characters read like pixel art instead of blurred text.
 - **Calm in motion:** temporal stability keeps each cell's glyph while it still
-  fits, so noise and flickering light do not make the drawing boil.
+  fits, so noise and flickering light do not make the drawing boil, and an
+  optional world-anchored grid follows the camera in scrolling games, so the
+  glyphs travel with the scene instead of crawling across the screen.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
   or up to 256 custom Unicode characters, with local TTF/OTF fonts. Characters
   keep their typographic position (`_` on the floor, `'` at the top) and an
@@ -262,7 +264,8 @@ after the first Linux release; see the
 graphics applications**; online games and anti-cheat are outside its scope.
 The launcher refuses privileged processes and targets. Full glyph rendering
 can lose fine HUD/text detail. Temporal stability calms flicker from noise and
-lighting; camera scrolling still moves glyphs across the screen-fixed grid.
+lighting. The world-anchored grid follows one dominant camera translation:
+parallax layers, a static HUD and 3D camera motion still change glyphs.
 
 ## Architecture: built to be multi-platform
 

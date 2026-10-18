@@ -29,6 +29,9 @@ struct ArtSettings {
     float stability = 0.0F;
     // Exposure follows the scene's metered brightness (0 off .. 1 fully).
     float auto_exposure = 0.0F;
+    // Illustrated cells follow the camera's motion, estimated on the GPU, so
+    // scrolling scenes keep their glyphs instead of crawling across the grid.
+    bool anchor_grid = false;
     std::array<float, 3> foreground{1, 1, 1}, background{0, 0, 0};
     bool operator==(const ArtSettings&) const = default;
 };
@@ -52,8 +55,10 @@ struct Settings {
 // exists. Entries after the last used one are zero.
 inline constexpr std::size_t art_vectors = 8;
 inline constexpr std::size_t art_stability = 19;
-// Renderers set the metering's adaptation rate for the frame (1: start fresh).
+// Renderers set the metering's adaptation rate for the frame (1: start fresh)
+// and whether the anchored grid's camera state continues the previous frame.
 inline constexpr std::size_t art_auto_exposure = 24, art_adaptation = 25;
+inline constexpr std::size_t art_anchor = 26, art_anchor_history = 27;
 using ArtParameters = std::array<float, 4 * art_vectors>;
 
 inline ArtParameters art_parameters(const Settings& s) {
@@ -84,7 +89,9 @@ inline ArtParameters art_parameters(const Settings& s) {
         a.edge_votes,
         0,
         a.auto_exposure,
-        1};
+        1,
+        a.anchor_grid ? 1.0F : 0.0F,
+        0};
 }
 
 enum SettingWarning : std::uint32_t {

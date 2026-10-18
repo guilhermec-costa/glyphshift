@@ -69,14 +69,14 @@ int main() {
             "shape_matching=true\nshape_threshold=0.17\nscene_paper=0.65\n"
             "saturation=1.6\nglow=0.3\npaper_wash=true\nstability=0.7\ncrisp_glyphs=true\n"
             "edge_detector=dog\ndog_sigma=1.4\ndog_threshold=0.03\nedge_votes=0.25\n"
-            "auto_exposure=0.6\n");
+            "auto_exposure=0.6\nanchor_grid=true\n");
         check(!parsed.warnings && parsed.value.art.illustrated && !parsed.value.art.fill &&
                   !parsed.value.art.contour_overlay && parsed.value.art.saturation == 1.6F &&
                   parsed.value.art.glow == .3F && parsed.value.art.paper_wash &&
                   parsed.value.art.stability == .7F && parsed.value.art.crisp &&
                   parsed.value.art.dog_edges && parsed.value.art.dog_sigma == 1.4F &&
                   parsed.value.art.dog_threshold == .03F && parsed.value.art.edge_votes == .25F &&
-                  parsed.value.art.auto_exposure == .6F,
+                  parsed.value.art.auto_exposure == .6F && parsed.value.art.anchor_grid,
             "illustration config");
         check(art_parameters(parsed.value)[16] == 1.6F && art_parameters(parsed.value)[17] == .3F &&
                   art_parameters(parsed.value)[18] == 7 &&
@@ -87,14 +87,19 @@ int main() {
             "saturation, glow and paper wash reach the shared shader parameters");
         {
             // Eight vec4s: slot 24 auto exposure, 25 the renderer's adaptation
-            // rate (1 until it sets one); 23 and 26 onward unused and zero.
+            // rate (1 until it sets one), 26 the anchored grid, 27 its camera
+            // history (0 until the renderer sets it); 23 and 28 onward zero.
             const auto values = art_parameters(parsed.value);
             check(values.size() == 4 * art_vectors && art_vectors == 8,
                 "art parameters fill eight vec4s");
             check(values[art_auto_exposure] == .6F && values[art_adaptation] == 1,
                 "auto exposure reaches the shader parameters");
+            check(values[art_anchor] == 1 && values[art_anchor_history] == 0,
+                "the anchored grid reaches the shader parameters");
+            check(art_parameters(Settings{})[art_anchor] == 0,
+                "the grid is screen-fixed by default");
             bool zero = values[23] == 0;
-            for (std::size_t i = 26; i < values.size(); ++i)
+            for (std::size_t i = 28; i < values.size(); ++i)
                 zero &= values[i] == 0;
             check(zero, "unused art parameter slots are zero");
         }
@@ -118,6 +123,7 @@ int main() {
                  "auto_exposure=1.5",
                  "auto_exposure=-0.1",
                  "auto_exposure=nan",
+                 "anchor_grid=maybe",
                  "glow=-0.1",
                  "paper_wash=bad",
                  "crisp_glyphs=maybe",

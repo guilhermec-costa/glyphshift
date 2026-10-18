@@ -12,7 +12,10 @@
 #include "editor_vert_spv.hpp"
 #include "glyph_analysis_spv.hpp"
 #include "glyph_frag_spv.hpp"
+#include "glyph_luma_spv.hpp"
 #include "glyph_meter_spv.hpp"
+#include "glyph_motion_spv.hpp"
+#include "glyph_resolve_spv.hpp"
 #include "glyph_vert_spv.hpp"
 
 namespace glyphshift::vulkan {
@@ -61,8 +64,9 @@ Pipeline::Pipeline(const Resources& resources,
             VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
         if ((resources_.features(cell_format) & cell_features) != cell_features)
             throw std::runtime_error("glyph cell format cannot be rendered and sampled");
-        if ((resources_.features(meter_format) & cell_features) != cell_features)
-            throw std::runtime_error("exposure meter format cannot be rendered and sampled");
+        for (const auto pass_format : {meter_format, luma_format, camera_format})
+            if ((resources_.features(pass_format) & cell_features) != cell_features)
+                throw std::runtime_error("glyph pass format cannot be rendered and sampled");
         resources_.texture(atlas_, VK_FORMAT_R32_SFLOAT, {integral_width, integral_height});
         resources_.texture(ramp_, VK_FORMAT_R8_UINT, {256, ramp_height});
         const auto font = editor::font();
@@ -70,33 +74,29 @@ Pipeline::Pipeline(const Resources& resources,
         resources_.texture(font_, VK_FORMAT_R8_UNORM, font_extent_);
         // Sized for the smallest 2x2 cell, so live cell-size edits never
         // reallocate; each frame renders only the current grid.
-        cell_extent_ = {(extent_.width + 1) / 2, (extent_.height + 1) / 2};
+        // One more column and row for an anchored grid's partial edge cells.
+        cell_extent_ = {(extent_.width + 1) / 2 + 1, (extent_.height + 1) / 2 + 1};
         for (auto& cells : cells_)
             resources_.texture(cells,
                 cell_format,
                 cell_extent_,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        constexpr auto rendered = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         for (auto& meter : meters_)
-            resources_.texture(meter,
-                meter_format,
-                {1, 1},
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+            resources_.texture(meter, meter_format, {1, 1}, rendered);
+        resources_.texture(luma_, luma_format, extent_, rendered);
+        resources_.texture(costs_, meter_format, {candidates, candidates}, rendered);
+        for (auto& camera : cameras_)
+            resources_.texture(camera, camera_format, {2, 1}, rendered);
         staging();
         descriptors(targets);
         pipelines();
         for (unsigned i = 0; i < 2; ++i) {
-            auto meter_framebuffer =
-                info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
-            meter_framebuffer.renderPass = meter_pass_;
-            meter_framebuffer.attachmentCount = 1;
-            meter_framebuffer.pAttachments = &meters_[i].view;
-            meter_framebuffer.width = meter_framebuffer.height = meter_framebuffer.layers = 1;
-            check(api_.CreateFramebuffer(device_,
-                      &meter_framebuffer,
-                      nullptr,
-                      &meter_framebuffers_[i]),
-                "create exposure meter framebuffer");
+            meter_framebuffers_[i] = framebuffer(meter_pass_, meters_[i], {1, 1});
+            camera_framebuffers_[i] = framebuffer(camera_pass_, cameras_[i], {2, 1});
         }
+        luma_framebuffer_ = framebuffer(luma_pass_, luma_, extent_);
+        costs_framebuffer_ = framebuffer(meter_pass_, costs_, {candidates, candidates});
         for (unsigned i = 0; i < 2; ++i) {
             auto cell_framebuffer =
                 info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
@@ -155,18 +155,29 @@ void Pipeline::release() noexcept {
             api_.FreeMemory(device_, target.art_memory, nullptr);
     }
     targets_.clear();
-    for (auto* pipeline : {&ui_pipeline_, &pipeline_, &analysis_pipeline_, &meter_pipeline_}) {
+    for (auto* pipeline : {&ui_pipeline_,
+             &pipeline_,
+             &analysis_pipeline_,
+             &meter_pipeline_,
+             &motion_pipeline_,
+             &resolve_pipeline_,
+             &luma_pipeline_}) {
         if (*pipeline)
             api_.DestroyPipeline(device_, *pipeline, nullptr);
         *pipeline = VK_NULL_HANDLE;
     }
-    for (auto* framebuffers : {&cell_framebuffers_, &meter_framebuffers_})
+    for (auto* framebuffers : {&cell_framebuffers_, &meter_framebuffers_, &camera_framebuffers_})
         for (auto& framebuffer : *framebuffers) {
             if (framebuffer)
                 api_.DestroyFramebuffer(device_, framebuffer, nullptr);
             framebuffer = VK_NULL_HANDLE;
         }
-    for (auto* pass : {&analysis_pass_, &meter_pass_, &render_pass_}) {
+    for (auto* framebuffer : {&luma_framebuffer_, &costs_framebuffer_}) {
+        if (*framebuffer)
+            api_.DestroyFramebuffer(device_, *framebuffer, nullptr);
+        *framebuffer = VK_NULL_HANDLE;
+    }
+    for (auto* pass : {&analysis_pass_, &meter_pass_, &luma_pass_, &camera_pass_, &render_pass_}) {
         if (*pass)
             api_.DestroyRenderPass(device_, *pass, nullptr);
         *pass = VK_NULL_HANDLE;
@@ -188,8 +199,8 @@ void Pipeline::release() noexcept {
     resources_.destroy(font_);
     resources_.destroy(cells_[0]);
     resources_.destroy(cells_[1]);
-    resources_.destroy(meters_[0]);
-    resources_.destroy(meters_[1]);
+    for (auto* texture : {&meters_[0], &meters_[1], &luma_, &costs_, &cameras_[0], &cameras_[1]})
+        resources_.destroy(*texture);
     resources_.destroy(atlas_);
     resources_.destroy(ramp_);
     if (staging_)
@@ -217,7 +228,7 @@ void Pipeline::set_target(unsigned index, VkImageView source, VkImageView output
     for (unsigned set = 0; set < 2; ++set) {
         // Set s is bound while grid s holds the previous frame: the meter then
         // reads meters[s] and writes meters[s ^ 1], which analysis reads.
-        const std::array<VkDescriptorImageInfo, 8> bindings{
+        const std::array<VkDescriptorImageInfo, 12> bindings{
             {{sampler_, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -225,9 +236,13 @@ void Pipeline::set_target(unsigned index, VkImageView source, VkImageView output
                 {sampler_, cells_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {},
                 {sampler_, meters_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {sampler_, meters_[set ^ 1U].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+                {sampler_, meters_[set ^ 1U].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {sampler_, luma_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {sampler_, costs_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {sampler_, cameras_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {sampler_, cameras_[set ^ 1U].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
         const VkDescriptorBufferInfo art{target.art_buffer, 0, art_bytes};
-        std::array<VkWriteDescriptorSet, 8> writes{};
+        std::array<VkWriteDescriptorSet, 12> writes{};
         for (uint32_t binding = 0; binding < writes.size(); ++binding) {
             writes[binding] = info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
             writes[binding].dstSet = target.descriptors[set];
@@ -262,7 +277,14 @@ void Pipeline::record(VkCommandBuffer command,
         upload(command, font_, font_offset_, font_extent_);
         // Analysis statically reads the previous grid even when history is
         // unused, so both grids start in the layout its descriptor declares.
-        for (const auto* image : {&cells_[0], &cells_[1], &meters_[0], &meters_[1]})
+        for (const auto* image : {&cells_[0],
+                 &cells_[1],
+                 &meters_[0],
+                 &meters_[1],
+                 &luma_,
+                 &costs_,
+                 &cameras_[0],
+                 &cameras_[1]})
             resources_.barrier(command,
                 image->image,
                 VK_IMAGE_LAYOUT_UNDEFINED,
@@ -273,10 +295,14 @@ void Pipeline::record(VkCommandBuffer command,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         uploaded_ = true;
     }
-    const VkExtent2D grid{std::min(cell_extent_.width,
-                              (extent_.width + settings.cell_width - 1) / settings.cell_width),
+    const bool anchoring = settings.enabled && settings.art.illustrated && settings.art.anchor_grid;
+    // An anchored grid adds a column and a row for the partial edge cells.
+    const uint32_t extra = anchoring ? 1 : 0;
+    const VkExtent2D grid{
+        std::min(cell_extent_.width,
+            (extent_.width + settings.cell_width - 1) / settings.cell_width + extra),
         std::min(cell_extent_.height,
-            (extent_.height + settings.cell_height - 1) / settings.cell_height)};
+            (extent_.height + settings.cell_height - 1) / settings.cell_height + extra)};
     // History is the other grid, valid only after an illustrated frame
     // with identical settings (grid, glyph atlas and every art control).
     const bool history =
@@ -301,6 +327,15 @@ void Pipeline::record(VkCommandBuffer command,
     if (metering)
         art[art_adaptation] = adaptation();
     metered_ = metering;
+    // The camera state continues while the cell size stays (the extent is
+    // fixed for a pipeline).
+    const bool anchor_history = anchoring && anchored_ &&
+                                anchor_cell_width_ == settings.cell_width &&
+                                anchor_cell_height_ == settings.cell_height;
+    art[art_anchor_history] = anchor_history ? 1.0F : 0.0F;
+    anchored_ = anchoring;
+    anchor_cell_width_ = settings.cell_width;
+    anchor_cell_height_ = settings.cell_height;
     std::memcpy(target.art_mapped, art.data(), art_bytes);
     api_.CmdPushConstants(command,
         layout_,
@@ -319,20 +354,24 @@ void Pipeline::record(VkCommandBuffer command,
             &target.descriptors[current_ ^ 1U],
             0,
             nullptr);
-        if (metering) {
-            auto meter = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
-            meter.renderPass = meter_pass_;
-            meter.framebuffer = meter_framebuffers_[current_];
-            meter.renderArea.extent = {1, 1};
-            api_.CmdBeginRenderPass(command, &meter, VK_SUBPASS_CONTENTS_INLINE);
-            api_.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, meter_pipeline_);
-            const VkViewport one{0, 0, 1, 1, 0, 1};
-            const VkRect2D pixel{{0, 0}, {1, 1}};
-            api_.CmdSetViewport(command, 0, 1, &one);
-            api_.CmdSetScissor(command, 0, 1, &pixel);
-            api_.CmdDraw(command, 3, 1, 0, 0);
-            api_.CmdEndRenderPass(command);
+        if (anchoring) {
+            // Motion search against the previous luminance, then this frame's
+            // luminance for the next search, then the camera state.
+            if (anchor_history)
+                offscreen(command,
+                    meter_pass_,
+                    costs_framebuffer_,
+                    motion_pipeline_,
+                    {candidates, candidates});
+            offscreen(command, luma_pass_, luma_framebuffer_, luma_pipeline_, extent_);
+            offscreen(command,
+                camera_pass_,
+                camera_framebuffers_[current_],
+                resolve_pipeline_,
+                {2, 1});
         }
+        if (metering)
+            offscreen(command, meter_pass_, meter_framebuffers_[current_], meter_pipeline_, {1, 1});
         auto analysis = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
         analysis.renderPass = analysis_pass_;
         analysis.framebuffer = cell_framebuffers_[current_];
@@ -411,8 +450,9 @@ void Pipeline::staging() {
 
 void Pipeline::descriptors(unsigned targets) {
     // Bindings 0..4: source, atlas, ramp, editor font and cell grid; 5: art;
-    // 6 and 7: exposure meters (the previous adapted value, then this frame's).
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
+    // 6 and 7: exposure meters (the previous adapted value, then this frame's);
+    // 8..11: previous luminance, motion costs and two camera states.
+    std::array<VkDescriptorSetLayoutBinding, 12> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i)
         bindings[i] = {i,
             i == 5 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -426,7 +466,7 @@ void Pipeline::descriptors(unsigned targets) {
     check(api_.CreateDescriptorSetLayout(device_, &layout, nullptr, &descriptor_layout_),
         "create glyph descriptor layout");
     const std::array<VkDescriptorPoolSize, 2> sizes{
-        {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(targets * 2 * 7)},
+        {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(targets * 2 * 11)},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(targets * 2)}}};
     auto pool = info<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
     pool.maxSets = static_cast<uint32_t>(targets * 2);
@@ -443,12 +483,15 @@ void Pipeline::descriptors(unsigned targets) {
 }
 
 void Pipeline::pipelines() {
-    const std::array<std::span<const uint32_t>, 6> code{shaders::glyph_vert_spv,
+    const std::array<std::span<const uint32_t>, 9> code{shaders::glyph_vert_spv,
         shaders::glyph_frag_spv,
         shaders::editor_vert_spv,
         shaders::editor_frag_spv,
         shaders::glyph_analysis_spv,
-        shaders::glyph_meter_spv};
+        shaders::glyph_meter_spv,
+        shaders::glyph_motion_spv,
+        shaders::glyph_resolve_spv,
+        shaders::glyph_luma_spv};
     for (unsigned i = 0; i < code.size(); ++i) {
         auto module = info<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
         module.codeSize = code[i].size_bytes();
@@ -546,6 +589,14 @@ void Pipeline::pipelines() {
         analysis_pass_,
         analysis_pipeline_);
     offscreen_pipeline(create, stages[1], meter_format, modules_[5], meter_pass_, meter_pipeline_);
+    offscreen_pipeline(create, stages[1], meter_format, modules_[6], meter_pass_, motion_pipeline_);
+    offscreen_pipeline(create,
+        stages[1],
+        camera_format,
+        modules_[7],
+        camera_pass_,
+        resolve_pipeline_);
+    offscreen_pipeline(create, stages[1], luma_format, modules_[8], luma_pass_, luma_pipeline_);
     stages[0].module = modules_[2];
     stages[1].module = modules_[3];
     const VkVertexInputBindingDescription binding{0,
@@ -615,8 +666,9 @@ void Pipeline::offscreen_pipeline(VkGraphicsPipelineCreateInfo create,
     pass.pSubpasses = &subpass;
     pass.dependencyCount = static_cast<uint32_t>(dependencies.size());
     pass.pDependencies = dependencies.data();
-    check(api_.CreateRenderPass(device_, &pass, nullptr, &pass_output),
-        "create glyph offscreen render pass");
+    if (!pass_output)
+        check(api_.CreateRenderPass(device_, &pass, nullptr, &pass_output),
+            "create glyph offscreen render pass");
     const auto compose = fragment.module;
     fragment.module = module;
     create.renderPass = pass_output;
@@ -628,6 +680,46 @@ void Pipeline::offscreen_pipeline(VkGraphicsPipelineCreateInfo create,
               &pipeline_output),
         "create glyph offscreen pipeline");
     fragment.module = compose;
+}
+
+VkFramebuffer Pipeline::framebuffer(VkRenderPass pass, const Texture& texture, VkExtent2D extent) {
+    auto create = info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+    create.renderPass = pass;
+    create.attachmentCount = 1;
+    create.pAttachments = &texture.view;
+    create.width = extent.width;
+    create.height = extent.height;
+    create.layers = 1;
+    VkFramebuffer result = VK_NULL_HANDLE;
+    check(api_.CreateFramebuffer(device_, &create, nullptr, &result),
+        "create glyph pass framebuffer");
+    return result;
+}
+
+// One full-target draw of a single-attachment pass; descriptors and push
+// constants are already bound.
+void Pipeline::offscreen(VkCommandBuffer command,
+    VkRenderPass pass,
+    VkFramebuffer framebuffer,
+    VkPipeline pipeline,
+    VkExtent2D extent) {
+    auto begin = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
+    begin.renderPass = pass;
+    begin.framebuffer = framebuffer;
+    begin.renderArea.extent = extent;
+    api_.CmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    api_.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    const VkViewport viewport{0,
+        0,
+        static_cast<float>(extent.width),
+        static_cast<float>(extent.height),
+        0,
+        1};
+    const VkRect2D area{{0, 0}, extent};
+    api_.CmdSetViewport(command, 0, 1, &viewport);
+    api_.CmdSetScissor(command, 0, 1, &area);
+    api_.CmdDraw(command, 3, 1, 0, 0);
+    api_.CmdEndRenderPass(command);
 }
 
 // Share of the way toward this frame's measurement: 1 without a previous value.

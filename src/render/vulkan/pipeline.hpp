@@ -84,7 +84,8 @@ private:
     void descriptors(unsigned targets);
     void pipelines();
     // A one-subpass pass rendering `module` into an image of `format`, which
-    // ends shader-readable; ordered after earlier fragment reads.
+    // ends shader-readable; ordered after earlier fragment reads. An existing
+    // `pass_output` of the same format is reused.
     void offscreen_pipeline(VkGraphicsPipelineCreateInfo create,
         VkPipelineShaderStageCreateInfo& fragment,
         VkFormat format,
@@ -92,6 +93,12 @@ private:
         VkRenderPass& pass_output,
         VkPipeline& pipeline_output);
     float adaptation();
+    VkFramebuffer framebuffer(VkRenderPass pass, const Texture& texture, VkExtent2D extent);
+    void offscreen(VkCommandBuffer command,
+        VkRenderPass pass,
+        VkFramebuffer framebuffer,
+        VkPipeline pipeline,
+        VkExtent2D extent);
     void art_buffer(Target& target);
     void ensure_ui_buffer(Target& target, VkDeviceSize required);
     void upload_ui(Target& target, const ImDrawData& data);
@@ -129,6 +136,21 @@ private:
     VkPipeline meter_pipeline_ = VK_NULL_HANDLE;
     bool metered_ = false;
     std::chrono::steady_clock::time_point meter_time_{};
+    // World-anchored grid: the previous frame's luminance, the motion search
+    // costs and two camera states alternating with the grids, and the cell
+    // size the camera state belongs to.
+    static constexpr VkFormat luma_format = VK_FORMAT_R8_UNORM;
+    static constexpr VkFormat camera_format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    static constexpr uint32_t candidates = 2 * 16 + 1;
+    Texture luma_, costs_;
+    std::array<Texture, 2> cameras_;
+    VkFramebuffer luma_framebuffer_ = VK_NULL_HANDLE, costs_framebuffer_ = VK_NULL_HANDLE;
+    std::array<VkFramebuffer, 2> camera_framebuffers_{};
+    VkRenderPass luma_pass_ = VK_NULL_HANDLE, camera_pass_ = VK_NULL_HANDLE;
+    VkPipeline motion_pipeline_ = VK_NULL_HANDLE, resolve_pipeline_ = VK_NULL_HANDLE,
+               luma_pipeline_ = VK_NULL_HANDLE;
+    bool anchored_ = false;
+    unsigned anchor_cell_width_ = 0, anchor_cell_height_ = 0;
     static constexpr VkDeviceSize font_offset_ =
         (integral_bytes + 256 * ramp_height + 3) & ~VkDeviceSize{3};
     VkBuffer staging_ = VK_NULL_HANDLE;
@@ -141,6 +163,6 @@ private:
     std::array<VkFramebuffer, 2> cell_framebuffers_{};
     VkPipeline ui_pipeline_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE, analysis_pipeline_ = VK_NULL_HANDLE;
-    std::array<VkShaderModule, 6> modules_{};
+    std::array<VkShaderModule, 9> modules_{};
 };
 }  // namespace glyphshift::vulkan

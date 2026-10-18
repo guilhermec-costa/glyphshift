@@ -131,6 +131,9 @@ struct Pipeline::Program {
         gl.Uniform1i(gl.GetUniformLocation(id, "ramp_image"), 2);
         gl.Uniform1i(gl.GetUniformLocation(id, "cell_image"), 3);
         gl.Uniform1i(gl.GetUniformLocation(id, "meter_image"), 4);
+        gl.Uniform1i(gl.GetUniformLocation(id, "luma_previous"), 5);
+        gl.Uniform1i(gl.GetUniformLocation(id, "motion_costs"), 6);
+        gl.Uniform1i(gl.GetUniformLocation(id, "camera_image"), 7);
         size = gl.GetUniformLocation(id, "size");
         cell = gl.GetUniformLocation(id, "cell");
         source_color = gl.GetUniformLocation(id, "source_color");
@@ -176,6 +179,13 @@ void Target::release() {
     for (auto& meter : meters)
         if (meter)
             gl.DeleteTextures(1, &meter);
+    for (const auto framebuffer :
+        {luma_framebuffer, costs_framebuffer, camera_framebuffers[0], camera_framebuffers[1]})
+        if (framebuffer)
+            gl.DeleteFramebuffers(1, &framebuffer);
+    for (const auto texture : {luma, costs, cameras[0], cameras[1]})
+        if (texture)
+            gl.DeleteTextures(1, &texture);
     *this = {};
 }
 
@@ -185,7 +195,7 @@ Pipeline::Pipeline(Caps caps) : caps_(caps) {
         throw std::runtime_error("OpenGL entry points unavailable");
     compose_ = std::make_unique<Program>(link(shaders::vertex, shaders::fragment));
     analysis_ = std::make_unique<Program>(link_offscreen(shaders::analysis));
-    meter_ = std::make_unique<Program>(link_offscreen(shaders::meter, true));
+
     gl.GenVertexArrays(1, &vao_);
     gl.GenTextures(1, &atlas_);
     gl.GenTextures(1, &ramp_);
@@ -242,10 +252,12 @@ void Pipeline::update_atlas(const CharacterSelection& selection) {
         GL_UNSIGNED_BYTE,
         data->ramp.data());
     count_ = data->count;
-    for (const auto* program : {compose_.get(), analysis_.get(), meter_.get()}) {
-        gl.UseProgram(program->id);
-        gl.Uniform1ui(program->ramp_count, count_);
-    }
+    for (const auto* program :
+        {compose_.get(), analysis_.get(), meter_.get(), motion_.get(), resolve_.get(), luma_.get()})
+        if (program) {
+            gl.UseProgram(program->id);
+            gl.Uniform1ui(program->ramp_count, count_);
+        }
     editor::character_report(data->diagnostic.data());
     if (data->diagnostic[0]) {
         diagnostic(data->diagnostic.data());
@@ -295,7 +307,17 @@ void Pipeline::prepare(Target& target, unsigned columns, unsigned rows) {
     target.rows = rows;
 }
 
+// Programs of optional passes are linked on first use: the injected renderer
+// rebuilds the pipeline after context switches, so unused passes cost nothing.
+void Pipeline::require(std::unique_ptr<Program>& program, const char* fragment) {
+    if (program)
+        return;
+    program = std::make_unique<Program>(link_offscreen(fragment, true));
+    api().Uniform1ui(program->ramp_count, count_);
+}
+
 void Pipeline::prepare_meter(Target& target) {
+    require(meter_, shaders::meter);
     if (target.meters[0])
         return;
     const auto& gl = api();
@@ -319,6 +341,75 @@ void Pipeline::prepare_meter(Target& target) {
             throw std::runtime_error("OpenGL exposure meter framebuffer incomplete");
     }
     target.metered = false;
+}
+
+// Single-attachment float targets of the anchored grid, allocated once per
+// size; a new size starts the camera state over.
+void Pipeline::prepare_anchor(Target& target, unsigned width, unsigned height) {
+    require(motion_, shaders::motion);
+    require(resolve_, shaders::resolve);
+    require(luma_, shaders::luma);
+    const auto& gl = api();
+    const auto attach = [&](GLuint& texture,
+                            GLuint& framebuffer,
+                            GLenum format,
+                            GLenum layout,
+                            GLsizei columns,
+                            GLsizei rows) {
+        if (!texture)
+            gl.GenTextures(1, &texture);
+        if (!framebuffer)
+            gl.GenFramebuffers(1, &framebuffer);
+        if (!texture || !framebuffer)
+            throw std::runtime_error("GL anchored grid allocation failed");
+        gl.BindTexture(GL_TEXTURE_2D, texture);
+        texture_parameters(gl);
+        gl.TexImage2D(GL_TEXTURE_2D,
+            0,
+            static_cast<GLint>(format),
+            columns,
+            rows,
+            0,
+            layout,
+            GL_FLOAT,
+            nullptr);
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            texture,
+            0);
+        if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw std::runtime_error("OpenGL anchored grid framebuffer incomplete");
+    };
+    gl.ActiveTexture(GL_TEXTURE5);
+    if (!target.costs) {
+        constexpr GLsizei candidates = 2 * 16 + 1;
+        attach(target.costs, target.costs_framebuffer, GL_R32F, GL_RED, candidates, candidates);
+        for (unsigned i = 0; i < 2; ++i)
+            attach(target.cameras[i], target.camera_framebuffers[i], GL_RGBA32F, GL_RGBA, 2, 1);
+    }
+    if (target.luma && target.anchor_width == width && target.anchor_height == height)
+        return;
+    attach(target.luma,
+        target.luma_framebuffer,
+        GL_R8,
+        GL_RED,
+        static_cast<GLsizei>(width),
+        static_cast<GLsizei>(height));
+    target.anchored = false;
+}
+
+void Pipeline::pass(GLuint framebuffer,
+    unsigned width,
+    unsigned height,
+    const Program& program) const {
+    const auto& gl = api();
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+    gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
+    viewport(width, height);
+    gl.UseProgram(program.id);
+    gl.DrawArrays(GL_TRIANGLES, 0, 3);
 }
 
 // Share of the way toward this frame's measurement: 1 without a previous value.
@@ -356,11 +447,14 @@ void Pipeline::draw(Target& target,
     update_atlas(settings.glyphs);
     gl.BindVertexArray(vao_);
     const bool illustrated = settings.art.illustrated;
+    const bool anchoring = illustrated && settings.art.anchor_grid;
     bool history = false;
     if (illustrated) {
+        // An anchored grid adds a column and a row for the partial edge cells.
+        const unsigned extra = anchoring ? 1 : 0;
         prepare(target,
-            (width + settings.cell_width - 1) / settings.cell_width,
-            (height + settings.cell_height - 1) / settings.cell_height);
+            (width + settings.cell_width - 1) / settings.cell_width + extra,
+            (height + settings.cell_height - 1) / settings.cell_height + extra);
         history = target.history && target.previous == settings;
         target.current ^= 1U;
     }
@@ -372,6 +466,16 @@ void Pipeline::draw(Target& target,
         prepare_meter(target);
         values[art_adaptation] = adaptation(target);
     }
+    bool anchor_history = false;
+    if (anchoring) {
+        prepare_anchor(target, width, height);
+        // The camera state continues while the size and cells stay the same.
+        anchor_history = target.anchored && target.anchor_width == width &&
+                         target.anchor_height == height &&
+                         target.anchor_settings.cell_width == settings.cell_width &&
+                         target.anchor_settings.cell_height == settings.cell_height;
+        values[art_anchor_history] = anchor_history ? 1.0F : 0.0F;
+    }
     // During analysis, unit 3 holds the previous grid; composition then reads
     // the grid just written. Unit 4 holds the meter's previous value, then the
     // value it wrote for analysis.
@@ -379,13 +483,36 @@ void Pipeline::draw(Target& target,
         atlas_,
         ramp_,
         target.cells[target.current ^ 1U],
-        target.meters[target.current ^ 1U]};
-    for (unsigned i = 0; i < 5; ++i) {
+        target.meters[target.current ^ 1U],
+        target.luma,
+        target.costs,
+        target.cameras[target.current ^ 1U]};
+    for (unsigned i = 0; i < 8; ++i) {
         gl.ActiveTexture(GL_TEXTURE0 + i);
         gl.BindTexture(GL_TEXTURE_2D, units[i]);
         gl.BindSampler(i, 0);
     }
+    if (anchoring) {
+        // Motion search against the previous luminance, then this frame's
+        // luminance for the next search, then the camera state (unit 7: the
+        // previous one for resolve, this frame's for analysis and composition).
+        if (anchor_history) {
+            motion_->use(width, height, top_down, settings, values);
+            pass(target.costs_framebuffer, 33, 33, *motion_);
+        }
+        luma_->use(width, height, top_down, settings, values);
+        pass(target.luma_framebuffer, width, height, *luma_);
+        resolve_->use(width, height, top_down, settings, values);
+        pass(target.camera_framebuffers[target.current], 2, 1, *resolve_);
+        gl.ActiveTexture(GL_TEXTURE7);
+        gl.BindTexture(GL_TEXTURE_2D, target.cameras[target.current]);
+        target.anchor_width = width;
+        target.anchor_height = height;
+        target.anchor_settings = settings;
+    }
+    target.anchored = anchoring;
     if (metering) {
+        gl.ActiveTexture(GL_TEXTURE4);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, target.meter_framebuffers[target.current]);
         gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
         viewport(1, 1);

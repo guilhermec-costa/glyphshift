@@ -166,6 +166,7 @@ public:
         glViewport(0, 0, static_cast<GLsizei>(window.width), static_cast<GLsizei>(window.height));
         glUniform2f(size, static_cast<float>(window.width), static_cast<float>(window.height));
         glUniform1f(time, glyphshift::fixture_time(frame, opts));
+        glUniform1f(glGetUniformLocation(program, "scroll"), glyphshift::fixture_scroll(frame));
         const unsigned phase = (frame / 30) % 2;
         if (flashes.is_open()) {
             glClearColor(static_cast<float>(phase),

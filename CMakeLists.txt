@@ -177,12 +177,15 @@ set(GLYPH_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GLYPH_GENERATED}")
 file(READ shaders/glyph/glyph.vert GLYPH_VERTEX)
 file(READ shaders/glyph/glyph.frag GLYPH_FRAGMENT)
-# The per-cell analysis pass is the same source with ANALYSIS defined.
-string(REPLACE "#version 330 core\n" "#version 330 core\n#define ANALYSIS\n" GLYPH_ANALYSIS
-    "${GLYPH_FRAGMENT}")
-# The automatic exposure meter is the same source with METER defined.
-string(REPLACE "#version 330 core\n" "#version 330 core\n#define METER\n" GLYPH_METER
-    "${GLYPH_FRAGMENT}")
+# Further passes are the same source with one define: per-cell analysis, the
+# exposure meter, and the anchored grid's motion search, motion resolve and
+# luminance copy.
+set(GLYPH_VARIANTS analysis meter motion resolve luma)
+foreach(variant ${GLYPH_VARIANTS})
+    string(TOUPPER "${variant}" define)
+    string(REPLACE "#version 330 core\n" "#version 330 core\n#define ${define}\n"
+        "GLYPH_${define}" "${GLYPH_FRAGMENT}")
+endforeach()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     shaders/glyph/glyph.vert shaders/glyph/glyph.frag)
 file(READ shaders/editor/editor.vert EDITOR_VERTEX)
@@ -201,24 +204,18 @@ foreach(stage vert frag)
         DEPENDS "shaders/glyph/glyph.${stage}" cmake/embed_spirv.cmake VERBATIM)
     target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_${stage}_spv.hpp")
 endforeach()
-add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_analysis_spv.hpp"
-    COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 -DANALYSIS
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/glyph/glyph.frag"
-        -o "${GLYPH_GENERATED}/glyph.analysis.spv"
-    COMMAND "${CMAKE_COMMAND}" "-DINPUT=${GLYPH_GENERATED}/glyph.analysis.spv"
-        "-DOUTPUT=${GLYPH_GENERATED}/glyph_analysis_spv.hpp" "-DNAME=glyph_analysis_spv"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
-    DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
-target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_analysis_spv.hpp")
-add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_meter_spv.hpp"
-    COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 -DMETER
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/glyph/glyph.frag"
-        -o "${GLYPH_GENERATED}/glyph.meter.spv"
-    COMMAND "${CMAKE_COMMAND}" "-DINPUT=${GLYPH_GENERATED}/glyph.meter.spv"
-        "-DOUTPUT=${GLYPH_GENERATED}/glyph_meter_spv.hpp" "-DNAME=glyph_meter_spv"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
-    DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
-target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_meter_spv.hpp")
+foreach(variant ${GLYPH_VARIANTS})
+    string(TOUPPER "${variant}" define)
+    add_custom_command(OUTPUT "${GLYPH_GENERATED}/glyph_${variant}_spv.hpp"
+        COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0 -D${define}
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/glyph/glyph.frag"
+            -o "${GLYPH_GENERATED}/glyph.${variant}.spv"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=${GLYPH_GENERATED}/glyph.${variant}.spv"
+            "-DOUTPUT=${GLYPH_GENERATED}/glyph_${variant}_spv.hpp" "-DNAME=glyph_${variant}_spv"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spirv.cmake"
+        DEPENDS "shaders/glyph/glyph.frag" cmake/embed_spirv.cmake VERBATIM)
+    target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/glyph_${variant}_spv.hpp")
+endforeach()
 foreach(stage vert frag)
     add_custom_command(OUTPUT "${GLYPH_GENERATED}/editor_${stage}_spv.hpp"
         COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0

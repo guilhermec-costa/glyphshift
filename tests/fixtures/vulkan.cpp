@@ -217,7 +217,7 @@ public:
             vk_check(vkCreateShaderModule(device, &module, nullptr, &shaders[i]),
                 "create shader module");
         }
-        VkPushConstantRange range{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 3 * sizeof(float)};
+        VkPushConstantRange range{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4 * sizeof(float)};
         auto pipeline_layout =
             info<VkPipelineLayoutCreateInfo>(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
         pipeline_layout.pushConstantRangeCount = 1;
@@ -505,7 +505,7 @@ public:
             "create pipeline");
     }
 
-    bool draw(Frame& frame, float time) {
+    bool draw(Frame& frame, float time, float scroll = -1) {
         vk_check(vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX), "wait for frame");
         std::uint32_t index = 0;
         const auto acquired = vkAcquireNextImageKHR(device,
@@ -539,9 +539,10 @@ public:
         const VkRect2D scissor{{0, 0}, extent};
         vkCmdSetViewport(frame.command, 0, 1, &viewport);
         vkCmdSetScissor(frame.command, 0, 1, &scissor);
-        const std::array<float, 3> parameters{static_cast<float>(extent.width),
+        const std::array<float, 4> parameters{static_cast<float>(extent.width),
             static_cast<float>(extent.height),
-            time};
+            time,
+            scroll};
         vkCmdPushConstants(frame.command,
             layout,
             VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -599,7 +600,9 @@ public:
                 fixture::pace(std::chrono::steady_clock::now(), 1);
                 continue;
             }
-            if (draw(frames[frame % frames.size()], glyphshift::fixture_time(frame, opts)))
+            if (draw(frames[frame % frames.size()],
+                    glyphshift::fixture_time(frame, opts),
+                    glyphshift::fixture_scroll(frame)))
                 fixture::pace(start, ++frame);
         }
         vk_check(vkDeviceWaitIdle(device), "wait for shutdown");

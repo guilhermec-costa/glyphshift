@@ -27,6 +27,10 @@ for name in ['LD_PRELOAD','GLYPHSHIFT_CONFIG','GLYPHSHIFT_PROFILE','GLYPHSHIFT_P
 env.update(XDG_CONFIG_HOME=str(output/'config'),GLYPHSHIFT_FIXTURE_NO_FOCUS='1',GLYPHSHIFT_FIXTURE_FLOATING='1',GLYPHSHIFT_FIXTURE_GL_DEBUG='1',GLYPHSHIFT_FIXTURE_STATE_CHECK='1',GLYPHSHIFT_FIXTURE_INPUT_LOG='1',VK_LAYER_VALIDATE_SYNC='1')
 env['GLYPHSHIFT_FIXTURE_INPUT_MODE']='press-only' if api=='glx' else 'release-only'
 env['GLYPHSHIFT_FIXTURE_PROC_SWAP']='1'
+# NVIDIA's shader disk cache stops accepting programs once full (about 1 GB);
+# a private cache keeps link times, and the bounded runs' timeouts, independent
+# of the user's cache. Other drivers ignore the variable.
+env['__GL_SHADER_DISK_CACHE_PATH']=str(build/'shader-cache')
 profile=f'smoke-{api}-{os.getpid()}'
 sequence=0
 @contextlib.contextmanager
@@ -202,6 +206,21 @@ try:
         characters('character_set=classic\n')
         assert image(window,'illustrated-restore-classic')==classic
         finish(process,window,log)
+    # World-anchored grid on live frames: after one second the fixture's block
+    # texture scrolls left one pixel per frame for N frames, then holds. With 7-pixel cells
+    # the anchored grid is back on the screen grid after 21 pixels and three
+    # pixels off it after 24, which exercises the motion search, resolve and
+    # camera-state alternation of each backend.
+    anchored_text=base.replace('cell_width=8','cell_width=7')+'render_style=illustrated\ncolor_mode=source\n'
+    for steps,aligned in ((21,True),(24,False)):
+        characters('');config.write_text(anchored_text+'anchor_grid=true\n')
+        with launch(f'anchor-{steps}',extra={'GLYPHSHIFT_CONFIG':str(config),'GLYPHSHIFT_PRESET':'default','GLYPHSHIFT_FIXTURE_SCROLL':str(steps)}) as (process,window,log):
+            x.resize(window,800,600);time.sleep(2)
+            anchored=image(window,f'anchor-{steps}')
+            temp=config.with_suffix('.tmp');temp.write_text(anchored_text);temp.replace(config);time.sleep(settle)
+            screen=image(window,f'anchor-{steps}-screen-grid')
+            assert (anchored==screen)==aligned,f'anchored grid after {steps} scrolled pixels: aligned={anchored==screen}'
+            finish(process,window,log)
     # A fresh profile renders both contexts/swapchains, not the saved disabled effect.
     with launch('multi',extra={'GLYPHSHIFT_FIXTURE_MULTI':'1','GLYPHSHIFT_PRESET':'default'},bounded=True) as (process,window,log):
         assert process.wait(timeout=30)==0,log.read_text()
@@ -222,6 +241,7 @@ try:
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('temporal.py')),'--build',str(build),'--output',str(output/'temporal')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('exposure.py')),'--build',str(build),'--output',str(output/'exposure')],check=True)
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('anchor.py')),'--build',str(build),'--output',str(output/'anchor')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay.py')),'--build',str(build),'--output',str(output/'overlay')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay_tray.py')),'--build',str(build),'--output',str(output/'overlay-tray')],check=True)
     print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')

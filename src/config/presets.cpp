@@ -190,6 +190,7 @@ std::string serialize_settings(const Settings& s) {
            "\nsaturation=" + decimal(s.art.saturation) + "\nglow=" + decimal(s.art.glow) +
            "\nstability=" + decimal(s.art.stability) +
            "\nauto_exposure=" + decimal(s.art.auto_exposure) +
+           "\nanchor_grid=" + (s.art.anchor_grid ? "true" : "false") +
            "\nforeground=" + rgb(s.art.foreground) + "\nbackground=" + rgb(s.art.background) + "\n";
 }
 

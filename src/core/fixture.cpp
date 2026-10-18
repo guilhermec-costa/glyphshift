@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <glyphshift/core/fixture.hpp>
 #include <stdexcept>
 #include <string>
@@ -38,6 +40,18 @@ FixtureOptions parse_fixture_options(std::span<const std::string_view> args,
             throw std::invalid_argument("Unknown option: " + std::string(arg));
     }
     return result;
+}
+
+float fixture_scroll(std::uint64_t frame) {
+    static const long limit = [] {
+        const char* value = std::getenv("GLYPHSHIFT_FIXTURE_SCROLL");
+        return value && *value ? std::strtol(value, nullptr, 10) : -1L;
+    }();
+    if (limit < 0)
+        return -1;
+    constexpr std::uint64_t hold = 60;
+    return static_cast<float>(std::min<std::uint64_t>(frame < hold ? 0 : frame - hold,
+        static_cast<std::uint64_t>(limit)));
 }
 
 float fixture_time(std::uint64_t frame, const FixtureOptions& options) {
