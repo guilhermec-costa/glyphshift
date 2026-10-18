@@ -53,8 +53,9 @@ only when the user requests it.
    [System tray](#m6-step-5-system-tray)).
 3. **Open-source release readiness.** In progress (see
    [Open-source release readiness](#open-source-release-readiness)): MIT
-   license, CI, the README animation and the PKGBUILD are done locally;
-   publishing (push, AUR, tag) waits for the user. Originally: choose and add
+   license, CI, the README animation and the PKGBUILD are done and pushed
+   (repository still private); the AUR, the tag and going public wait for
+   the user. Originally: choose and add
    the license (see Later Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
    package and a first tagged release.
@@ -3462,8 +3463,14 @@ wait for the user's explicit go-ahead.
   private directory `/usr/lib/glyphshift`, the `/usr/bin` links, the desktop
   entry, the icon and both licenses. `namcap` is not installed and was not run.
 
-Still to do: push and see the workflow pass on GitHub, tag `v0.1.0`, fill the
-checksum, publish to the AUR, and release notes.
+On 2026-10-18 the user pushed these commits; the repository is still
+private, and the workflow's result on GitHub was not seen by the agent (no
+GitHub access here). The user decided not to publish to the AUR yet; with a
+private repository the PKGBUILD's source could not be downloaded anyway.
+
+Still to do, when the user decides: confirm the workflow passes on GitHub,
+make the repository public, tag `v0.1.0` with release notes, fill the
+checksum and publish to the AUR.
 
 ### Later — Broader Linux support
 
