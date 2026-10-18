@@ -1,8 +1,10 @@
 #include "tracker.hpp"
 
+#include <X11/Xutil.h>
+
 #include <stdexcept>
 
-namespace glyphshift::overlay {
+namespace glyphshift::display::x11 {
 namespace {
 struct Children {
     Window* windows = nullptr;
@@ -13,10 +15,17 @@ struct Children {
             XFree(windows);
     }
 };
+
+// The target can disappear between any two requests. Errors are ignored and
+// the next query reports it gone, instead of Xlib's default exit.
+int ignore_error(Display*, XErrorEvent*) {
+    return 0;
+}
 }  // namespace
 
 Tracker::Tracker(Display* display, Window target)
     : display_(display), target_(target), root_(DefaultRootWindow(display)) {
+    XSetErrorHandler(ignore_error);
     // Walk up to the root's child: reparenting window managers wrap clients in
     // frames, and stacking happens among root children.
     Window current = target;
@@ -52,6 +61,22 @@ Tracker::State Tracker::query() const {
     state.viewable = attributes.map_state == IsViewable;
     state.exists = true;
     return state;
+}
+
+std::string Tracker::application_class() const {
+    XClassHint hint{};
+    std::string name;
+    if (XGetClassHint(display_, target_, &hint)) {
+        if (hint.res_class)
+            name = hint.res_class;
+        else if (hint.res_name)
+            name = hint.res_name;
+        if (hint.res_name)
+            XFree(hint.res_name);
+        if (hint.res_class)
+            XFree(hint.res_class);
+    }
+    return name;
 }
 
 bool Tracker::affects(const XEvent& event, Window ignored) const noexcept {
@@ -103,4 +128,4 @@ bool Tracker::stack_above(Window window) const {
     XConfigureWindow(display_, window, CWSibling | CWStackMode, &changes);
     return true;
 }
-}  // namespace glyphshift::overlay
+}  // namespace glyphshift::display::x11

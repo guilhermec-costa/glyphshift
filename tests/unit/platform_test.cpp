@@ -1,5 +1,7 @@
+#include <sys/wait.h>
 #include <unistd.h>
 
+#include <csignal>
 #include <cstdlib>
 #include <fstream>
 #include <glyphshift/platform/desktop.hpp>
@@ -96,6 +98,57 @@ int main() {
         const auto fallback = bold_monospace_font({});
         check(std::filesystem::is_regular_file(fallback), "default monospace font file");
         check(bold_monospace_font(missing) == fallback, "missing family falls back to monospace");
+        // Children: stopped on request and reported once ended; started
+        // children end with their parent even when it is killed.
+        const auto ended = [](ProcessId child) {
+            for (int i = 0; i < 500; ++i) {
+                for (const auto id : ended_children())
+                    if (id == child)
+                        return true;
+                usleep(10000);
+            }
+            return false;
+        };
+        const auto sleeper = spawn_child({"/usr/bin/sleep", "30"});
+        check(sleeper > 0, "child started");
+        stop_child(sleeper);
+        check(ended(sleeper), "stopped child reported as ended");
+        const auto unknown = spawn_child({(path / "no-such-program").string()});
+        check(unknown > 0 && ended(unknown), "failed exec ends the child");
+        check(spawn_child({}) == -1, "empty command refused");
+        int ids[2];
+        check(pipe(ids) == 0, "pipe");
+        const pid_t parent = fork();
+        if (parent == 0) {
+            const ProcessId orphan = spawn_child({"/usr/bin/sleep", "30"});
+            const auto written = write(ids[1], &orphan, sizeof orphan);
+            (void)written;
+            pause();
+            _exit(0);
+        }
+        ProcessId orphan = 0;
+        check(read(ids[0], &orphan, sizeof orphan) == sizeof orphan && orphan > 0,
+            "grandchild started");
+        close(ids[0]);
+        close(ids[1]);
+        kill(parent, SIGKILL);
+        waitpid(parent, nullptr, 0);
+        bool gone = false;
+        for (int i = 0; i < 500 && !gone; ++i) {
+            std::string state = read("/proc/" + std::to_string(orphan) + "/stat");
+            const auto close_paren = state.rfind(')');
+            gone = state.empty() ||
+                   (close_paren != std::string::npos && state.size() > close_paren + 2 &&
+                       state[close_paren + 2] == 'Z');
+            if (!gone)
+                usleep(10000);
+        }
+        check(gone, "child ends when its parent is killed");
+        check(!stop_requested(), "no stop request yet");
+        catch_stop_requests();
+        raise(SIGTERM);
+        check(stop_requested(), "SIGTERM becomes a stop request");
+        check(!stderr_is_terminal() || isatty(STDERR_FILENO), "terminal check");
         // Without notify-send on PATH, notify must still return promptly.
         setenv("PATH", (path / "empty").c_str(), 1);
         notify("GlyphShift test", "not shown");

@@ -1,10 +1,14 @@
 #pragma once
 #include <X11/Xlib.h>
 
-namespace glyphshift::overlay {
-// Follows one X11 window chosen by the user: its on-screen geometry, whether it
-// is viewable, and where it sits in the stacking order. It only reads state and
-// selects notification events; it never changes the target.
+#include <string>
+
+namespace glyphshift::display::x11 {
+// display::Tracker for X11. Follows one window chosen by the user: its
+// on-screen geometry, whether it is viewable, and where it sits in the stacking
+// order. It only reads state and selects notification events; it never changes
+// the target. X errors about the target are ignored process-wide from here on:
+// it can disappear between any two requests, and the next query reports that.
 class Tracker {
 public:
     struct State {
@@ -28,6 +32,9 @@ public:
     // Current geometry in root coordinates and viewability.
     State query() const;
 
+    // The application's class name (WM_CLASS class, else instance), or empty.
+    std::string application_class() const;
+
     // True when an event can change the target's geometry, visibility or
     // stacking. Events about `ignored` (the overlay itself) never count.
     bool affects(const XEvent& event, Window ignored) const noexcept;
@@ -44,4 +51,4 @@ private:
     Display* display_;
     Window target_, frame_ = 0, root_;
 };
-}  // namespace glyphshift::overlay
+}  // namespace glyphshift::display::x11

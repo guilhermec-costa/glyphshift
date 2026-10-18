@@ -1032,10 +1032,10 @@ removed incrementally, each step verified by the existing tests:
 4. Done: the OpenGL renderer library resolved GLX entry points (`gl_api.cpp`)
    and the injected renderer was bound to GLX. GL function loading stays in
    the renderer; GLX context handling moved to the X11 adapter.
-5. `apps/overlay/main.cpp` contains Composite, GLX pixmap binding and overlay
-   window code inline. They become the X11 `display::Capture` and
-   `display::Overlay`; `tracker.cpp` is already separate. `daemon.cpp` splits
-   into `display::GlobalHotkey` (X11 grab) and `platform::Process` (fork,
+5. Done: `apps/overlay/main.cpp` contained Composite, GLX pixmap binding and
+   overlay window code inline. They are now the X11 `display::Capture` and
+   `display::Overlay`, next to the tracker. `daemon.cpp` was split into
+   `display::GlobalHotkey` (X11 grab) and `platform::Process` (fork,
    `PR_SET_PDEATHSIG`).
 6. The Vulkan renderer exists only inside the layer and has its own pipeline
    code; it is extracted into a reusable `render::Pipeline` so the overlay can
@@ -1043,6 +1043,13 @@ removed incrementally, each step verified by the existing tests:
 
 This migration is a roadmap prerequisite for Wayland and M7 and is done
 before them, not mixed into feature work.
+
+Code added before the migration already followed the rules: the X11
+window-system layer existed as `src/display/x11/` (the tray, static library
+`glyphshift_x11_tray`), the Linux platform layer as `src/platform/linux/`
+(static library `glyphshift_platform`, headers in
+`include/glyphshift/platform/`) with XDG autostart, notifications,
+`config_home()` and `executable_path()`.
 
 #### Migration record
 
@@ -1139,15 +1146,53 @@ Comic, Ink & Edges, `illustrated-ink.conf` and `classic.conf` were
 byte-identical to the previous build. Native SuperTux through the launcher
 was not rerun; its SDL hooks are covered by the interposer unit test.
 
-Code added since this list was written already follows the rules: the X11
-window-system layer exists as `src/display/x11/` (the tray, static library
-`glyphshift_x11_tray`), the Linux
-platform layer as `src/platform/linux/` (static library
-`glyphshift_platform`, headers in `include/glyphshift/platform/`) with XDG
-autostart, notifications, `config_home()` and `executable_path()`. The
-daemon's single-instance
-selection (`claim_instance` in `daemon.cpp`) moves with its hotkey grab into
-the X11 `display::GlobalHotkey` in step 5.
+**Step 5, capture overlay and daemon (2026-10-18).** The overlay's and
+daemon's window-system and operating-system code left `apps/overlay/`:
+
+- `display::x11::Capture` (`capture.{hpp,cpp}`): Composite 0.2 redirection,
+  XDamage reports, the target-depth GLX pixmap config, pixmap wrapping after
+  resizes, and binding into the renderer's texture.
+- `display::x11::OverlayWindow` (`overlay_window.{hpp,cpp}`): the
+  override-redirect window with an empty XFixes input shape and no compositor
+  shadow, its OpenGL 3.3 core context with swap interval 1, show/hide above
+  the tracked target, and presentation.
+- `display::x11::Tracker` moved from `apps/overlay/` and now also reads the
+  application class for the profile and installs the error handler it
+  depends on.
+- `display::x11::GlobalHotkey` (`global_hotkey.{hpp,cpp}`): hotkey parsing,
+  the `_GLYPHSHIFT_DAEMON_S<screen>` claim, the root grab and its BadAccess
+  check, and the 400 ms repeat filter; `focused_client` and `window_title`
+  live next to it. These four form the static library `glyphshift_x11_overlay`.
+- `platform::Process` (`process.hpp`): `spawn_child` (fork, exec,
+  `PR_SET_PDEATHSIG`), `stop_child`, `wait_child`, `ended_children`, stop
+  requests from SIGINT/SIGTERM and `stderr_is_terminal`.
+- `opengl::OwnedRenderer` (`src/render/opengl/owned.{hpp,cpp}`): the GL calls
+  the overlay made itself (state reset, GPU timing, source texture, the F10
+  original view, editor drawing), now through the loaded GL table.
+
+`apps/overlay/` keeps option parsing, the profile rule, the attach/detach and
+tray-menu logic, and wiring. Its two event loops still read Xlib events and
+wait on the X connection: with one window system there is no second
+implementation yet to shape a neutral event source, so that abstraction is
+left to the Wayland or Win32 work. The `check_hotkey` function of `daemon.hpp`
+was replaced by `GlobalHotkey::check`. Messages and exit codes are unchanged.
+
+Verification: Debug 15/15 (the platform test now covers a child stopped on
+request, a failed exec, an empty command, a child ending when its parent is
+killed with SIGKILL, and SIGTERM becoming a stop request; with `prctl`
+removed it failed as expected); Release 17/17. Because the user's own daemon
+was running, the overlay smoke's single-instance phase had been skipped; with
+the user's permission their daemon was stopped, `tests/smoke/overlay.py`
+then passed including that phase, and the daemon was restarted afterwards.
+The tray smoke and the tray step of `overlay_daemon.py` stay skipped here
+because polybar now runs a real tray; instead, a Release daemon's icon was
+seen docked in polybar's tray (its window a descendant of the bar's, mapped,
+17×17) and a screen capture showed the drawn icon. With the user's
+permission, the focused XTest drivers passed on the Release build:
+`editor_apps.py --application overlay-fixture`, `overlay_daemon.py`, and
+`overlay_game.py` on native SuperTux and on Windows SuperTux through
+GE-Proton in `test_env.py run --offline` (attach by hotkey, input reaching the
+game, editor, following a resize, detach, game exit, daemon exit 0).
 
 ### Repository layout (target)
 
@@ -3044,7 +3089,8 @@ target client, so another window raised over the game was covered, frame moves
 by the window manager could be missed, a hidden workspace left the overlay on
 screen, and an X error during the target's teardown ended the process.
 
-Tracking moved into `apps/overlay/tracker.{hpp,cpp}`. The tracker finds the
+Tracking moved into `apps/overlay/tracker.{hpp,cpp}` (since the platform
+migration, `src/display/x11/tracker.{hpp,cpp}`). The tracker finds the
 target's top-level ancestor (under i3 the client sits in a frame that is a
 root child, confirmed with `XQueryTree`), selects StructureNotify on the client
 and frame and SubstructureNotify on the root, and only reads state. After any
@@ -3117,7 +3163,9 @@ python3 tests/smoke/editor_apps.py --build build/dev --application overlay-fixtu
 #### M6 step 4: background daemon and global hotkey
 
 `glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]`, without
-`--window`, runs in the background (`apps/overlay/daemon.{hpp,cpp}`). It
+`--window`, runs in the background (`apps/overlay/daemon.{hpp,cpp}`; its X11 and
+process code moved to the window-system and platform layers in the platform
+migration). It
 registers one global hotkey, **Ctrl+Alt+G** by default; `--hotkey` accepts
 `ctrl`, `shift`, `alt` and `super` modifiers joined with `+` to a keysym name
 (for example `super+shift+F9`). Each press acts on the focused window:

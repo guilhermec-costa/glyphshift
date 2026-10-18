@@ -77,7 +77,7 @@ target_link_libraries(glyphshift_x11_input PUBLIC glyphshift_editor PRIVATE PkgC
 # through the loader of the window system that owns the context.
 add_library(glyphshift_gl_pipeline STATIC src/render/opengl/gl_api.cpp
     src/render/opengl/pipeline.cpp src/render/opengl/gpu_timer.cpp
-    src/render/opengl/gl_state.cpp src/render/opengl/injected.cpp)
+    src/render/opengl/gl_state.cpp src/render/opengl/injected.cpp src/render/opengl/owned.cpp)
 set_target_properties(glyphshift_gl_pipeline PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_compile_definitions(glyphshift_gl_pipeline PUBLIC GL_GLEXT_PROTOTYPES)
@@ -216,11 +216,17 @@ pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes
 pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft)
 add_library(glyphshift_x11_tray STATIC src/display/x11/tray.cpp)
 target_link_libraries(glyphshift_x11_tray PUBLIC X11::X11 PRIVATE PkgConfig::XFT)
-add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp
-    apps/overlay/daemon.cpp)
+# Window-system layer, X11: the overlay's capture (Composite, XDamage,
+# texture_from_pixmap), its click-through window, target tracking and the
+# daemon's global hotkey.
+add_library(glyphshift_x11_overlay STATIC src/display/x11/capture.cpp
+    src/display/x11/overlay_window.cpp src/display/x11/tracker.cpp
+    src/display/x11/global_hotkey.cpp)
+target_link_libraries(glyphshift_x11_overlay PUBLIC X11::X11 OpenGL::GL
+    PRIVATE PkgConfig::X11_CAPTURE)
+add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/daemon.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
-    glyphshift_x11_input glyphshift_x11_tray OpenGL::GL X11::X11
-    PkgConfig::X11_CAPTURE)
+    glyphshift_x11_input glyphshift_x11_overlay glyphshift_x11_tray)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
 add_executable(glyphshift-glx-fixture tests/fixtures/glx.cpp)
