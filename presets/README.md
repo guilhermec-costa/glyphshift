@@ -20,6 +20,37 @@ not six new live gameplay tests. Except for Soft color, the styles use strength 
 all visible detail comes from cell palettes and glyph masks. Blueprint deliberately
 omits most surface detail; Mosaic deliberately uses blocks instead of letters.
 
+## More styles
+
+Six more configs use the newer ink, paper wash, glow and outline-glyph controls.
+They are config files only: load them with `GLYPHSHIFT_CONFIG` (below), then
+**Save preset** to keep one in the overlay's **Saved presets**.
+
+| Config | Style | Cell size |
+| --- | --- | --- |
+| [art-comic.conf](art-comic.conf) | Bold scene-colored inks over a vivid watercolor wash. | 8×12 |
+| [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 7×11 |
+| [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 8×12 |
+| [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 7×11 |
+| [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 7×12 |
+| [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 8×12 |
+
+![Six more styles rendered from the same SuperTux frame](../docs/presets/overview-more.png)
+
+Like the gallery above, these are GPU previews of the same captured frame, not
+live gameplay tests. Dark-paper styles (Chalk, Midnight, CRT, Digital rain)
+use low exposure so a bright scene does not fill the screen with characters;
+raise **Exposure** for darker games.
+
+```bash
+cp presets/art-comic.conf /tmp/glyphshift-style.conf
+setpriv --inh-caps=-all --ambient-caps=-all -- \
+  env GLYPHSHIFT_CONFIG=/tmp/glyphshift-style.conf \
+  ./build/dev/glyphshift -- ./build/dev/glyphshift-glx-fixture
+# In a second terminal, switch live:
+cp presets/art-sepia.conf /tmp/glyphshift-style.conf
+```
+
 ## Choose directly in the overlay
 
 Restart the application through the rebuilt launcher to load the updated shared

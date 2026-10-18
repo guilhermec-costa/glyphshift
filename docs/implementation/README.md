@@ -428,6 +428,12 @@ strength 0.65. They use existing renderer controls and do not add a milestone,
 backend or installation step. A later change embeds them at build time and lists
 them under **Insert → Preset → Included styles**.
 
+Six more config-only styles (Comic, Sepia, Chalk, Midnight, CRT, Digital rain)
+use the phase 1–4 controls. They were calibrated with `glyphshift-preview` on
+the same SuperTux frame and are documented in the preset gallery. They are not
+embedded in the overlay menu, because the focused editor test clicks the
+included-style rows by position and was not rerun.
+
 Each `presets/art-*.conf` was passed to the current Debug `glyphshift-preview`
 against the same captured SuperTux frame. All six parsed without warnings,
 loaded their glyph atlas without fallback and rendered successfully on the
