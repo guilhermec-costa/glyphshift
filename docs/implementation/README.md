@@ -3306,8 +3306,10 @@ Verification on 2026-10-18:
   built without warnings and passed 16/16 with the persistent validation
   layer and `VK_LAYER_VALIDATE_SYNC=1` (107 s). `overlay_daemon.py` (XTest)
   passed on the Release build.
-- Not verified: launching the entry from a menu (rofi `drun` lists
-  `~/.local/share/applications`), login autostart (this i3 configuration runs
+- Reported by the user after `cmake --install build/release --prefix
+  ~/.local`: GlyphShift started from the application menu (rofi) and worked.
+  This was the user's own check; its details were not recorded.
+- Not verified by the agent: login autostart (this i3 configuration runs
   `dex --autostart`, but dex is not installed), icon rendering in a desktop's
   menu, and installation into a system prefix.
 
