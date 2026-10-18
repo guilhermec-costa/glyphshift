@@ -270,12 +270,13 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
             if (!number(value, target, 0, unit ? 1 : 2))
                 parsed.warnings |= invalid_art;
         } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching" ||
-                   key == "paper_wash") {
+                   key == "paper_wash" || key == "crisp_glyphs") {
             auto& target = key == "fill_enabled"     ? parsed.value.art.fill
                            : key == "shape_matching" ? parsed.value.art.shape_matching
                            : key == "paper_wash"     ? parsed.value.art.paper_wash
+                           : key == "crisp_glyphs"   ? parsed.value.art.crisp
                                                      : parsed.value.art.contour_overlay;
-            target = key != "shape_matching" && key != "paper_wash";
+            target = key == "fill_enabled" || key == "contour_overlay";
             if (value != "false" && value != "0" && value != "true" && value != "1")
                 parsed.warnings |= invalid_art;
             else

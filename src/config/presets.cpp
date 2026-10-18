@@ -190,6 +190,7 @@ std::string serialize_settings(const Settings& s) {
            "\nshape_threshold=" + decimal(s.art.shape_threshold) +
            "\nscene_paper=" + decimal(s.art.scene_paper) +
            "\npaper_wash=" + (s.art.paper_wash ? "true" : "false") +
+           "\ncrisp_glyphs=" + (s.art.crisp ? "true" : "false") +
            "\nsaturation=" + decimal(s.art.saturation) + "\nglow=" + decimal(s.art.glow) +
            "\nstability=" + decimal(s.art.stability) + "\nforeground=" + rgb(s.art.foreground) +
            "\nbackground=" + rgb(s.art.background) + "\n";

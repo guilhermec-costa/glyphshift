@@ -51,11 +51,36 @@ for ink in [0, 1]:
     rgb = output.read_bytes().split(b'\n', 3)[3]
     for y in range(h):
         for x in range(w):
-            # The cell before the boundary owns the Sobel contour. A two-texel
-            # atlas bar integrates to half coverage in its two center pixels.
-            expected = 128 if x in [35, 36] else ink * 255
+            # The cell before the boundary owns the contour. The four-texel
+            # atlas bar covers texels 6..9 of 16: pixels 3 and 4 of the 8-pixel
+            # cell, fully, in the contrasting paper color.
+            expected = (1 - ink) * 255 if x in [35, 36] else ink * 255
             assert all(abs(c - expected) <= 1 for c in rgb[(y*w+x)*3:(y*w+x+1)*3]), (name, x, y)
 print('2 adaptive contour-over-fill GPU cases passed without cell-sized holes')
+# Crisp glyphs: every pixel must be exactly ink or paper, decided by the
+# analytic rectangle coverage against the 40% threshold.
+for cw, ch in [(3, 5), (8, 12), (13, 19), (64, 96)]:
+    w, h = cw * 2, ch * 2
+    name = f'crisp-{cw}-{ch}'
+    source = args.output / (name + '-source.ppm')
+    source.write_bytes(f'P6\n{w} {h}\n255\n'.encode() + bytes([128]) * w * h * 3)
+    config = args.output / (name + '.conf')
+    config.write_text('render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\n'
+        f'cell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="▘"\n'
+        'edge_strength=0\ncrisp_glyphs=true\nforeground=1,1,1\nbackground=0,0,0\n')
+    output = args.output / (name + '.ppm')
+    subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
+    rgb = output.read_bytes().split(b'\n', 3)[3]
+    for y in range(h):
+        for x in range(w):
+            x0, x1 = (x % cw) / cw, (x % cw + 1) / cw
+            y0, y1 = (y % ch) / ch, (y % ch + 1) / ch
+            area = max(0, min(x1, .5) - x0) / (x1 - x0) * max(0, min(y1, .5) - y0) / (y1 - y0)
+            pixel = rgb[(y * w + x) * 3:(y * w + x + 1) * 3]
+            assert pixel in (b'\xff\xff\xff', b'\x00\x00\x00'), (name, x, y, pixel)
+            if abs(area - .4) > .01:
+                assert pixel == (b'\xff\xff\xff' if area >= .4 else b'\x00\x00\x00'), (name, x, y, area)
+print('4 crisp-glyph GPU cases passed: binary pixels matching analytic coverage')
 # Structural matching must recover every mixed quadrant silhouette, including
 # dark objects on bright paper, with both source colors and reversed mono ink.
 for mode in ['source', 'mono']:

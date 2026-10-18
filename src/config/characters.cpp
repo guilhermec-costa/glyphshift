@@ -382,10 +382,12 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
                     for (unsigned x = 0; x < 16; ++x) {
                         const float px = (static_cast<float>(x) + .5F) / 16;
                         const float py = (static_cast<float>(y) + .5F) / 24;
-                        const bool lit = code == '|' ? std::abs(px - .5F) < .075F
+                        // Four-texel strokes: two solid pixels at an 8x12 cell
+                        // instead of one half-intensity pixel.
+                        const bool lit = code == '|' ? std::abs(px - .5F) < .125F
                                          : code == '-'
-                                             ? std::abs(py - .5F) < .05F
-                                             : std::abs(px - (code == '/' ? 1 - py : py)) < .075F;
+                                             ? std::abs(py - .5F) < .084F
+                                             : std::abs(px - (code == '/' ? 1 - py : py)) < .125F;
                         if (lit)
                             pixel(atlas, 256 + e, x, y, 255);
                     }

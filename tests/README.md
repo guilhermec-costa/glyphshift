@@ -433,10 +433,14 @@ presets do. **Saturation** (0..2) affects source color only. **Glow / ink
 bleed** pulls nearby paper toward the ink of surrounding glyphs: a phosphor
 glow on dark paper, a soft bleed on light paper. Compare 0 and 0.5 with F10.
 
+**Crisp pixel glyphs** turns every pixel into ink or paper, with no gray
+antialiasing, for a pixel-art look; most included styles enable it.
+
 ```ini
 saturation=1.6
 glow=0.25
 paper_wash=true
+crisp_glyphs=true
 ```
 
 The old mode remains available as `render_style=classic`. At 4×4, filtering

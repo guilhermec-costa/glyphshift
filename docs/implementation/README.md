@@ -419,6 +419,42 @@ python3 tests/smoke/temporal.py --build build/dev --output /tmp/glyphshift-tempo
 python3 tests/smoke/temporal.py --build build/dev --output /tmp/glyphshift-temporal --report
 ```
 
+## Crisp glyphs and solid strokes (art direction, phase 5, step 1)
+
+The user pointed to Acerola's ReShade ASCII shader as the reference for
+personality. Reading it (ideas only; the repository states no license, so no
+code was taken) showed pixel-art 8×8 glyphs fetched without filtering: every
+pixel is ink or background. A temporary experiment that binarized our masks
+showed the gap: the built-in contour strokes were about 2.4 texels of the 16×24
+tile, so at an 8×12 cell they integrated to one half-intensity gray pixel.
+
+- Built-in `| - / \` contour glyphs are now four texels wide (half-widths
+  0.125 of the tile width, 0.084 of its height): two solid pixels at 8×12,
+  with or without crisp glyphs. The analytic contour oracle now expects those
+  two pixels fully in the contrasting stroke color.
+- `crisp_glyphs` (bool, default false) binarizes the filtered fill and contour
+  masks in composition: a pixel is ink when at least 40% of its footprint is
+  covered. The art vec4 stays full, so `paper_wash` and `crisp_glyphs` share the
+  former wash slot as bit flags (1 wash, 2 crisp); push constants stay at 112
+  bytes. The editor's **Illustration → Crisp pixel glyphs** checkbox sits below
+  the controls the focused tests click.
+- A new oracle group renders the ▘ quadrant at 3×5, 8×12, 13×19 and 64×96 with
+  crisp glyphs and requires every pixel to be exactly ink or paper, matching
+  the analytic rectangle coverage against the 40% threshold.
+- Crisp glyphs are enabled in every included style except Chalk (chalk reads
+  better soft), and in `illustrated.conf` and `illustrated-ink.conf`.
+
+Thicker strokes also make the remaining texture contours (SuperTux ice in
+Newsprint and Blueprint) more visible; contour *detection* is unchanged in this
+step and is the subject of step 2 (pixel-level difference-of-Gaussians edges).
+
+Verified on 2026-10-18 on the existing NVIDIA/X11 setup: Debug and Release
+built without warnings; Debug CTest 12/12 and Release 14/14 including both
+graphics smokes with Khronos validation. The analytic oracle passed with the
+updated contour expectation and the four crisp cases. Both API smokes require
+crisp glyphs to change the live image, and their GLX/Vulkan captures were
+identical. Focused editor tests and SuperTux were not run for this step.
+
 ## Ready-to-use style collection
 
 Eight embedded styles are listed under **Insert → Preset → Included styles**,

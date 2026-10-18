@@ -291,7 +291,9 @@ void main() {
         uvec4 data = texelFetch(cell_image, index, 0);
         vec3 ink = unpack_rgb(data.x), paper = unpack_rgb(data.y);
         uint glyph = data.z & 255u;
-        if (ART[4].z > .5) {
+        // ART[4].z holds bit flags: 1 paper wash, 2 crisp glyphs.
+        int flags = int(ART[4].z + .5);
+        if ((flags & 1) != 0) {
             // Paper wash: bilinear paper between cell centers, so scene color
             // reads as a soft wash under the ink instead of a tile mosaic.
             vec2 at = pixel / CELL - .5;
@@ -304,11 +306,16 @@ void main() {
             vec3 p11 = unpack_rgb(texelFetch(cell_image, clamp(base+ivec2(1,1), ivec2(0), last), 0).y);
             paper = mix(mix(p00,p10,f.x),mix(p01,p11,f.x),f.y);
         }
+        // Crisp glyphs: a pixel is ink when at least 40% of its footprint is
+        // covered, so strokes stay solid instead of fading to gray.
+        bool crisp = (flags & 2) != 0;
         float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
+        if (crisp) fill_mask = step(.4, fill_mask);
         result = mix(paper,ink,fill_mask);
         uint contour = data.w & 7u;
         if (contour != 0u) {
             float mask = glyph_mask(255u+contour,pixel-origin,true);
+            if (crisp) mask = step(.4, mask);
             if (ART[0].w > .5) {
                 // Choose whichever ink/paper stroke contrasts more with the
                 // cell's mean filled color, so contours never punch holes.

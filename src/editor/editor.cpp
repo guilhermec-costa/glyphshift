@@ -404,6 +404,11 @@ void controls(State& state,
                 ImGui::SetTooltip(
                     "Blend scene-colored paper smoothly between cells, like a "
                     "watercolor wash under the glyphs.");
+            ImGui::Checkbox("Crisp pixel glyphs", &art.crisp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Every pixel is ink or paper: solid strokes with no gray "
+                    "antialiasing, like pixel-art characters.");
             ImGui::TextWrapped(
                 "Shape matching uses your selected glyphs to preserve small silhouettes. "
                 "Include quadrant blocks for finer shapes. Scene-colored paper affects source "

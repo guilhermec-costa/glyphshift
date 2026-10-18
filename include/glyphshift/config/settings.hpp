@@ -12,6 +12,8 @@ struct ArtSettings {
     bool shape_matching = false;
     // Interpolate cell paper between cell centers: a wash instead of tiles.
     bool paper_wash = false;
+    // Binary glyph masks: every pixel is ink or paper, like pixel-art glyphs.
+    bool crisp = false;
     float shape_threshold = 0.2F, scene_paper = 0.0F;
     float exposure = 1.0F, contrast = 1.0F, gamma = 1.0F;
     float edge_strength = 1.0F, edge_threshold = 0.18F;
@@ -60,7 +62,8 @@ inline std::array<float, 20> art_parameters(const Settings& s) {
         a.scene_paper,
         a.saturation,
         a.glow,
-        a.paper_wash ? 1.0F : 0.0F,
+        // Bit flags: 1 paper wash, 2 crisp glyphs.
+        (a.paper_wash ? 1.0F : 0.0F) + (a.crisp ? 2.0F : 0.0F),
         a.stability};
 }
 
