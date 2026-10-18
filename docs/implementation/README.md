@@ -2767,8 +2767,55 @@ Native SuperTux started on its own (no GlyphShift library in its memory map)
 was transformed live; the overlay kept pace at about 60 frames per second
 using about 0.2–0.35 ms of CPU per frame including the swap call. End-to-end
 added latency was not measured; one display frame is the expected bound with
-vsync. Hotkey attachment, the editor, window-manager restacking, focus changes
-and Wayland are later steps.
+vsync. Hotkey attachment, the editor and Wayland are later steps.
+
+#### M6 step 2: window tracking
+
+The prototype raised the overlay above every window and only listened to the
+target client, so another window raised over the game was covered, frame moves
+by the window manager could be missed, a hidden workspace left the overlay on
+screen, and an X error during the target's teardown ended the process.
+
+Tracking moved into `apps/overlay/tracker.{hpp,cpp}`. The tracker finds the
+target's top-level ancestor (under i3 the client sits in a frame that is a
+root child, confirmed with `XQueryTree`), selects StructureNotify on the client
+and frame and SubstructureNotify on the root, and only reads state. After any
+relevant event the overlay queries the target and applies it:
+
+- not viewable (`map_state != IsViewable`: hidden workspace, minimized or
+  withdrawn), zero-sized, or the effect disabled: unmap the overlay;
+- otherwise move/resize it to the target's root geometry, rewrap the pixmap
+  after a size change, map it, and restack it directly above the frame
+  (`XConfigureWindow` with the frame as sibling) unless it is already there,
+  so windows above the game stay above the overlay;
+- destruction of the target or frame, or a failed query, ends the overlay with
+  status 0. An X error handler records errors instead of Xlib's default exit.
+
+Damage only marks a frame dirty; rendering happens when the overlay is mapped.
+The overlay never takes focus, so focus changes need no handling here; the
+editor (step 3) will.
+
+`tests/smoke/overlay.py` adds a tracking phase with unmanaged test windows, so
+no window manager reacts: the overlay must follow a move and resize, stay
+directly above the target while an occluding window raised later stays above
+it, follow the target when it is raised over the occluder, unmap with the
+target and return with it, and exit 0 when the target is destroyed. Replacing
+the restack with the prototype's raise made it fail ("overlay left its place
+directly above the target"). Workspace switching, fullscreen toggling and
+window-manager frame moves were not exercised live under i3 for this step.
+
+#### M6 technical debt (tracked)
+
+1. Two GL implementations of the two passes: the injected renderer (GL through
+   `dlsym`, host state saved and restored) and `GlyphPasses` (overlay and
+   preview). The shader is shared; the cell textures, ping-pong and history
+   plumbing are duplicated. Planned with step 3, by parameterizing the module
+   over the GL function table.
+2. Resolved in step 2: window tracking left the single overlay source file.
+3. With `--preset`, the overlay reparses the included style on every frame. It
+   is cheap but per-frame work; to be removed with the step 3 editor.
+4. The shared editor registers per presentation drawable/window of the host
+   process; reusing it in the overlay needs an adaptation in step 3.
 
 ### Later — Broader Linux support
 

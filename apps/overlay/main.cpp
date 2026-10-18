@@ -23,13 +23,21 @@
 #include <string_view>
 
 #include "../../src/render/standalone/glyph_passes.hpp"
+#include "tracker.hpp"
 
 // Standalone capture overlay (M6, step 1). Never touches the target process:
 // it reads the target window's pixels through the X Composite extension, runs
 // the glyph passes, and presents into its own input-transparent window kept
 // above the target.
 namespace {
+using glyphshift::overlay::Tracker;
 volatile std::sig_atomic_t stop = 0;
+
+// The target can disappear between any two requests. Errors are counted and
+// the next query reports it gone, instead of Xlib's default exit.
+int x_error(Display*, XErrorEvent*) {
+    return 0;
+}
 
 void require(bool value, const char* message) {
     if (!value)
@@ -97,10 +105,11 @@ public:
         XWindowAttributes target{};
         require(XGetWindowAttributes(display_, options.target, &target), "target window not found");
         depth_ = static_cast<unsigned>(target.depth);
+        XSetErrorHandler(x_error);
+        tracker_ = std::make_unique<Tracker>(display_, options.target);
         // Automatic redirection keeps the window on screen while giving it an
         // off-screen pixmap that can be read; released when we disconnect.
         XCompositeRedirectWindow(display_, options.target, CompositeRedirectAutomatic);
-        XSelectInput(display_, options.target, StructureNotifyMask);
         damage_ = XDamageCreate(display_, options.target, XDamageReportNonEmpty);
 
         create_window(screen, target);
@@ -110,7 +119,7 @@ public:
         glBindTexture(GL_TEXTURE_2D, source_);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        follow(target.width, target.height);
+        update();
         XSync(display_, False);
     }
 
@@ -132,33 +141,35 @@ public:
     }
 
     void run() {
-        bool dirty = true;
         while (!stop && alive_) {
+            bool changed = false;
             while (XPending(display_)) {
                 XEvent event;
                 XNextEvent(display_, &event);
                 if (event.type == damage_event_ + XDamageNotify) {
                     XDamageSubtract(display_, damage_, None, None);
-                    dirty = true;
-                } else if (event.type == ConfigureNotify &&
-                           event.xconfigure.window == options_.target) {
-                    follow(event.xconfigure.width, event.xconfigure.height);
-                    dirty = true;
-                } else if (event.type == DestroyNotify &&
-                           event.xdestroywindow.window == options_.target) {
+                    dirty_ = true;
+                } else if (tracker_->destroyed(event)) {
                     alive_ = false;
-                } else if (event.type == UnmapNotify && event.xunmap.window == options_.target) {
-                    XUnmapWindow(display_, window_);
-                } else if (event.type == MapNotify && event.xmap.window == options_.target) {
-                    XMapRaised(display_, window_);
-                    dirty = true;
+                } else if (tracker_->affects(event, window_)) {
+                    changed = true;
                 }
             }
             if (!alive_)
                 break;
-            if (dirty) {
-                render();
-                dirty = false;
+            if (changed)
+                update();
+            if (dirty_ && alive_) {
+                dirty_ = false;
+                const auto settings = settings_for(options_);
+                // A disabled effect shows the game itself; re-enabling through
+                // a live config takes effect on the next frame.
+                if (settings.enabled != enabled_) {
+                    enabled_ = settings.enabled;
+                    update();
+                }
+                if (mapped_)
+                    render(settings);
                 continue;
             }
             wait();
@@ -178,6 +189,9 @@ private:
     BindTexImage bind_ = nullptr;
     ReleaseTexImage release_ = nullptr;
     std::unique_ptr<glyphshift::standalone::GlyphPasses> passes_;
+    std::unique_ptr<Tracker> tracker_;
+    Tracker::State state_{};
+    bool mapped_ = false, enabled_ = true, dirty_ = true;
     unsigned depth_ = 24, width_ = 0, height_ = 0, frames_ = 0;
     int damage_event_ = 0;
     bool alive_ = true, top_down_ = true, rgba_ = false;
@@ -242,7 +256,6 @@ private:
             PropModeReplace,
             reinterpret_cast<const unsigned char*>(&no_shadow),
             1);
-        XMapRaised(display_, window_);
     }
 
     GLXFBConfig window_config_ = nullptr;
@@ -308,31 +321,45 @@ private:
         }
     }
 
-    // Keep the overlay over the target and rebind its pixmap after a resize.
-    void follow(int width, int height) {
-        Window child = 0;
-        int x = 0, y = 0;
-        XTranslateCoordinates(display_,
-            options_.target,
-            DefaultRootWindow(display_),
-            0,
-            0,
-            &x,
-            &y,
-            &child);
-        XMoveResizeWindow(display_,
-            window_,
-            x,
-            y,
-            static_cast<unsigned>(width),
-            static_cast<unsigned>(height));
-        XRaiseWindow(display_, window_);
-        if (static_cast<unsigned>(width) == width_ && static_cast<unsigned>(height) == height_ &&
-            glx_pixmap_)
+    // Applies the target's current state: hide the overlay while the target
+    // is not viewable (hidden workspace, minimized, withdrawn) or the effect is
+    // disabled; otherwise follow its geometry, rebind its pixmap after a resize
+    // and stay directly above its frame in the stacking order.
+    void update() {
+        const auto next = tracker_->query();
+        if (!next.exists) {
+            alive_ = false;
             return;
-        width_ = static_cast<unsigned>(width);
-        height_ = static_cast<unsigned>(height);
+        }
+        const bool show = next.viewable && enabled_ && next.width && next.height;
+        if (!show) {
+            if (mapped_) {
+                XUnmapWindow(display_, window_);
+                mapped_ = false;
+            }
+            state_ = next;
+            return;
+        }
+        if (next.x != state_.x || next.y != state_.y || next.width != state_.width ||
+            next.height != state_.height || !mapped_)
+            XMoveResizeWindow(display_, window_, next.x, next.y, next.width, next.height);
+        if (next.width != width_ || next.height != height_ || !glx_pixmap_)
+            rebind(next.width, next.height);
+        state_ = next;
+        if (!mapped_) {
+            XMapWindow(display_, window_);
+            mapped_ = true;
+            dirty_ = true;
+        }
+        tracker_->stack_above(window_);
+    }
+
+    // A resized window gets a new backing pixmap; wrap it again.
+    void rebind(unsigned width, unsigned height) {
         release_pixmap();
+        width_ = width;
+        height_ = height;
+        dirty_ = true;
         pixmap_ = XCompositeNameWindowPixmap(display_, options_.target);
         const int attributes[] = {GLX_TEXTURE_TARGET_EXT,
             GLX_TEXTURE_2D_EXT,
@@ -340,21 +367,17 @@ private:
             rgba_ ? GLX_TEXTURE_FORMAT_RGBA_EXT : GLX_TEXTURE_FORMAT_RGB_EXT,
             None};
         glx_pixmap_ = glXCreatePixmap(display_, pixmap_config_, pixmap_, attributes);
-        require(glx_pixmap_, "cannot wrap the target pixmap for GLX");
+        XSync(display_, False);
+        if (!glx_pixmap_)
+            alive_ = false;
     }
 
-    void render() {
+    void render(const glyphshift::Settings& settings) {
         const auto start = std::chrono::steady_clock::now();
-        const auto settings = settings_for(options_);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glBindTexture(GL_TEXTURE_2D, source_);
         bind_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, nullptr);
-        if (settings.enabled)
-            passes_->draw(source_, width_, height_, top_down_, settings);
-        else {
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-        }
+        passes_->draw(source_, width_, height_, top_down_, settings);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_);
         release_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT);

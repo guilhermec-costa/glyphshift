@@ -57,6 +57,142 @@ def difference(a, b):
     return worst, close
 
 
+class WindowAttributes(c.Structure):
+    _fields_ = [('x', c.c_int), ('y', c.c_int), ('width', c.c_int), ('height', c.c_int),
+                ('border_width', c.c_int), ('depth', c.c_int), ('visual', c.c_void_p),
+                ('root', c.c_ulong), ('class_', c.c_int), ('bit_gravity', c.c_int),
+                ('win_gravity', c.c_int), ('backing_store', c.c_int),
+                ('backing_planes', c.c_ulong), ('backing_pixel', c.c_ulong),
+                ('save_under', c.c_int), ('colormap', c.c_ulong), ('map_installed', c.c_int),
+                ('map_state', c.c_int), ('all_event_masks', c.c_long),
+                ('your_event_mask', c.c_long), ('do_not_propagate_mask', c.c_long),
+                ('override_redirect', c.c_int), ('screen', c.c_void_p)]
+
+
+class SetAttributes(c.Structure):
+    _fields_ = [('background_pixmap', c.c_ulong), ('background_pixel', c.c_ulong),
+                ('border_pixmap', c.c_ulong), ('border_pixel', c.c_ulong),
+                ('bit_gravity', c.c_int), ('win_gravity', c.c_int), ('backing_store', c.c_int),
+                ('backing_planes', c.c_ulong), ('backing_pixel', c.c_ulong),
+                ('save_under', c.c_int), ('event_mask', c.c_long),
+                ('do_not_propagate_mask', c.c_long), ('override_redirect', c.c_int),
+                ('colormap', c.c_ulong), ('cursor', c.c_ulong)]
+
+
+def call(name, result, argtypes, *values):
+    function = getattr(x.lib, name)
+    function.restype = result
+    function.argtypes = argtypes
+    return function(*values)
+
+
+def plain_window(x0, y0, w, h, color):
+    """An unmanaged window: no window manager reacts to moves, maps or stacking."""
+    attributes = SetAttributes(background_pixel=color, override_redirect=1)
+    window = call('XCreateWindow', c.c_ulong,
+                  [c.c_void_p, c.c_ulong, c.c_int, c.c_int, c.c_uint, c.c_uint, c.c_uint, c.c_int,
+                   c.c_uint, c.c_void_p, c.c_ulong, c.POINTER(SetAttributes)],
+                  x.display, x.root, x0, y0, w, h, 0, 0, 1, None, (1 << 1) | (1 << 9),
+                  c.byref(attributes))
+    call('XStoreName', c.c_int, [c.c_void_p, c.c_ulong, c.c_char_p], x.display, window,
+         f'GlyphShift overlay target{suffix}'.encode())
+    call('XMapRaised', c.c_int, [c.c_void_p, c.c_ulong], x.display, window)
+    x.lib.XSync(x.display, False)
+    return window
+
+
+def attributes(window):
+    info = WindowAttributes()
+    ok = call('XGetWindowAttributes', c.c_int,
+              [c.c_void_p, c.c_ulong, c.POINTER(WindowAttributes)], x.display, window,
+              c.byref(info))
+    return info if ok else None
+
+
+def stacking():
+    root, parent = c.c_ulong(), c.c_ulong()
+    children, count = c.POINTER(c.c_ulong)(), c.c_uint()
+    x.lib.XQueryTree(x.display, x.root, c.byref(root), c.byref(parent), c.byref(children),
+                     c.byref(count))
+    order = [children[i] for i in range(count.value)]
+    if children:
+        x.lib.XFree(children)
+    return order
+
+
+def eventually(condition, message):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        x.lib.XSync(x.display, False)
+        if condition():
+            return
+        time.sleep(.05)
+    raise AssertionError(message)
+
+
+def tracking():
+    """Follow, stack directly above, hide and show with an unmanaged target."""
+    target = plain_window(60, 80, 320, 200, 0x3366cc)
+    occluder = None
+    log = output / 'tracking.log'
+    with log.open('w') as stream:
+        process = subprocess.Popen([str(build / 'glyphshift-overlay'), '--window', str(target),
+                                    '--preset', 'art-newsprint'], env=env, stdout=stream,
+                                   stderr=subprocess.STDOUT)
+    try:
+        layer = wait_window('GlyphShift overlay', process, log)
+
+        def follows(x0, y0, w, h):
+            info = attributes(layer)
+            return info and (info.x, info.y, info.width, info.height, info.map_state) == \
+                (x0, y0, w, h, 2)
+
+        def directly_above(window):
+            order = stacking()
+            return layer in order and window in order and \
+                order.index(layer) == order.index(window) + 1
+
+        eventually(lambda: follows(60, 80, 320, 200) and directly_above(target),
+                   'overlay did not cover the target')
+        call('XMoveResizeWindow', c.c_int,
+             [c.c_void_p, c.c_ulong, c.c_int, c.c_int, c.c_uint, c.c_uint],
+             x.display, target, 140, 120, 360, 240)
+        eventually(lambda: follows(140, 120, 360, 240), 'overlay did not follow move/resize')
+        # A window raised above the target must stay above the overlay too.
+        occluder = plain_window(100, 100, 200, 150, 0xcc3333)
+        call('XMoveWindow', c.c_int, [c.c_void_p, c.c_ulong, c.c_int, c.c_int],
+             x.display, target, 150, 130)
+        eventually(lambda: follows(150, 130, 360, 240) and directly_above(target),
+                   'overlay left its place directly above the target')
+        order = stacking()
+        assert order.index(occluder) > order.index(layer), 'overlay covered a window above'
+        # Raising the target brings the overlay with it.
+        call('XRaiseWindow', c.c_int, [c.c_void_p, c.c_ulong], x.display, target)
+        eventually(lambda: directly_above(target) and
+                   stacking().index(layer) > stacking().index(occluder),
+                   'overlay did not follow the raised target')
+        # Hidden like a switched workspace or minimized window, then shown.
+        call('XUnmapWindow', c.c_int, [c.c_void_p, c.c_ulong], x.display, target)
+        eventually(lambda: attributes(layer).map_state == 0, 'overlay stayed over a hidden target')
+        call('XMapWindow', c.c_int, [c.c_void_p, c.c_ulong], x.display, target)
+        eventually(lambda: follows(150, 130, 360, 240) and directly_above(target),
+                   'overlay did not return with the target')
+        call('XDestroyWindow', c.c_int, [c.c_void_p, c.c_ulong], x.display, target)
+        x.lib.XSync(x.display, False)
+        target = None
+        assert process.wait(timeout=10) == 0, log.read_text()
+        print('Overlay tracking: follows move/resize, stays directly above the target under '
+              'other windows, rises with it, hides and returns with it, exits on destroy')
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+        for window in [target, occluder]:
+            if window:
+                call('XDestroyWindow', c.c_int, [c.c_void_p, c.c_ulong], x.display, window)
+        x.lib.XSync(x.display, False)
+
+
 fixture_log = output / 'fixture.log'
 overlay_log = output / 'overlay.log'
 # The fixture is started directly: no launcher, no preload, no Vulkan layer.
@@ -125,6 +261,7 @@ try:
     assert overlay.wait(timeout=15) == 0, overlay_log.read_text()
     print('Capture overlay: independent fixture transformed on screen, output equals the '
           'preview, input shape empty, clean exit with the target')
+    tracking()
 finally:
     for process in [overlay, fixture]:
         if process and process.poll() is None:
