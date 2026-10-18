@@ -52,7 +52,17 @@ set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
 target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
 set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
 target_include_directories(glyphshift_editor PUBLIC include)
-target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype PkgConfig::FONTCONFIG)
+# Platform layer, Linux: desktop integration (autostart, notifications),
+# process facilities and font discovery (Fontconfig). Operating-system
+# interfaces only; the shared editor library links it as well.
+add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
+    src/platform/linux/process.cpp src/platform/linux/fonts.cpp)
+set_target_properties(glyphshift_platform PROPERTIES POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+target_include_directories(glyphshift_platform PUBLIC include)
+target_link_libraries(glyphshift_platform PRIVATE PkgConfig::FONTCONFIG)
+target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype
+    glyphshift_platform)
 # Window-system layer, X11: the editor's input surface (own XCB connection).
 # Linked into each module that presents the editor; the first module to give a
 # window its input source keeps it, so one window never gets two connections.
@@ -199,11 +209,6 @@ target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
 # M6 capture overlay: reads a chosen window through X Composite and draws the
 # glyph effect in its own input-transparent window; it never enters the game.
 pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes)
-# Platform layer, Linux: desktop integration (autostart, notifications) and
-# process facilities. Operating-system interfaces only.
-add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
-    src/platform/linux/process.cpp)
-target_include_directories(glyphshift_platform PUBLIC include)
 # Window-system layer, X11: system tray icon and menu (XEmbed, Xft text).
 pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft)
 add_library(glyphshift_x11_tray STATIC src/display/x11/tray.cpp)

@@ -1025,8 +1025,8 @@ removed incrementally, each step verified by the existing tests:
    lived in the editor library and the editor entry point took an `x11_input`
    flag. It is now the X11 `display::Input`, with the editor model receiving
    neutral events.
-2. `src/config/characters.cpp` calls Fontconfig directly; it becomes the Linux
-   `platform::Fonts`. FreeType rasterization stays in core.
+2. Done: `src/config/characters.cpp` called Fontconfig directly; it is now the
+   Linux `platform::Fonts`. FreeType rasterization stays in core.
 3. `src/config/presets.cpp` resolves `XDG_CONFIG_HOME`/`HOME`; it becomes the
    Linux `platform::Paths`.
 4. The OpenGL renderer library resolves GLX entry points (`gl_api.cpp`) and the
@@ -1079,6 +1079,21 @@ changes and forgotten); Release 17/17. The exported symbols of the GL and
 Vulkan modules are unchanged; the editor library's `Frame` constructor changed
 as intended. The focused XTest editor test (`editor_apps.py`, Release) passed
 on `glx-fixture`, `vulkan-fixture` and `overlay-fixture`.
+
+**Step 2, fonts (2026-10-18).** `platform::bold_monospace_font(families)`
+(`include/glyphshift/platform/fonts.hpp`, Linux implementation
+`src/platform/linux/fonts.cpp`) returns the first installed family's bold font
+file, else the system monospace default. The preferred family list stays in
+`characters.cpp`, which no longer includes Fontconfig. The platform library is
+now position-independent and linked into the editor library, which is where the
+configuration code lives; the core uses only the header's neutral interface,
+the same pattern step 3 uses for `config_home()`.
+
+Verification: Debug 15/15 (the platform test checks that a missing family is
+not replaced by a substitute and that the default is an existing file);
+Release 17/17. `glyphshift-preview` of Comic, Newsprint, `illustrated.conf`
+and `characters-ascii.conf` (all with discovered fonts; Hack Bold here) was
+byte-identical between the previous Release build and the new Debug build.
 
 Code added since this list was written already follows the rules: the X11
 window-system layer exists as `src/display/x11/` (the tray, static library

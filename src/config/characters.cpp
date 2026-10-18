@@ -1,4 +1,3 @@
-#include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ADVANCES_H
@@ -10,6 +9,7 @@
 #include <cstring>
 #include <glyphshift/config/characters.hpp>
 #include <glyphshift/core/glyph.hpp>
+#include <glyphshift/platform/fonts.hpp>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -168,45 +168,17 @@ bool procedural(CharacterAtlas& atlas, unsigned glyph, std::uint32_t code) {
 }
 
 std::string default_font() {
-    std::unique_ptr<FcConfig, decltype(&FcConfigDestroy)> config(FcInitLoadConfigAndFonts(),
-        FcConfigDestroy);
-    if (!config)
-        throw std::runtime_error("cannot initialize font discovery");
     // The generic monospace alias often resolves to thin Courier clones whose
     // hairlines vanish at cell scale. Prefer sturdy, distinct-punctuation
     // families in bold, then fall back to whatever monospace is installed.
-    constexpr const char* families[] = {"DejaVu Sans Mono",
+    constexpr std::string_view families[] = {"DejaVu Sans Mono",
         "Hack",
         "Liberation Mono",
         "Noto Sans Mono",
         "Cascadia Mono",
         "JetBrains Mono",
-        "Source Code Pro",
-        "monospace"};
-    for (const char* family : families) {
-        std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> pattern(FcPatternCreate(),
-            FcPatternDestroy);
-        if (!pattern)
-            throw std::runtime_error("cannot allocate font query");
-        FcPatternAddString(pattern.get(), FC_FAMILY, reinterpret_cast<const FcChar8*>(family));
-        FcPatternAddInteger(pattern.get(), FC_WEIGHT, FC_WEIGHT_BOLD);
-        FcConfigSubstitute(config.get(), pattern.get(), FcMatchPattern);
-        FcDefaultSubstitute(pattern.get());
-        FcResult result;
-        std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> match(
-            FcFontMatch(config.get(), pattern.get(), &result),
-            FcPatternDestroy);
-        FcChar8* path = nullptr;
-        FcChar8* found = nullptr;
-        if (!match || FcPatternGetString(match.get(), FC_FILE, 0, &path) != FcResultMatch)
-            continue;
-        const bool generic = std::strcmp(family, "monospace") == 0;
-        if (generic ||
-            (FcPatternGetString(match.get(), FC_FAMILY, 0, &found) == FcResultMatch &&
-                FcStrCmpIgnoreCase(found, reinterpret_cast<const FcChar8*>(family)) == 0))
-            return reinterpret_cast<const char*>(path);
-    }
-    throw std::runtime_error("no monospace font found");
+        "Source Code Pro"};
+    return platform::bold_monospace_font(families);
 }
 
 struct Font {

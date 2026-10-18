@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <glyphshift/platform/desktop.hpp>
+#include <glyphshift/platform/fonts.hpp>
 #include <glyphshift/platform/process.hpp>
 #include <iostream>
 #include <sstream>
@@ -88,6 +89,12 @@ int main() {
         check(executable_path().is_absolute() &&
                   executable_path().filename() == "glyphshift-platform-tests",
             "own executable path");
+        // A missing family is not replaced by a substitute: the system default
+        // monospace font answers, as with no preferred family at all.
+        constexpr std::string_view missing[] = {"GlyphShift No Such Family"};
+        const auto fallback = bold_monospace_font({});
+        check(std::filesystem::is_regular_file(fallback), "default monospace font file");
+        check(bold_monospace_font(missing) == fallback, "missing family falls back to monospace");
         // Without notify-send on PATH, notify must still return promptly.
         setenv("PATH", (path / "empty").c_str(), 1);
         notify("GlyphShift test", "not shown");
