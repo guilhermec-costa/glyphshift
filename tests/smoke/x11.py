@@ -88,6 +88,25 @@ class X11:
                 at=row*w*3;rgb[at:at+w*3:3]=pixels[2::4];rgb[at+1:at+w*3:3]=pixels[1::4];rgb[at+2:at+w*3:3]=pixels[0::4]
             return (w,h,bytes(rgb))
         finally:self.lib.XDestroyImage(image)
+    def screen(self,window):
+        # The composited screen over a window's area: overlays included.
+        self.visible(window);time.sleep(.12)
+        w,h=self.geometry(window)
+        fn=self.lib.XTranslateCoordinates
+        fn.argtypes=[c.c_void_p,c.c_ulong,c.c_ulong,c.c_int,c.c_int,c.POINTER(c.c_int),c.POINTER(c.c_int),c.POINTER(c.c_ulong)]
+        x,y,child=c.c_int(),c.c_int(),c.c_ulong()
+        fn(self.display,window,self.root,0,0,c.byref(x),c.byref(y),c.byref(child))
+        image=self.lib.XGetImage(self.display,self.root,x.value,y.value,w,h,c.c_ulong(-1).value,2)
+        if not image:raise RuntimeError('XGetImage failed on the screen')
+        try:
+            info=image.contents
+            raw=c.string_at(info.data,info.bytes_per_line*h)
+            rgb=bytearray(w*h*3)
+            for row in range(h):
+                pixels=raw[row*info.bytes_per_line:row*info.bytes_per_line+w*4]
+                at=row*w*3;rgb[at:at+w*3:3]=pixels[2::4];rgb[at+1:at+w*3:3]=pixels[1::4];rgb[at+2:at+w*3:3]=pixels[0::4]
+            return (w,h,bytes(rgb))
+        finally:self.lib.XDestroyImage(image)
     def send(self,window,kind,code=0,x=0,y=0,state=0):
         event=Event();key=event.key;key.type=kind;key.display=self.display;key.window=window;key.root=self.root
         key.time=self.last_time;self.last_time+=1;key.x=x;key.y=y;key.x_root=x+40;key.y_root=y+40;key.state=state;key.same_screen=1

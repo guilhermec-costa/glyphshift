@@ -134,8 +134,9 @@ sleep 3; ./build/dev/glyphshift-overlay --window "$(xdotool getactivewindow)" --
 
 Run that from a terminal and click the game window within three seconds; the
 window that is active when the delay ends is used. You can also pass an ID from
-`xdotool search --name "Game title"`. Close the game or press
-Ctrl+C to stop. A global attach hotkey and the in-game editor for this mode are
+`xdotool search --name "Game title"`. With the game focused, **Insert** opens the
+same editor as in launcher mode and **F10** toggles the effect; saved presets are
+kept per game. Close the game or press Ctrl+C to stop. A global attach hotkey is
 in progress; the launcher below remains the lowest-latency option.
 
 ## Choose a starting style

@@ -15,7 +15,7 @@ from x11 import X11
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', type=Path, default=Path('build/dev'))
-    parser.add_argument('--application', choices=['glx-fixture', 'vulkan-fixture', 'glxgears', 'vkcube', 'supertux'], required=True)
+    parser.add_argument('--application', choices=['glx-fixture', 'vulkan-fixture', 'glxgears', 'vkcube', 'supertux', 'overlay-fixture'], required=True)
     parser.add_argument('--apps', type=Path, default=Path('/tmp/glyphshift-m5-apps'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--illustrated', action='store_true', help='Enable the new rendering mode through the actual panel')
@@ -34,7 +34,13 @@ def main():
                GLYPHSHIFT_FIXTURE_STATE_CHECK='1', GLYPHSHIFT_FIXTURE_GL_DEBUG='1')
     env.pop('GLYPHSHIFT_FIXTURE_NO_FOCUS', None)
     app = args.application
-    if app.endswith('fixture'):
+    # overlay-fixture: the GLX fixture is started directly (no launcher) and
+    # the capture overlay is attached to it; the editor runs in the overlay.
+    overlay_mode = app == 'overlay-fixture'
+    if overlay_mode:
+        target = [str(args.build / 'glyphshift-glx-fixture'), '--fixed-time', '1.25']
+        title = 'GlyphShift GLX fixture'
+    elif app.endswith('fixture'):
         target = [str(args.build / ('glyphshift-' + app)), '--fixed-time', '1.25']
         title = 'GlyphShift ' + ('GLX' if app == 'glx-fixture' else 'Vulkan') + ' fixture'
         if app == 'vulkan-fixture':
@@ -59,7 +65,9 @@ def main():
         if args.level:
             target.append('glyphshift-m5-test.stl')
         title = 'SuperTux v0.7.0'
-    command = [str(args.build / 'glyphshift'), '--profile', 'editor-' + app, '--', *target]
+    command = target if overlay_mode else [str(args.build / 'glyphshift'), '--profile', 'editor-' + app, '--', *target]
+    overlay = None
+    overlay_log = out / 'overlay.log'
     x = X11()
     previous_focus = RealInput.read_focus(x)
     control = None
@@ -68,15 +76,29 @@ def main():
         process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             window = None
+            editor_log = path
+            if overlay_mode:
+                for _ in range(200):
+                    found = x.windows(title)
+                    if found:
+                        break
+                    assert process.poll() is None, path.read_text()
+                    time.sleep(.05)
+                assert found, 'fixture window not found'
+                overlay_env = dict(env, GLYPHSHIFT_PROFILE='editor-' + app)
+                with overlay_log.open('w') as stream:
+                    overlay = subprocess.Popen([str(args.build / 'glyphshift-overlay'), '--window', str(found[0])],
+                                               env=overlay_env, stdout=stream, stderr=subprocess.STDOUT)
+                editor_log = overlay_log
             for _ in range(400):
-                text = path.read_text()
+                text = editor_log.read_text()
                 found = re.search(r'editor X11 input surface=0x[0-9a-f]+ client=0x([0-9a-f]+)', text)
                 if found:
                     window = int(found.group(1), 16)
                     break
                 assert process.poll() is None, text
                 time.sleep(.1)
-            assert window, path.read_text()
+            assert window, editor_log.read_text()
             if title:
                 assert window in x.windows(title), (title, window, x.windows(title))
             if shutil.which('i3-msg'):
@@ -85,13 +107,29 @@ def main():
             control = RealInput(x, window, previous_focus)
             time.sleep(2)
 
+            def view():
+                # What the user sees: the composited screen over the window in
+                # overlay mode, the window's own pixels when rendered in-process.
+                if not overlay_mode:
+                    return x.image(window)
+                time.sleep(.15)
+                return x.screen(window)
+
             def capture(label, editor):
                 time.sleep(.3)
                 assert process.poll() is None, path.read_text()
-                w, h, rgb = x.image(window)
+                if overlay:
+                    assert overlay.poll() is None, overlay_log.read_text()
+                w, h, rgb = view()
                 (out / (label + '.ppm')).write_bytes(f'P6\n{w} {h}\n255\n'.encode() + rgb)
                 colors = len(set(zip(rgb[0::3], rgb[1::3], rgb[2::3])))
-                chromatic = any(r != g or g != b for r, g, b in zip(rgb[0::3], rgb[1::3], rgb[2::3]))
+                if overlay_mode:
+                    # Screen captures include the cursor and window edges; the
+                    # open panel alone has thousands of colored pixels.
+                    tinted = sum(r != g or g != b for r, g, b in zip(rgb[0::3], rgb[1::3], rgb[2::3]))
+                    chromatic = tinted > len(rgb) // 3 // 1000
+                else:
+                    chromatic = any(r != g or g != b for r, g, b in zip(rgb[0::3], rgb[1::3], rgb[2::3]))
                 assert chromatic == editor, (label, colors, chromatic)
                 print(f'{app}: {label} {w}x{h} colors={colors}', flush=True)
 
@@ -189,7 +227,7 @@ def main():
             capture('escape-closed', False)
             control.key(0xffc7)
             time.sleep(.3)
-            _, _, original = x.image(window)
+            _, _, original = view()
             assert len(set(zip(original[0::3], original[1::3], original[2::3]))) > 2, 'F10 failed'
             control.key(0xffc7)
             capture('f10-restored', False)
@@ -249,13 +287,18 @@ def main():
             else:
                 x.close(window)
             assert process.wait(timeout=20) == 0, path.read_text()
-            text = path.read_text()
+            if overlay:
+                assert overlay.wait(timeout=20) == 0, overlay_log.read_text()
+            text = path.read_text() + (overlay_log.read_text() if overlay else '')
             for error in ['VUID-', 'Validation Error', 'Vulkan validation:', 'editor input:', 'OpenGL error', 'state mismatch']:
                 assert error not in text, (error, text)
             print(f'{app}: editor mouse/keyboard/save/hotkeys/resize/focus/clean exit passed', flush=True)
         finally:
             if control:
                 control.close()
+            if overlay and overlay.poll() is None:
+                overlay.terminate()
+                overlay.wait(timeout=10)
             if process.poll() is None:
                 if app == 'supertux':
                     subprocess.run([str(args.apps / 'GE-Proton11-9-x86_64/files/bin/wineserver'), '-k'], env=dict(env, WINEPREFIX=env['STEAM_COMPAT_DATA_PATH'] + '/pfx'), check=True)

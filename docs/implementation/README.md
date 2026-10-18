@@ -2804,6 +2804,48 @@ the restack with the prototype's raise made it fail ("overlay left its place
 directly above the target"). Workspace switching, fullscreen toggling and
 window-manager frame moves were not exercised live under i3 for this step.
 
+#### M6 step 3: editor and per-game presets
+
+The overlay now runs the shared editor exactly as the injected mode does. Each
+loop iteration with a new game frame, an open editor, or every 50 ms while idle
+creates an `editor::Frame` for (overlay display, target window). Its X11 input
+adapter connects on its own, finds the target's managed client, grabs
+Insert/F10 there and, while the editor is open, places its input-only child
+inside the target; the overlay's empty input shape lets clicks reach it at the
+same coordinates as the panel the overlay draws. The idle polling interval keeps
+the hotkeys working while the game is paused and produces no frames; with the
+editor open the overlay renders continuously, paced by vsync.
+
+- Settings come from the editor session (saved presets, `GLYPHSHIFT_CONFIG`,
+  F10). `--preset NAME` only sets `GLYPHSHIFT_PRESET` for the first frame.
+- Presets are kept per game: profile `overlay-CLASS` from the target's
+  `WM_CLASS` (lowercased; characters outside the profile alphabet become `-`),
+  unless `GLYPHSHIFT_PROFILE` is set.
+- Visibility: shown while the target is viewable and the effect is enabled or
+  the editor is open. F10 with the editor open shows the original image (a
+  strength-0, source-color, classic pass) under the panel; with the editor
+  closed the overlay unmaps and the game shows through.
+- The overlay resets blending and scissoring before each frame because it owns
+  its context; the injected renderer keeps relying on GlState.
+
+The focused driver `tests/smoke/editor_apps.py` gained `--application
+overlay-fixture`: it starts the GLX fixture directly, attaches the overlay and
+runs the full editor script through real XTest input. In this mode it judges
+the composited screen (`X11.screen`) instead of the window's own pixels, and
+counts the image as "editor open" when more than 0.1% of pixels are colored:
+the first run failed on 62 colored edge/cursor pixels out of 480,000 under the
+monochrome effect. Passed on 2026-10-18 (NVIDIA, i3 with picom): Insert opened
+the editor over the overlay, a typed cell width and the binary character set
+were applied and saved to `profiles/editor-overlay-fixture/app-editor.conf`,
+Escape, F10, three resizes with the editor open, focus loss/return and the
+title-bar close worked, no UI key or click reached the fixture, and both
+processes exited with status 0.
+
+```bash
+python3 tests/smoke/editor_apps.py --build build/dev --application overlay-fixture \
+  --output /tmp/glyphshift-overlay-editor
+```
+
 #### M6 technical debt (tracked)
 
 1. Resolved in step 3: one GL pipeline (`src/render/opengl/pipeline.{hpp,cpp}`,
@@ -2816,10 +2858,10 @@ window-manager frame moves were not exercised live under i3 for this step.
    injected library's exports were unchanged, and CTest plus both API smokes
    (state probes, shader-failure pass-through, overlay) passed.
 2. Resolved in step 2: window tracking left the single overlay source file.
-3. With `--preset`, the overlay reparses the included style on every frame. It
-   is cheap but per-frame work; to be removed with the step 3 editor.
-4. The shared editor registers per presentation drawable/window of the host
-   process; reusing it in the overlay needs an adaptation in step 3.
+3. Resolved in step 3: settings come from the editor session; `--preset` only
+   seeds the first frame.
+4. Resolved in step 3 without changing the editor: its X11 adapter already
+   opens its own connection, so the overlay registers the target window.
 
 ### Later — Broader Linux support
 

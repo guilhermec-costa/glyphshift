@@ -7,7 +7,9 @@
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/shape.h>
+#include <sys/select.h>
 
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -15,6 +17,7 @@
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/config/settings.hpp>
+#include <glyphshift/editor/editor.hpp>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -24,10 +27,11 @@
 #include "../../src/render/opengl/pipeline.hpp"
 #include "tracker.hpp"
 
-// Standalone capture overlay (M6, step 1). Never touches the target process:
-// it reads the target window's pixels through the X Composite extension, runs
-// the glyph passes, and presents into its own input-transparent window kept
-// above the target.
+// Standalone capture overlay (M6). Never touches the target process: it reads
+// the target window's pixels through the X Composite extension, runs the glyph
+// pipeline, and presents into its own input-transparent window kept directly
+// above the target. The shared editor (Insert/F10) works as in the injected
+// mode, with presets kept per game in a profile derived from WM_CLASS.
 namespace {
 using glyphshift::overlay::Tracker;
 volatile std::sig_atomic_t stop = 0;
@@ -71,13 +75,31 @@ Options parse(int argc, char** argv) {
     return options;
 }
 
-glyphshift::Settings settings_for(const Options& options) {
-    if (options.preset.empty())
-        return glyphshift::runtime_settings();
-    const auto* included = glyphshift::builtin_preset(options.preset);
-    if (!included)
-        throw std::invalid_argument("unknown included style: " + options.preset);
-    return glyphshift::parse_settings(included->config).value;
+// Presets are kept per game: profile "overlay-CLASS" from the target's
+// WM_CLASS, unless the user chose GLYPHSHIFT_PROFILE. Profile names allow
+// 1-64 ASCII letters, digits, dots, underscores and hyphens.
+void choose_profile(Display* display, Window target) {
+    if (const char* chosen = std::getenv("GLYPHSHIFT_PROFILE"); chosen && *chosen)
+        return;
+    XClassHint hint{};
+    std::string profile = "overlay";
+    if (XGetClassHint(display, target, &hint)) {
+        const char* name = hint.res_class ? hint.res_class : hint.res_name;
+        std::string suffix;
+        for (const char* c = name; c && *c && suffix.size() < 55; ++c) {
+            const auto ch = static_cast<unsigned char>(*c);
+            suffix += std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-'
+                          ? static_cast<char>(std::tolower(ch))
+                          : '-';
+        }
+        if (!suffix.empty())
+            profile += "-" + suffix;
+        if (hint.res_name)
+            XFree(hint.res_name);
+        if (hint.res_class)
+            XFree(hint.res_class);
+    }
+    setenv("GLYPHSHIFT_PROFILE", profile.c_str(), 1);
 }
 
 class Overlay {
@@ -104,6 +126,13 @@ public:
         XWindowAttributes target{};
         require(XGetWindowAttributes(display_, options.target, &target), "target window not found");
         depth_ = static_cast<unsigned>(target.depth);
+        choose_profile(display_, options.target);
+        if (!options.preset.empty()) {
+            if (!glyphshift::builtin_preset(options.preset))
+                throw std::invalid_argument("unknown included style: " + options.preset);
+            // The starting style; the editor and saved presets take over from here.
+            setenv("GLYPHSHIFT_PRESET", options.preset.c_str(), 1);
+        }
         XSetErrorHandler(x_error);
         tracker_ = std::make_unique<Tracker>(display_, options.target);
         // Automatic redirection keeps the window on screen while giving it an
@@ -118,11 +147,15 @@ public:
         glBindTexture(GL_TEXTURE_2D, source_);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        const auto* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        version_ = version ? version : "";
         update();
         XSync(display_, False);
     }
 
     ~Overlay() {
+        if (display_)
+            glyphshift::editor::forget(display_, options_.target);
         if (display_ && context_)
             glXMakeCurrent(display_, window_, context_);
         release_pixmap();
@@ -141,6 +174,7 @@ public:
     }
 
     void run() {
+        bool poll = true;
         while (!stop && alive_) {
             bool changed = false;
             while (XPending(display_)) {
@@ -159,20 +193,15 @@ public:
                 break;
             if (changed)
                 update();
-            if (dirty_ && alive_) {
-                dirty_ = false;
-                const auto settings = settings_for(options_);
-                // A disabled effect shows the game itself; re-enabling through
-                // a live config takes effect on the next frame.
-                if (settings.enabled != enabled_) {
-                    enabled_ = settings.enabled;
-                    update();
-                }
-                if (mapped_)
-                    render(settings);
+            // A new game frame, an open editor (continuous, vsync-paced UI) or
+            // the idle polling interval runs one editor frame: it reads the
+            // Insert/F10 hotkeys and UI input even while the game is paused.
+            if (dirty_ || editor_open_ || poll) {
+                present();
+                poll = false;
                 continue;
             }
-            wait();
+            poll = !wait(50);
         }
     }
 
@@ -192,7 +221,8 @@ private:
     glyphshift::opengl::Target cells_;
     std::unique_ptr<Tracker> tracker_;
     Tracker::State state_{};
-    bool mapped_ = false, enabled_ = true, dirty_ = true;
+    bool mapped_ = false, enabled_ = true, dirty_ = true, editor_open_ = false;
+    std::string version_;
     unsigned depth_ = 24, width_ = 0, height_ = 0, frames_ = 0;
     int damage_event_ = 0;
     bool alive_ = true, top_down_ = true, rgba_ = false;
@@ -332,7 +362,9 @@ private:
             alive_ = false;
             return;
         }
-        const bool show = next.viewable && enabled_ && next.width && next.height;
+        // Shown while the effect is on, or while the editor is open over the
+        // original image after F10.
+        const bool show = next.viewable && (enabled_ || editor_open_) && next.width && next.height;
         if (!show) {
             if (mapped_) {
                 XUnmapWindow(display_, window_);
@@ -373,12 +405,52 @@ private:
             alive_ = false;
     }
 
-    void render(const glyphshift::Settings& settings) {
+    // One editor frame: settings, hotkeys and UI for this target. Changes to
+    // the effect or editor state update visibility before rendering.
+    void present() {
         const auto start = std::chrono::steady_clock::now();
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glyphshift::editor::Frame frame(display_,
+            options_.target,
+            state_.width,
+            state_.height,
+            "Overlay (OpenGL)",
+            version_.c_str(),
+            true);
+        const bool open = frame.draw_data != nullptr;
+        if (frame.settings.enabled != enabled_ || open != editor_open_) {
+            enabled_ = frame.settings.enabled;
+            editor_open_ = open;
+            update();
+        }
+        if (mapped_ && (dirty_ || open))
+            render(frame.settings, frame.draw_data);
+        dirty_ = false;
+        frame.complete(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                .count());
+    }
+
+    void render(const glyphshift::Settings& settings, const ImDrawData* ui) {
+        const auto start = std::chrono::steady_clock::now();
+        // The editor pass leaves blending and scissoring on; this process owns
+        // the context, so reset them instead of saving host state.
+        glDisable(GL_BLEND);
+        glDisable(GL_SCISSOR_TEST);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_);
         bind_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, nullptr);
-        pipeline_->draw(cells_, source_, width_, height_, top_down_, settings, 0);
+        if (settings.enabled)
+            pipeline_->draw(cells_, source_, width_, height_, top_down_, settings, 0);
+        else {
+            // F10 with the editor open: show the original image under the panel.
+            auto original = settings;
+            original.art.illustrated = false;
+            original.source_color = true;
+            original.glyph_strength = 0;
+            pipeline_->draw(cells_, source_, width_, height_, top_down_, original, 0);
+        }
+        if (ui)
+            pipeline_->draw_editor(*ui, width_, height_, 0);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_);
         release_(display_, glx_pixmap_, GLX_FRONT_LEFT_EXT);
@@ -398,10 +470,16 @@ private:
         }
     }
 
-    // Sleep until an X event arrives (damage, configure, destroy).
-    void wait() {
-        XEvent event;
-        XPeekEvent(display_, &event);
+    // Waits up to `milliseconds` for an X event; false on timeout.
+    bool wait(int milliseconds) {
+        if (XPending(display_))
+            return true;
+        const int fd = ConnectionNumber(display_);
+        fd_set read{};
+        FD_ZERO(&read);
+        FD_SET(fd, &read);
+        timeval timeout{0, milliseconds * 1000};
+        return select(fd + 1, &read, nullptr, nullptr, &timeout) > 0;
     }
 };
 }  // namespace
