@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -70,7 +71,9 @@ struct Frame {
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkSemaphore completed = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
-    VkDescriptorSet descriptors = VK_NULL_HANDLE;
+    // Binding 4 of set i reads cell grid i: composition reads the grid just
+    // written, analysis reads the other one (the previous frame's).
+    std::array<VkDescriptorSet, 2> descriptors{};
 };
 
 struct Parameters {
@@ -137,6 +140,10 @@ public:
         return selection_ == value;
     }
 
+    void forget_history() {
+        history_ = false;
+    }
+
     ~GlyphRenderer() {
         const auto device = device_.handle;
         // This wait is teardown/resize only. Ordinary frames wait only their own
@@ -170,8 +177,9 @@ public:
             api_.DestroyPipeline(device, pipeline_, nullptr);
         if (analysis_pipeline_)
             api_.DestroyPipeline(device, analysis_pipeline_, nullptr);
-        if (cell_framebuffer_)
-            api_.DestroyFramebuffer(device, cell_framebuffer_, nullptr);
+        for (const auto framebuffer : cell_framebuffers_)
+            if (framebuffer)
+                api_.DestroyFramebuffer(device, framebuffer, nullptr);
         if (analysis_pass_)
             api_.DestroyRenderPass(device, analysis_pass_, nullptr);
         if (render_pass_)
@@ -186,7 +194,8 @@ public:
         if (sampler_)
             api_.DestroySampler(device, sampler_, nullptr);
         destroy(font_);
-        destroy(cells_);
+        destroy(cells_[0]);
+        destroy(cells_[1]);
         destroy(atlas_);
         destroy(ramp_);
         if (staging_)
@@ -250,24 +259,29 @@ public:
         // Sized for the smallest 2x2 cell, so live cell-size edits never
         // reallocate; each frame renders only the current grid.
         cell_extent_ = {(extent_.width + 1) / 2, (extent_.height + 1) / 2};
-        texture(cells_,
-            cell_format,
-            cell_extent_,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        for (auto& cells : cells_)
+            texture(cells,
+                cell_format,
+                cell_extent_,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         staging();
         descriptors();
         pipeline();
-        auto cell_framebuffer =
-            info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
-        cell_framebuffer.renderPass = analysis_pass_;
-        cell_framebuffer.attachmentCount = 1;
-        cell_framebuffer.pAttachments = &cells_.view;
-        cell_framebuffer.width = cell_extent_.width;
-        cell_framebuffer.height = cell_extent_.height;
-        cell_framebuffer.layers = 1;
-        check(
-            api_.CreateFramebuffer(device_.handle, &cell_framebuffer, nullptr, &cell_framebuffer_),
-            "create glyph cell framebuffer");
+        for (unsigned i = 0; i < 2; ++i) {
+            auto cell_framebuffer =
+                info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+            cell_framebuffer.renderPass = analysis_pass_;
+            cell_framebuffer.attachmentCount = 1;
+            cell_framebuffer.pAttachments = &cells_[i].view;
+            cell_framebuffer.width = cell_extent_.width;
+            cell_framebuffer.height = cell_extent_.height;
+            cell_framebuffer.layers = 1;
+            check(api_.CreateFramebuffer(device_.handle,
+                      &cell_framebuffer,
+                      nullptr,
+                      &cell_framebuffers_[i]),
+                "create glyph cell framebuffer");
+        }
         auto semaphore = info<VkSemaphoreCreateInfo>(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
         auto fence = info<VkFenceCreateInfo>(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
         fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -300,34 +314,38 @@ public:
             ensure_ui_buffer(frame, 256 * 1024);
             check(device_.set_loader_data(device_.handle, frame.command),
                 "initialize layer command-buffer dispatch");
-            auto descriptor =
-                info<VkDescriptorSetAllocateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
-            descriptor.descriptorPool = descriptor_pool_;
-            descriptor.descriptorSetCount = 1;
-            descriptor.pSetLayouts = &descriptor_layout_;
-            check(api_.AllocateDescriptorSets(device_.handle, &descriptor, &frame.descriptors),
-                "allocate glyph descriptors");
-            const std::array<VkDescriptorImageInfo, 5> bindings{
-                {{sampler_, frame.capture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                    {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                    {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                    {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                    {sampler_, cells_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
-            std::array<VkWriteDescriptorSet, 5> writes{};
-            for (uint32_t binding = 0; binding < writes.size(); ++binding) {
-                writes[binding] =
-                    info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-                writes[binding].dstSet = frame.descriptors;
-                writes[binding].dstBinding = binding;
-                writes[binding].descriptorCount = 1;
-                writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                writes[binding].pImageInfo = &bindings[binding];
+            for (unsigned set = 0; set < 2; ++set) {
+                auto descriptor = info<VkDescriptorSetAllocateInfo>(
+                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+                descriptor.descriptorPool = descriptor_pool_;
+                descriptor.descriptorSetCount = 1;
+                descriptor.pSetLayouts = &descriptor_layout_;
+                check(api_.AllocateDescriptorSets(device_.handle,
+                          &descriptor,
+                          &frame.descriptors[set]),
+                    "allocate glyph descriptors");
+                const std::array<VkDescriptorImageInfo, 5> bindings{
+                    {{sampler_, frame.capture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                        {sampler_, atlas_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                        {sampler_, ramp_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                        {sampler_, font_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                        {sampler_, cells_[set].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+                std::array<VkWriteDescriptorSet, 5> writes{};
+                for (uint32_t binding = 0; binding < writes.size(); ++binding) {
+                    writes[binding] =
+                        info<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+                    writes[binding].dstSet = frame.descriptors[set];
+                    writes[binding].dstBinding = binding;
+                    writes[binding].descriptorCount = 1;
+                    writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    writes[binding].pImageInfo = &bindings[binding];
+                }
+                api_.UpdateDescriptorSets(device_.handle,
+                    static_cast<uint32_t>(writes.size()),
+                    writes.data(),
+                    0,
+                    nullptr);
             }
-            api_.UpdateDescriptorSets(device_.handle,
-                static_cast<uint32_t>(writes.size()),
-                writes.data(),
-                0,
-                nullptr);
         }
         diagnostic("glyphshift: Vulkan glyph renderer initialized\n");
     }
@@ -353,6 +371,17 @@ public:
             upload(frame.command, atlas_, 0, {integral_width, integral_height});
             upload(frame.command, ramp_, integral_bytes, {256, ramp_height});
             upload(frame.command, font_, font_offset_, font_extent_);
+            // Analysis statically reads the previous grid even when history is
+            // unused, so both grids start in the layout its descriptor declares.
+            for (const auto& cells : cells_)
+                barrier(frame.command,
+                    cells.image,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    0,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         }
         barrier(frame.command,
             frame.image,
@@ -389,7 +418,19 @@ public:
             VK_ACCESS_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-        const Parameters parameters{static_cast<float>(extent_.width),
+        const VkExtent2D grid{std::min(cell_extent_.width,
+                                  (extent_.width + settings.cell_width - 1) / settings.cell_width),
+            std::min(cell_extent_.height,
+                (extent_.height + settings.cell_height - 1) / settings.cell_height)};
+        // History is the other grid, valid only after an illustrated frame
+        // with identical settings (grid, glyph atlas and every art control).
+        const bool history = history_ && settings.enabled && settings.art.illustrated &&
+                             history_settings_ == settings;
+        if (settings.enabled)
+            current_ ^= 1U;
+        history_ = settings.enabled && settings.art.illustrated;
+        history_settings_ = settings;
+        Parameters parameters{static_cast<float>(extent_.width),
             static_cast<float>(extent_.height),
             static_cast<float>(settings.cell_width),
             static_cast<float>(settings.cell_height),
@@ -398,31 +439,28 @@ public:
             (format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_R8G8B8A8_SRGB) ? 1U : 0U,
             settings.glyph_strength,
             art_parameters(settings)};
+        if (!history)
+            parameters.art[art_stability] = 0;
         api_.CmdPushConstants(frame.command,
             layout_,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
             sizeof(parameters),
             &parameters);
-        api_.CmdBindDescriptorSets(frame.command,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            layout_,
-            0,
-            1,
-            &frame.descriptors,
-            0,
-            nullptr);
         if (settings.enabled) {
             // The composition pass declares the cell image, so it is always
             // written (zeros in classic mode) and left shader-readable.
-            const VkExtent2D grid{
-                std::min(cell_extent_.width,
-                    (extent_.width + settings.cell_width - 1) / settings.cell_width),
-                std::min(cell_extent_.height,
-                    (extent_.height + settings.cell_height - 1) / settings.cell_height)};
+            api_.CmdBindDescriptorSets(frame.command,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                layout_,
+                0,
+                1,
+                &frame.descriptors[current_ ^ 1U],
+                0,
+                nullptr);
             auto analysis = info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
             analysis.renderPass = analysis_pass_;
-            analysis.framebuffer = cell_framebuffer_;
+            analysis.framebuffer = cell_framebuffers_[current_];
             analysis.renderArea.extent = grid;
             api_.CmdBeginRenderPass(frame.command, &analysis, VK_SUBPASS_CONTENTS_INLINE);
             api_.CmdBindPipeline(frame.command,
@@ -440,6 +478,14 @@ public:
             api_.CmdDraw(frame.command, 3, 1, 0, 0);
             api_.CmdEndRenderPass(frame.command);
         }
+        api_.CmdBindDescriptorSets(frame.command,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            layout_,
+            0,
+            1,
+            &frame.descriptors[current_],
+            0,
+            nullptr);
         barrier(frame.command,
             frame.image,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -500,8 +546,14 @@ private:
     VkPhysicalDeviceMemoryProperties memory_{};
     std::mutex mutex_;
     bool uploaded_ = false, submitted_ = false;
+    // Cell grid written by the latest enabled frame, and whether it is usable
+    // history for the next one (cleared when frames pass through unprocessed).
+    unsigned current_ = 0;
+    std::atomic<bool> history_{false};
+    Settings history_settings_{};
     std::vector<Frame> frames_;
-    Texture atlas_, ramp_, font_, cells_;
+    Texture atlas_, ramp_, font_;
+    std::array<Texture, 2> cells_;
     VkExtent2D font_extent_{}, cell_extent_{};
     static constexpr VkFormat cell_format = VK_FORMAT_R32G32B32A32_UINT;
     static constexpr VkDeviceSize font_offset_ =
@@ -513,7 +565,7 @@ private:
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkRenderPass render_pass_ = VK_NULL_HANDLE, analysis_pass_ = VK_NULL_HANDLE;
-    VkFramebuffer cell_framebuffer_ = VK_NULL_HANDLE;
+    std::array<VkFramebuffer, 2> cell_framebuffers_{};
     VkPipeline ui_pipeline_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE, analysis_pipeline_ = VK_NULL_HANDLE;
     VkCommandPool pool_ = VK_NULL_HANDLE;
@@ -630,9 +682,9 @@ private:
         check(api_.CreateDescriptorSetLayout(device_.handle, &layout, nullptr, &descriptor_layout_),
             "create glyph descriptor layout");
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            static_cast<uint32_t>(frames_.size() * 5)};
+            static_cast<uint32_t>(frames_.size() * 2 * 5)};
         auto pool = info<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
-        pool.maxSets = static_cast<uint32_t>(frames_.size());
+        pool.maxSets = static_cast<uint32_t>(frames_.size() * 2);
         pool.poolSizeCount = 1;
         pool.pPoolSizes = &size;
         check(api_.CreateDescriptorPool(device_.handle, &pool, nullptr, &descriptor_pool_),
@@ -1082,6 +1134,12 @@ VkResult render_present(DeviceDispatch& device, VkQueue queue, const VkPresentIn
         device.version.data(),
         true);
     if (!editor_frame.settings.enabled && !editor_frame.draw_data) {
+        {
+            // Frames presented unprocessed break the cells' temporal continuity.
+            const std::lock_guard lock(state->mutex);
+            if (state->renderer)
+                state->renderer->forget_history();
+        }
         editor_frame.complete(0);
         return device.present(queue, info);
     }

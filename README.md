@@ -25,6 +25,8 @@ version of the effect running in the game through Proton.*
 - **Ink, paper and light:** scene-colored ink that glows on dark paper or
   prints dark on light paper, adjustable saturation, a smooth watercolor paper
   wash and a phosphor glow / ink bleed.
+- **Calm in motion:** temporal stability keeps each cell's glyph while it still
+  fits, so noise and flickering light do not make the drawing boil.
 - **Your characters and fonts:** ASCII, alphanumeric, binary, blocks, Braille,
   or up to 256 custom Unicode characters, with local TTF/OTF fonts. Characters
   keep their typographic position (`_` on the floor, `'` at the top) and an
@@ -172,7 +174,8 @@ Native Wayland input, EGL, Steam integration, exclusive fullscreen and HDR are
 not currently supported. The tool is intended for **offline games and local
 graphics applications**; online games and anti-cheat are outside its scope.
 The launcher refuses privileged processes and targets. Full glyph rendering
-can lose fine HUD/text detail, and temporal stabilization is still pending.
+can lose fine HUD/text detail. Temporal stability calms flicker from noise and
+lighting; camera scrolling still moves glyphs across the screen-fixed grid.
 
 ## Development and documentation
 

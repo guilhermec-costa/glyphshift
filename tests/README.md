@@ -438,8 +438,31 @@ paper_wash=true
 ```
 
 The old mode remains available as `render_style=classic`. At 4×4, filtering
-preserves average ink, but letters may still be too small to recognize. The
-new mode currently uses spatial filtering, not temporal hysteresis.
+preserves average ink, but letters may still be too small to recognize.
+
+**Temporal stability** (0..1) keeps each cell's previous glyph, silhouette or
+contour while it still fits the cell, so noise, compression and flickering
+light do not make glyphs boil. Included styles use `stability=0.8`. Compare 0
+and 1 while the scene moves; a real change, such as an object moving away,
+still updates immediately. Camera scrolling can still make glyphs crawl
+across the screen-fixed grid.
+
+The GPU temporal oracle renders frame sequences through `glyphshift-preview`
+and checks static identity, flicker suppression and that real changes are not
+held; add `--report` to print its measurements only:
+
+```bash
+python3 tests/smoke/temporal.py --build build/dev \
+  --output /tmp/glyphshift-temporal
+```
+
+To render your own sequence, pass extra input/output pairs to the preview tool;
+each pair is rendered as the next frame with the previous frame's history:
+
+```bash
+./build/dev/glyphshift-preview a.ppm presets/illustrated.conf a-out.ppm \
+  b.ppm b-out.ppm c.ppm c-out.ppm
+```
 
 The expanded graphics smoke checks the new controls on GLX/Vulkan, including
 fill/contour separation, custom Unicode contours, tone/colors, small cells,

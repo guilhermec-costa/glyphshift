@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <glyphshift/config/characters.hpp>
 #include <string_view>
@@ -16,6 +17,8 @@ struct ArtSettings {
     float edge_strength = 1.0F, edge_threshold = 0.18F;
     // Source-color saturation (0..2) and glow/ink bleed from neighboring glyphs (0..1).
     float saturation = 1.0F, glow = 0.0F;
+    // Temporal hysteresis for illustrated glyph choices (0 off .. 1 strongest).
+    float stability = 0.0F;
     std::array<float, 3> foreground{1, 1, 1}, background{0, 0, 0};
     bool operator==(const ArtSettings&) const = default;
 };
@@ -33,7 +36,10 @@ struct Settings {
     bool operator==(const Settings&) const = default;
 };
 
-// Five vec4s, shared by the GL uniforms and Vulkan push constants.
+// Five vec4s, shared by the GL uniforms and Vulkan push constants. Renderers
+// zero the last entry (stability) whenever no valid previous frame exists.
+inline constexpr std::size_t art_stability = 19;
+
 inline std::array<float, 20> art_parameters(const Settings& s) {
     const auto& a = s.art;
     return {a.exposure,
@@ -55,7 +61,7 @@ inline std::array<float, 20> art_parameters(const Settings& s) {
         a.saturation,
         a.glow,
         a.paper_wash ? 1.0F : 0.0F,
-        0};
+        a.stability};
 }
 
 enum SettingWarning : std::uint32_t {

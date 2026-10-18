@@ -459,6 +459,16 @@ void controls(State& state,
                 ImGui::SetTooltip(
                     "Spreads glyph ink into nearby paper: a phosphor glow on dark "
                     "paper, ink bleed on light paper.");
+            ImGui::SliderFloat("Temporal stability",
+                &art.stability,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Keeps each cell's previous glyph while it still fits, so motion and "
+                    "noise do not make glyphs flicker.");
             ImGui::InputText("Contour glyphs", state.draft.edges.data(), state.draft.edges.size());
             ImGui::InputText("Shape glyphs", state.draft.shapes.data(), state.draft.shapes.size());
             if (ImGui::IsItemHovered())

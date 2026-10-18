@@ -34,9 +34,10 @@ Only implement work explicitly requested by the user.
 - [ ] Contour thresholds are calibrated per style on one SuperTux frame.
   Outlined cartoon textures (SuperTux ice) separate from silhouettes by
   contrast only; other games and scene types are not calibrated.
-- [ ] Add configurable temporal glyph stability/hysteresis. The current
-  illustrated renderer filters spatially and has no previous-frame glyph state.
-  The phase 2 cell texture is intended to carry the previous frame's choice.
+- [ ] Investigate a world-anchored glyph grid. Hysteresis (phase 4) removes
+  flicker from noise and lighting, but camera scrolling still moves content
+  across the screen-fixed grid, so glyphs crawl. Anchoring would need camera
+  motion estimation from the final image.
 - [ ] Add explicit aspect correction beyond independent cell dimensions.
 - [ ] Validate visual quality and motion across longer gameplay sessions and
   multiple scene types, including fine HUD/text readability.
@@ -327,6 +328,97 @@ The focused XTest editor tests, SuperTux and GPU timing were not run; the new
 sliders and checkbox were not exercised through real input, and calibration
 covers one captured frame of one game.
 
+## Temporal stability (art direction, phase 4)
+
+Phases 1–3 were judged on still frames. In motion, cells near a tone boundary,
+a shape-fit limit or a contour vote threshold switch glyphs from frame to frame.
+Animated lighting, compression noise and sub-pixel camera motion then make the
+drawing boil.
+
+`glyphshift-preview` now accepts extra `INPUT OUTPUT` pairs and renders them as
+consecutive frames. On a captured SuperTux frame scrolled one pixel per frame,
+the share of cells changing glyph per frame was 6.6% (illustrated), 11.6%
+(Green terminal) and 6.7% (Newsprint) without stabilization.
+
+The renderers keep two cell grids per target and alternate them. The analysis
+pass reads the other grid, holding the previous frame's decisions, through the
+same `cell_image` binding. Composition then reads the grid just written.
+A new `stability` setting (0..1, default 0) controls hysteresis on all three
+decisions:
+
+- **Tonal glyphs** are kept while the cell's tone stays within ±0.06 and its
+  internal light/dark contrast within ±0.12 of the values at which the glyph
+  was chosen (at stability 1). Each cell texel's glyph word now also stores
+  that decision tone and contrast (8 bits each above the glyph index).
+  Comparing against the decision, not last frame, prevents slow drifts from
+  creeping past the band. The contrast condition is what releases a cell whose
+  content changed character but kept a similar mean, such as a gradient cell
+  becoming an object border; a tone-only first version left 3.6% of cells
+  stale after a real change in the oracle below.
+- **Silhouette glyphs** stay while their error is within
+  `0.5 * stability * limit` of the new best and within a fit limit widened by
+  `1 + stability`. A matched cell keeps matching down to half the contrast
+  threshold at stability 1. The cell word records "matched" in bit 3.
+- **Contours** persist with two coherent votes, instead of the three a new
+  contour needs, while they keep at least half of the leading axis's votes.
+
+History is used only when the previous frame was illustrated, had identical
+settings (including grid and glyph atlas) and was processed. GLX compares
+per-drawable settings and reallocates both grids only when the grid changes.
+Vulkan keeps a shared pair of grids sized for 2×2 cells, two descriptor sets per
+swapchain image (binding 4 pointing at each grid) and two cell framebuffers. Both
+grids are transitioned once to shader-read layout, because analysis statically
+declares the previous grid even on frames without history. A frame presented
+with the effect disabled clears history in both backends. When history is
+invalid, the renderer sends stability 0 in the existing art parameter slot,
+so push constants stay at 112 bytes.
+
+With stability 1, the same scroll changed 5.1%, 6.7% and 4.9% of cells per
+frame. Half-pixel scrolling with noise went from 3.9/6.1/3.9% to 2.8/3.0/2.4%.
+The remainder is real content moving across a screen-fixed grid; holding it
+would require visible lag. Lighting flicker and noise are suppressed almost
+entirely. All included illustrated styles and illustrated configs ship with
+`stability=0.8`. The editor's **Illustration → Temporal stability** slider sits
+below every control the focused editor tests click.
+
+### Phase 4 verification
+
+The new deterministic GPU oracle `tests/smoke/temporal.py` uses only the
+Python standard library and runs from the GLX smoke after the analytic oracle.
+It renders a generated gradient with an outlined object, where noisy frames add
+±6 levels of pixel noise and up to ±8 levels of global brightness flicker. It
+asserts:
+
+- a static sequence renders identically with stability 1 and 0;
+- the first frame never uses history;
+- without stability, the flicker moves more than 5% of cells per frame
+  (measured 36.7%); with stability 1, at most 35% of that (measured 0.0%);
+- after the flicker sequence, a frame with a moved object and +70 brightness
+  differs from a fresh render in at most 2% of cells (measured 0.5%, one cell).
+
+Both API smokes also require `stability=1` to reproduce the static fixture
+image exactly, and a temporary trace confirmed that Vulkan actually enabled
+history during a 90-frame fixture run with validation (the trace was removed).
+
+Verified on 2026-10-17 on the existing Arch/X11/i3/NVIDIA RTX 3060 Ti setup.
+Debug built without compiler warnings and passed 12/12 CPU tests, including
+`stability` parsing, persistence, its shader slot and invalid values. The
+Debug smoke passed on GLX and Vulkan with Khronos core/synchronization
+validation and no `GL debug:` or `Vulkan validation:` output; the GLX/Vulkan
+static-stability captures were identical. Release built without warnings and
+passed 14/14 CTest tests including both graphics smokes (103 seconds). All six
+glyph SPIR-V modules passed `spirv-val`. A single-frame preview of
+`illustrated.conf` stayed pixel-identical to phase 3.
+
+The SuperTux scroll measurements are synthetic camera motion on one captured
+frame, not gameplay. The focused XTest editor tests, a live SuperTux session
+and GPU timing were not run.
+
+```bash
+python3 tests/smoke/temporal.py --build build/dev --output /tmp/glyphshift-temporal
+python3 tests/smoke/temporal.py --build build/dev --output /tmp/glyphshift-temporal --report
+```
+
 ## Ready-to-use style collection
 
 Six complete live configs are available in the [preset gallery](../../presets/README.md):
@@ -401,7 +493,8 @@ changes; changing these art controls does not rebuild GPU resources.
 The recommended color/ink presets now use 6×10 cells to preserve smaller objects,
 with sparse tonal ramps, stronger contour rejection and optional scene-colored
 paper. The coarser blocks preset retains the earlier style. No temporal state or
-hysteresis is implemented by this refinement; motion stability remains a TODO.
+hysteresis was implemented by this refinement; see
+[phase 4](#temporal-stability-art-direction-phase-4).
 
 Same-frame GPU previews: [color](../shape-color.png), [ink](../shape-ink.png),
 [original](../illustration-original.png). Earlier gallery assets below preserve
@@ -1608,8 +1701,8 @@ idle per frame, or CPU framebuffer readback was added to the injected path.
 Small cells still have a physical information limit: 4×4 cannot preserve the
 identity of arbitrary letters. Filtering preserves their ink coverage instead
 of dropping strokes, and the panel suggests 8×12 or larger for readable text.
-Contour selection remains spatial; temporal hysteresis is not implemented by
-this change. HUD/text can still lose detail in a full glyph drawing; reducing
+Contour selection was spatial; temporal hysteresis arrived later in
+[phase 4](#temporal-stability-art-direction-phase-4). HUD/text can still lose detail in a full glyph drawing; reducing
 strength remains a configurable compromise.
 
 #### Illustrated renderer verification and comparisons

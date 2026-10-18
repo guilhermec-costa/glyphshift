@@ -101,6 +101,17 @@ void main() {
         cell_data = uvec4(0);
         return;
     }
+    // Temporal hysteresis: during analysis, cell_image holds this cell's
+    // previous decision. The renderer sets ART[4].w to the stability only when
+    // that history matches the current grid and glyph set, else 0.
+    float stability = ART[4].w;
+    uvec4 previous = stability > 0.0 ? texelFetch(cell_image, index, 0) : uvec4(0);
+    // z: glyph in bits 0..7, then the tone and internal contrast (8 bits each)
+    // at which a tonal glyph was chosen.
+    uint previous_glyph = previous.z & 255u, previous_contour = previous.w & 7u;
+    float previous_tone = float((previous.z >> 8) & 255u) / 255.0;
+    float previous_contrast = float((previous.z >> 16) & 255u) / 255.0;
+    bool previous_shape = stability > 0.0 && (previous.w & 8u) != 0u;
     // Sixteen region means cover the whole cell, so thin features and fine
     // texture average out instead of aliasing through a few point samples.
     vec3 regions[16];
@@ -136,9 +147,30 @@ void main() {
     for (int a=0;a<4;++a) if (a != axis) second = max(second,votes[a]);
     // A straight contour crossing the cell yields three coherent votes.
     bool edge = votes[axis] >= 3 && votes[axis] >= 2*second;
+    if (stability > 0.0 && previous_contour != 0u) {
+        // An existing contour persists on weaker evidence than a new one needs,
+        // so a stroke near the threshold does not blink frame to frame.
+        int kept = int(previous_contour) - 1;
+        if (votes[kept] >= 2 && 2*votes[kept] >= votes[axis]) {
+            axis = kept;
+            edge = true;
+        }
+    }
     float tone = clamp((luma(average)*ART[0].x-.5)*ART[0].y+.5,0.0,1.0);
     tone = pow(tone,1.0/ART[0].z);
-    uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ART[2].w >= 0.0 ? 3 : 1),0).r;
+    int ramp_row = ART[2].w >= 0.0 ? 3 : 1;
+    uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ramp_row),0).r;
+    float decided_tone = tone;
+    // Keep the previous tonal glyph while this cell still looks like the cell
+    // it was chosen for: tone within +/-0.06 and internal contrast within
+    // +/-0.12 at stability 1. Comparing against the decision's own tone, not
+    // last frame's, keeps slow drifts from creeping past the band.
+    if (stability > 0.0 && !previous_shape &&
+        abs(tone - previous_tone) <= .06 * stability &&
+        abs((light - dark) - previous_contrast) <= .12 * stability) {
+        glyph = previous_glyph;
+        decided_tone = previous_tone;
+    }
     float peak = max(max(average.r,average.g),average.b);
     // Paper lighter than ink selects dark-ink-on-paper polarity in both color
     // modes: silhouettes then draw the dark group, as tonal ramps already do
@@ -156,7 +188,9 @@ void main() {
         paper = saturate_color(mix(ART[3].rgb,average,ART[3].w));
     }
     bool shape = false;
-    if (ART[2].w >= 0.0 && ART[1].w > .5 && light-dark > max(ART[2].w,.0001)) {
+    // A silhouette that was matched last frame needs less contrast to stay.
+    float shape_contrast = max(ART[2].w,.0001) * (previous_shape ? 1.0 - .5*stability : 1.0);
+    if (ART[2].w >= 0.0 && ART[1].w > .5 && light-dark > shape_contrast) {
         // Split the regions into a light and a dark group, then pick the
         // matchable glyph whose ink layout best fits the light group. Palette
         // entries are constant per cell, never a blend with per-pixel detail.
@@ -168,19 +202,31 @@ void main() {
             else { dark_color += regions[r]; dark_count += 1.0; }
         }
         int matchable = int(texelFetch(ramp_image,ivec2(0,4),0).r) + 1;
-        float best = 1e9;
+        float best = 1e9, kept_error = 1e9;
         uint shaped = 0u;
         for (int g=0;g<matchable;++g) {
+            bool was = previous_shape && uint(g) == previous_glyph;
             float error = 0.0;
-            for (int r=0;r<16 && error<best;++r) {
+            // The previous glyph's error is always completed for hysteresis.
+            for (int r=0;r<16 && (error<best || was);++r) {
                 float target = (levels[r]-dark)/(light-dark);
                 float delta = float(texelFetch(ramp_image,ivec2(g,5+r),0).r)/255.0 -
                               (invert ? 1.0-target : target);
                 error += delta*delta;
             }
+            if (was) kept_error = error;
             if (error < best) { best = error; shaped = uint(g); }
         }
-        shape = best <= shape_fit * 16.0;
+        // Keep last frame's silhouette glyph while it is nearly as good as
+        // the new best and still within a widened fit limit.
+        float limit = shape_fit * 16.0;
+        if (previous_shape && kept_error <= best + .5*stability*limit &&
+            kept_error <= limit * (1.0 + stability)) {
+            best = kept_error;
+            shaped = previous_glyph;
+            limit *= 1.0 + stability;
+        }
+        shape = best <= limit;
         if (shape) glyph = shaped;
         if (shape && SOURCE_COLOR != 0u) {
             // The glyph covers the light group, or the dark group when inverted.
@@ -191,7 +237,11 @@ void main() {
     }
     // A matched silhouette already owns its boundary; drawing another
     // centered contour over it would replace useful character detail.
-    cell_data = uvec4(pack_rgb(ink), pack_rgb(paper), glyph, edge && !shape ? uint(axis)+1u : 0u);
+    // w: contour axis + 1 (0 none) in bits 0..2, matched silhouette in bit 3.
+    uint memory = (uint(round(decided_tone*255.0)) << 8) |
+                  (uint(round(clamp(light - dark, 0.0, 1.0)*255.0)) << 16);
+    cell_data = uvec4(pack_rgb(ink), pack_rgb(paper), glyph | memory,
+                      (edge && !shape ? uint(axis)+1u : 0u) | (shape ? 8u : 0u));
 }
 #else
 // Each glyph owns a 17x25 summed-area tile around its 16x24 coverage mask.
@@ -240,7 +290,7 @@ void main() {
         ivec2 index = ivec2(floor(pixel / CELL));
         uvec4 data = texelFetch(cell_image, index, 0);
         vec3 ink = unpack_rgb(data.x), paper = unpack_rgb(data.y);
-        uint glyph = data.z;
+        uint glyph = data.z & 255u;
         if (ART[4].z > .5) {
             // Paper wash: bilinear paper between cell centers, so scene color
             // reads as a soft wash under the ink instead of a tile mosaic.
@@ -256,8 +306,9 @@ void main() {
         }
         float fill_mask = ART[1].w > .5 ? glyph_mask(glyph,pixel-origin,true) : 0;
         result = mix(paper,ink,fill_mask);
-        if (data.w != 0u) {
-            float mask = glyph_mask(255u+data.w,pixel-origin,true);
+        uint contour = data.w & 7u;
+        if (contour != 0u) {
+            float mask = glyph_mask(255u+contour,pixel-origin,true);
             if (ART[0].w > .5) {
                 // Choose whichever ink/paper stroke contrasts more with the
                 // cell's mean filled color, so contours never punch holes.
@@ -280,7 +331,8 @@ void main() {
             for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
                 ivec2 near = clamp(index + ivec2(x,y), ivec2(0), last);
                 uvec4 cell_near = texelFetch(cell_image, near, 0);
-                ivec2 corner = ivec2(int(cell_near.z)%16,int(cell_near.z)/16)*ivec2(17,25)+ivec2(16,24);
+                int near_glyph = int(cell_near.z & 255u);
+                ivec2 corner = ivec2(near_glyph%16,near_glyph/16)*ivec2(17,25)+ivec2(16,24);
                 vec2 offset = (pixel - (vec2(near)+.5)*CELL) / CELL;
                 float weight = exp(-1.5*dot(offset,offset));
                 float coverage = texelFetch(atlas_image,corner,0).r/(255.0*16.0*24.0) * weight;

@@ -167,6 +167,10 @@ try:
         assert max(paper[0::3])-min(paper[0::3])==0 and all(abs(a-b)<=1 for a,b in zip(paper[:3],[51,77,102])),'background compositing incorrect'
         characters(art+'edge_strength=0\ntone_exposure=2\ntone_contrast=1.3\ntone_gamma=0.7\n')
         assert image(window,'illustrated-tone')!=filled,'tone controls missing'
+        # A static scene must render identically with history: the previous
+        # grid holds the same decisions, so ping-pong plumbing is exact.
+        characters(art+'stability=1\n')
+        assert image(window,'illustrated-stable')==illustrated,'temporal stability changed a static scene'
         characters(art+'glow=0.8\n')
         assert image(window,'illustrated-glow')!=illustrated,'glow did not change image'
         characters(art+'saturation=0\n')
@@ -205,5 +209,6 @@ try:
             assert 'Vulkan validation:' not in text,text
     if api=='glx':
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('temporal.py')),'--build',str(build),'--output',str(output/'temporal')],check=True)
     print(f'{api}: launch, editor/input, live toggle, strength 0/1/fraction, named preset restart, character/Unicode/font switching, 6 resizes, multi-target lifetime'+(', shader failure pass-through' if api=='glx' else '')+' passed')
 finally:x.shutdown()

@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -78,8 +79,13 @@ struct Drawable {
     GLuint image = 0, framebuffer = 0;
     unsigned width = 0, height = 0;
     // One RGBA32UI texel per cell, written by the illustrated analysis pass.
-    GLuint cells = 0, cell_framebuffer = 0;
-    unsigned columns = 0, rows = 0;
+    // The two grids alternate: one holds the previous frame's decisions.
+    std::array<GLuint, 2> cells{}, cell_framebuffers{};
+    unsigned columns = 0, rows = 0, current = 0;
+    // The previous grid is usable history only after an illustrated frame
+    // with identical settings (grid, glyph atlas and every art control).
+    bool history = false;
+    Settings previous{};
 };
 
 struct Uniforms {
@@ -106,10 +112,12 @@ struct Context {
                 gl.DeleteFramebuffers(1, &drawable.framebuffer);
             if (drawable.image)
                 gl.DeleteTextures(1, &drawable.image);
-            if (drawable.cell_framebuffer)
-                gl.DeleteFramebuffers(1, &drawable.cell_framebuffer);
-            if (drawable.cells)
-                gl.DeleteTextures(1, &drawable.cells);
+            for (auto& framebuffer : drawable.cell_framebuffers)
+                if (framebuffer)
+                    gl.DeleteFramebuffers(1, &framebuffer);
+            for (auto& cells : drawable.cells)
+                if (cells)
+                    gl.DeleteTextures(1, &cells);
         }
         drawables.clear();
         if (atlas)
@@ -341,7 +349,8 @@ struct Context {
         const Uniforms& uniforms,
         unsigned width,
         unsigned height,
-        const Settings& settings) {
+        const Settings& settings,
+        bool history) {
         const auto& gl = api();
         gl.UseProgram(current);
         gl.Uniform2f(uniforms.size, static_cast<float>(width), static_cast<float>(height));
@@ -350,7 +359,9 @@ struct Context {
             static_cast<float>(settings.cell_height));
         gl.Uniform1ui(uniforms.source_color, settings.source_color ? 1 : 0);
         gl.Uniform1f(uniforms.glyph_strength, settings.glyph_strength);
-        const auto art = art_parameters(settings);
+        auto art = art_parameters(settings);
+        if (!history)
+            art[art_stability] = 0;
         gl.Uniform4fv(uniforms.art, 5, art.data());
     }
 
@@ -362,39 +373,51 @@ struct Context {
             gl.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
     }
 
-    // Allocation happens only when the window or cell size changes the grid.
+    // Allocation happens only when the window or cell size changes the grid,
+    // which also discards the history.
     void prepare_cells(Drawable& drawable, unsigned columns, unsigned rows) {
         const auto& gl = api();
-        if (!drawable.cells) {
-            gl.GenTextures(1, &drawable.cells);
-            gl.GenFramebuffers(1, &drawable.cell_framebuffer);
-            if (!drawable.cells || !drawable.cell_framebuffer)
+        if (!drawable.cells[0]) {
+            gl.GenTextures(2, drawable.cells.data());
+            gl.GenFramebuffers(2, drawable.cell_framebuffers.data());
+            if (!drawable.cells[0] || !drawable.cells[1] || !drawable.cell_framebuffers[0] ||
+                !drawable.cell_framebuffers[1])
                 throw std::runtime_error("GL cell object allocation failed");
         }
-        gl.ActiveTexture(GL_TEXTURE3);
-        gl.BindTexture(GL_TEXTURE_2D, drawable.cells);
         if (drawable.columns == columns && drawable.rows == rows)
             return;
-        texture_parameters(gl);
-        gl.TexImage2D(GL_TEXTURE_2D,
-            0,
-            GL_RGBA32UI,
-            static_cast<GLsizei>(columns),
-            static_cast<GLsizei>(rows),
-            0,
-            GL_RGBA_INTEGER,
-            GL_UNSIGNED_INT,
-            nullptr);
+        drawable.history = false;
+        gl.ActiveTexture(GL_TEXTURE3);
+        for (unsigned i = 0; i < 2; ++i) {
+            gl.BindTexture(GL_TEXTURE_2D, drawable.cells[i]);
+            texture_parameters(gl);
+            gl.TexImage2D(GL_TEXTURE_2D,
+                0,
+                GL_RGBA32UI,
+                static_cast<GLsizei>(columns),
+                static_cast<GLsizei>(rows),
+                0,
+                GL_RGBA_INTEGER,
+                GL_UNSIGNED_INT,
+                nullptr);
+            gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffers[i]);
+            gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                drawable.cells[i],
+                0);
+            if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                throw std::runtime_error("OpenGL glyph cell framebuffer incomplete");
+        }
         drawable.columns = columns;
         drawable.rows = rows;
-        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffer);
-        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D,
-            drawable.cells,
-            0);
-        if (gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            throw std::runtime_error("OpenGL glyph cell framebuffer incomplete");
+    }
+
+    void forget_history() {
+        for (auto& [handle, drawable] : drawables) {
+            (void)handle;
+            drawable.history = false;
+        }
     }
 
     static void texture_parameters(const GlApi& gl) {
@@ -628,28 +651,42 @@ struct Context {
                 GL_COLOR_BUFFER_BIT,
                 GL_NEAREST);
             gl.BindVertexArray(vao);
-            if (settings.art.illustrated)
+            const bool illustrated = settings.art.illustrated;
+            bool history = false;
+            if (illustrated) {
                 prepare_cells(drawable,
                     (width + settings.cell_width - 1) / settings.cell_width,
                     (height + settings.cell_height - 1) / settings.cell_height);
-            const GLuint units[] = {drawable.image, atlas, ramp, drawable.cells};
+                history = drawable.history && drawable.previous == settings;
+                drawable.current ^= 1U;
+            }
+            // During analysis, unit 3 holds the previous grid; composition
+            // then reads the grid just written.
+            const GLuint units[] = {drawable.image,
+                atlas,
+                ramp,
+                drawable.cells[drawable.current ^ 1U]};
             for (unsigned i = 0; i < 4; ++i) {
                 gl.ActiveTexture(GL_TEXTURE0 + i);
                 gl.BindTexture(GL_TEXTURE_2D, units[i]);
                 gl.BindSampler(i, 0);
             }
-            if (settings.art.illustrated) {
+            if (illustrated) {
                 // Integer target: host blend state cannot alter packed cell data.
-                gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, drawable.cell_framebuffer);
+                gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,
+                    drawable.cell_framebuffers[drawable.current]);
                 gl.DrawBuffer(GL_COLOR_ATTACHMENT0);
                 viewport(drawable.columns, drawable.rows);
-                parameters(analysis, analysis_uniforms, width, height, settings);
+                parameters(analysis, analysis_uniforms, width, height, settings, history);
                 gl.DrawArrays(GL_TRIANGLES, 0, 3);
+                gl.BindTexture(GL_TEXTURE_2D, drawable.cells[drawable.current]);
             }
+            drawable.history = illustrated;
+            drawable.previous = settings;
             gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             gl.DrawBuffer(GL_BACK);
             viewport(width, height);
-            parameters(program, compose_uniforms, width, height, settings);
+            parameters(program, compose_uniforms, width, height, settings, history);
             gl.DrawArrays(GL_TRIANGLES, 0, 3);
         }
         if (ui)
@@ -722,6 +759,8 @@ void render(Display* display, GLXDrawable drawable) noexcept {
             true);
         if (frame.settings.enabled || frame.draw_data)
             state->draw(drawable, width, height, frame.settings, frame.draw_data);
+        if (!frame.settings.enabled)
+            state->forget_history();  // Frames shown unprocessed break continuity.
         frame.complete(
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count());

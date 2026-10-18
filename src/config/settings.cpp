@@ -259,11 +259,15 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
                 key.starts_with("edge_") || key == "shape_threshold" || key == "scene_paper";
             if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
                 parsed.warnings |= invalid_art;
-        } else if (key == "saturation" || key == "glow") {
-            const bool glow = key == "glow";
-            float& target = glow ? parsed.value.art.glow : parsed.value.art.saturation;
-            target = glow ? defaults.art.glow : defaults.art.saturation;
-            if (!number(value, target, 0, glow ? 1 : 2))
+        } else if (key == "saturation" || key == "glow" || key == "stability") {
+            const bool unit = key != "saturation";
+            float& target = key == "glow"        ? parsed.value.art.glow
+                            : key == "stability" ? parsed.value.art.stability
+                                                 : parsed.value.art.saturation;
+            target = key == "glow"        ? defaults.art.glow
+                     : key == "stability" ? defaults.art.stability
+                                          : defaults.art.saturation;
+            if (!number(value, target, 0, unit ? 1 : 2))
                 parsed.warnings |= invalid_art;
         } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching" ||
                    key == "paper_wash") {
@@ -355,6 +359,7 @@ bool valid_art(const ArtSettings& a) noexcept {
              a.shape_threshold,
              a.scene_paper,
              a.glow,
+             a.stability,
              a.foreground[0],
              a.foreground[1],
              a.foreground[2],

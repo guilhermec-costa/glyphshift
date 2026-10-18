@@ -191,7 +191,8 @@ std::string serialize_settings(const Settings& s) {
            "\nscene_paper=" + decimal(s.art.scene_paper) +
            "\npaper_wash=" + (s.art.paper_wash ? "true" : "false") +
            "\nsaturation=" + decimal(s.art.saturation) + "\nglow=" + decimal(s.art.glow) +
-           "\nforeground=" + rgb(s.art.foreground) + "\nbackground=" + rgb(s.art.background) + "\n";
+           "\nstability=" + decimal(s.art.stability) + "\nforeground=" + rgb(s.art.foreground) +
+           "\nbackground=" + rgb(s.art.background) + "\n";
 }
 
 bool PresetStore::load(std::string_view name, Settings& settings, std::string& error) const {
