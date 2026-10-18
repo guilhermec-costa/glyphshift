@@ -121,6 +121,23 @@ characters easier to recognize; 4×4 cells cannot preserve every letter's shape.
 Use **Characters and font** to change the fill set, then **Apply characters**.
 Use **Save preset** to retain your applied settings.
 
+## Overlay mode (preview)
+
+Start the game normally, from Steam or anywhere, and put GlyphShift on top of
+its window instead of launching the game through it. The overlay reads the
+window's image on the GPU and draws the effect in its own click-through window;
+nothing is injected into the game. X11 only for now.
+
+```bash
+sleep 3; ./build/dev/glyphshift-overlay --window "$(xdotool getactivewindow)" --preset art-comic
+```
+
+Run that from a terminal and click the game window within three seconds; the
+window that is active when the delay ends is used. You can also pass an ID from
+`xdotool search --name "Game title"`. Close the game or press
+Ctrl+C to stop. A global attach hotkey and the in-game editor for this mode are
+in progress; the launcher below remains the lowest-latency option.
+
 ## Choose a starting style
 
 Try the [ready-to-use style collection](presets/README.md): Comic, Sepia,

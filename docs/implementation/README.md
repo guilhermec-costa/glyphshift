@@ -820,7 +820,8 @@ The following are explicitly out of scope for the MVP:
 - Wayland-native input integration;
 - EGL;
 - Steam integration;
-- attaching to an already-running process;
+- attaching to an already-running process (code injection or ptrace); the
+  later M6 overlay captures a window instead and does not attach;
 - fullscreen-exclusive compatibility;
 - ANSI terminal output, recording, or streaming;
 - multiplayer games or anti-cheat compatibility.
@@ -2694,6 +2695,80 @@ returns input to each fixture.
 Exit condition: failures degrade to pass-through behavior, presets survive
 restart, both smoke tests pass, and the results of real-application tests are
 documented without claiming broader compatibility.
+
+### M6 — Standalone capture overlay (X11), requested after M5
+
+The user asked for an RivaTuner-style workflow: start the game normally (from
+Steam or anywhere), then apply GlyphShift on top, instead of launching the game
+through GlyphShift. RivaTuner injects into every process; that remains out of
+scope (system-wide injection, anti-cheat exposure, ptrace attachment). M6 adds
+a separate application, `glyphshift-overlay`, that never enters the game:
+
+- It captures the target window's contents on the GPU through the X Composite
+  extension and `GLX_EXT_texture_from_pixmap`, renders only when XDamage
+  reports a new frame, and runs the same two-pass glyph shaders.
+- It presents into its own override-redirect window kept exactly above the
+  target, with an empty XFixes input shape so mouse and keyboard reach the game.
+  The editor makes only its panel input-receiving while open.
+- The user attaches with a global hotkey on the focused window. The launcher
+  mode stays available as the lower-latency option.
+
+Constraints and expected costs: X11 only (Wayland needs a portal/PipeWire
+capture path), about one frame of added latency, extra composition work, and no
+exclusive fullscreen; borderless fullscreen windows are supported. Capturing is
+read-only screen capture of one chosen window; no process is modified.
+
+Steps, each validated before the next: (1) capture-and-overlay prototype for a
+window given by ID, with latency/cost measurements; (2) robust window tracking
+(move, resize, unmap, focus, restacking, destruction); (3) editor and
+per-game presets keyed by window class; (4) background daemon with global
+attach/detach hotkeys, then validation with the fixtures, native SuperTux and
+a Proton game.
+
+Exit condition: an independently started game window is transformed live,
+input still reaches the game, the overlay follows the window and detaches
+cleanly, and measured latency/cost are documented.
+
+#### M6 step 1: capture-and-overlay prototype
+
+`glyphshift-overlay --window ID [--preset NAME] [--log]` attaches to a window
+by X11 ID. Without `--preset` it uses `GLYPHSHIFT_CONFIG` (live reload) or the
+defaults. It requires X Composite 0.2, XDamage, XFixes and
+`GLX_EXT_texture_from_pixmap`, and fails with a diagnostic otherwise.
+
+- The target is redirected with `CompositeRedirectAutomatic` (it stays on
+  screen; the redirection ends when the overlay disconnects), its pixmap is
+  named with `XCompositeNameWindowPixmap` and wrapped by a GLX pixmap of the
+  target's depth; `GLX_Y_INVERTED_EXT` gives the row order, passed to the
+  shader through a new GL-only `source_top_down` uniform (default 0 keeps the
+  back-buffer convention of the injected renderer and preview).
+- XDamage (`ReportNonEmpty`) wakes the loop; each new frame binds the pixmap as
+  a texture, runs the glyph passes and swaps with swap interval 1.
+- The overlay is an override-redirect window with an empty XFixes input shape
+  and `_COMPTON_SHADOW=0`, moved and resized on the target's ConfigureNotify,
+  unmapped/remapped with it, and the overlay exits when the target is destroyed.
+- The two-pass rendering moved into a `GlyphPasses` module shared by the
+  overlay and `glyphshift-preview`. After the refactor the analytic and
+  temporal oracles passed unchanged, and previews of `illustrated`,
+  `illustrated-ink`, Comic and Ink & Edges stayed pixel-identical.
+
+New smoke `tests/smoke/overlay.py` (run from the GLX smoke) starts the GLX
+fixture directly, without launcher, preload or layer, and attaches the overlay
+with Newsprint. The overlay window's pixels must equal `glyphshift-preview` of
+the captured original (observed: identical, max difference 0); the screen
+region over the fixture must match the overlay and not the original (observed
+99.97% identical channels to the overlay, 0.5% to the original); the overlay's
+input shape must have zero rectangles; closing the fixture must end both
+processes with status 0.
+
+Manual checks on 2026-10-18 (NVIDIA RTX 3060 Ti, i3 with picom): an XTest click
+(`xdotool`) inside the overlay reached the fixture, which logged the button.
+Native SuperTux started on its own (no GlyphShift library in its memory map)
+was transformed live; the overlay kept pace at about 60 frames per second
+using about 0.2–0.35 ms of CPU per frame including the swap call. End-to-end
+added latency was not measured; one display frame is the expected bound with
+vsync. Hotkey attachment, the editor, window-manager restacking, focus changes
+and Wayland are later steps.
 
 ### Later — Broader Linux support
 

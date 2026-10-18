@@ -31,6 +31,9 @@ uniform sampler2D source_image;
 uniform sampler2D atlas_image;
 uniform usampler2D ramp_image;
 uniform usampler2D cell_image;
+// GL only: 1 when the source texture stores rows top-down (window captures);
+// 0, the default, for a captured GL back buffer, which is bottom-up.
+uniform uint source_top_down;
 uniform vec2 size;
 uniform vec2 cell;
 uniform uint source_color;
@@ -53,7 +56,7 @@ layout(location=0) out vec4 color;
 vec3 sample_source(vec2 pixel) {
     ivec2 at = ivec2(clamp(floor(pixel), vec2(0.0), SIZE - vec2(1.0)));
 #ifndef VULKAN
-    at.y = int(SIZE.y) - 1 - at.y;
+    if (source_top_down == 0u) at.y = int(SIZE.y) - 1 - at.y;
 #endif
     return texelFetch(source_image, at, 0).rgb;
 }

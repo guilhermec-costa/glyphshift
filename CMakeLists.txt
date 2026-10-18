@@ -173,6 +173,17 @@ foreach(stage vert frag)
     target_sources(glyphshift_vk PRIVATE "${GLYPH_GENERATED}/editor_${stage}_spv.hpp")
 endforeach()
 target_include_directories(glyphshift_gl PRIVATE "${GLYPH_GENERATED}")
+# Two-pass glyph rendering for processes that own their GL context (preview,
+# capture overlay); the injected renderer keeps its own implementation.
+add_library(glyphshift_standalone STATIC src/render/standalone/glyph_passes.cpp)
+target_include_directories(glyphshift_standalone PRIVATE "${GLYPH_GENERATED}")
+target_link_libraries(glyphshift_standalone PUBLIC glyphshift_editor OpenGL::GL)
+# M6 capture overlay: reads a chosen window through X Composite and draws the
+# glyph effect in its own input-transparent window; it never enters the game.
+pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes)
+add_executable(glyphshift-overlay apps/overlay/main.cpp)
+target_link_libraries(glyphshift-overlay PRIVATE glyphshift_standalone X11::X11
+    PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
 add_executable(glyphshift-glx-fixture tests/fixtures/glx.cpp)
@@ -198,8 +209,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/launcher_test.py"
         "$<TARGET_FILE:glyphshift>" "$<TARGET_FILE:glyphshift-launcher-probe>")
     add_executable(glyphshift-preview tools/preview.cpp)
-    target_include_directories(glyphshift-preview PRIVATE "${GLYPH_GENERATED}")
-    target_link_libraries(glyphshift-preview PRIVATE glyphshift_core glyphshift_editor OpenGL::GL X11::X11)
+    target_link_libraries(glyphshift-preview PRIVATE glyphshift_standalone X11::X11)
     add_library(glyphshift-fault-glx SHARED tests/fixtures/fault_glx.cpp)
     target_link_libraries(glyphshift-fault-glx PRIVATE ${CMAKE_DL_LIBS})
     target_include_directories(glyphshift-fault-glx PRIVATE ${OPENGL_INCLUDE_DIR} ${X11_INCLUDE_DIR})
@@ -257,7 +267,7 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
         add_custom_target(smoke-${api}
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py"
                 --build "${CMAKE_BINARY_DIR}" --api ${api}
-            DEPENDS glyphshift glyphshift-${api}-fixture glyphshift-fault-glx glyphshift-preview
+            DEPENDS glyphshift glyphshift-${api}-fixture glyphshift-fault-glx glyphshift-preview glyphshift-overlay
             USES_TERMINAL VERBATIM)
         if(GLYPHSHIFT_GPU_SMOKE_TESTS)
             add_test(NAME smoke-${api} COMMAND "${Python3_EXECUTABLE}"
@@ -269,6 +279,6 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
     add_custom_target(smoke
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api glx
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py" --build "${CMAKE_BINARY_DIR}" --api vulkan
-        DEPENDS glyphshift glyphshift-glx-fixture glyphshift-vulkan-fixture glyphshift-fault-glx glyphshift-preview
+        DEPENDS glyphshift glyphshift-glx-fixture glyphshift-vulkan-fixture glyphshift-fault-glx glyphshift-preview glyphshift-overlay
         USES_TERMINAL VERBATIM)
 endif()

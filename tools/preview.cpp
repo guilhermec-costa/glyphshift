@@ -3,16 +3,15 @@
 #include <GL/glext.h>
 #include <GL/glx.h>
 
-#include <algorithm>
 #include <fstream>
 #include <glyphshift/config/settings.hpp>
-#include <glyphshift/core/glyph.hpp>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
-#include "glyph_shaders.hpp"
+#include "../src/render/standalone/glyph_passes.hpp"
 
 namespace {
 void require(bool value, const char* message) {
@@ -66,55 +65,6 @@ void flip(std::vector<unsigned char>& pixels, unsigned width, unsigned height) {
             std::swap(pixels[y * row + x], pixels[(height - 1 - y) * row + x]);
 }
 
-GLuint link(const char* fragment) {
-    const auto program = glCreateProgram();
-    for (const auto type : {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER}) {
-        const auto shader = glCreateShader(static_cast<GLenum>(type));
-        const char* source = type == GL_VERTEX_SHADER ? glyphshift::shaders::vertex : fragment;
-        glShaderSource(shader, 1, &source, nullptr);
-        glCompileShader(shader);
-        GLint ok = 0;
-        glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-        if (!ok) {
-            char log[4096]{};
-            glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-            throw std::runtime_error(log);
-        }
-        glAttachShader(program, shader);
-        glDeleteShader(shader);
-    }
-    glLinkProgram(program);
-    GLint linked = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    require(linked, "Shader link failed");
-    return program;
-}
-
-GLuint texture(unsigned unit,
-    GLint internal,
-    unsigned width,
-    unsigned height,
-    GLenum format,
-    const void* data,
-    GLenum type = GL_UNSIGNED_BYTE) {
-    GLuint name = 0;
-    glGenTextures(1, &name);
-    glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, name);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D,
-        0,
-        internal,
-        static_cast<GLsizei>(width),
-        static_cast<GLsizei>(height),
-        0,
-        format,
-        type,
-        data);
-    return name;
-}
-
 std::vector<unsigned char> read_ppm(const char* path, unsigned& width, unsigned& height) {
     std::ifstream input(path, std::ios::binary);
     std::string magic;
@@ -145,7 +95,8 @@ void write_ppm(const char* path,
 // Developer-only, real GPU preview on fixed images. Readback belongs here,
 // never in the injected render loop. PPM input is deliberately minimal.
 // Additional INPUT/OUTPUT pairs render as consecutive frames, so temporal
-// stability sees the previous frame's cells exactly as the backends do.
+// stability sees the previous frame's cells exactly as the renderers do.
+// Rendering uses the same GlyphPasses module as the capture overlay.
 int main(int argc, char** argv) {
     if (argc < 4 || argc % 2) {
         std::cerr << "Usage: glyphshift-preview INPUT.ppm SETTINGS.conf OUTPUT.ppm "
@@ -161,73 +112,34 @@ int main(int argc, char** argv) {
             std::string(std::istreambuf_iterator<char>(config), std::istreambuf_iterator<char>()));
         require(!parsed.warnings, "Invalid settings");
         const auto& settings = parsed.value;
-        const auto characters = glyphshift::build_character_atlas(settings.glyphs);
-        if (characters.diagnostic[0])
-            std::cerr << characters.diagnostic.data() << '\n';
         const Context context(width, height);
-        const auto program = link(glyphshift::shaders::fragment);
-        const auto analysis = link(glyphshift::shaders::analysis);
+        glyphshift::standalone::GlyphPasses passes;
+        GLuint source = 0, output = 0, framebuffer = 0;
+        glGenTextures(1, &source);
+        glGenTextures(1, &output);
+        glGenFramebuffers(1, &framebuffer);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        const auto source = texture(0, GL_RGB8, width, height, GL_RGB, nullptr);
-        const auto atlas = texture(1,
-            GL_R32F,
-            glyphshift::integral_width,
-            glyphshift::integral_height,
-            GL_RED,
-            characters.integral.data(),
-            GL_FLOAT);
-        const auto ramp = texture(2,
-            GL_R8UI,
-            256,
-            glyphshift::ramp_height,
-            GL_RED_INTEGER,
-            characters.ramp.data());
-        const auto output = texture(5, GL_RGB8, width, height, GL_RGB, nullptr);
-        GLuint fbo = 0, vao = 0;
-        glGenFramebuffers(1, &fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        for (const auto texture : {source, output}) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D,
+                0,
+                GL_RGB8,
+                static_cast<GLsizei>(width),
+                static_cast<GLsizei>(height),
+                0,
+                GL_RGB,
+                GL_UNSIGNED_BYTE,
+                nullptr);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, output, 0);
         require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
             "Incomplete output framebuffer");
-        // Two cell grids alternate: analysis reads the previous frame's
-        // decisions from one while writing the current frame into the other.
-        const unsigned columns = (width + settings.cell_width - 1) / settings.cell_width;
-        const unsigned rows = (height + settings.cell_height - 1) / settings.cell_height;
-        GLuint cells[2]{}, cell_fbos[2]{};
-        glGenFramebuffers(2, cell_fbos);
-        for (unsigned i = 0; i < 2; ++i) {
-            cells[i] =
-                texture(3, GL_RGBA32UI, columns, rows, GL_RGBA_INTEGER, nullptr, GL_UNSIGNED_INT);
-            glBindFramebuffer(GL_FRAMEBUFFER, cell_fbos[i]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                cells[i],
-                0);
-            require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
-                "Incomplete cell framebuffer");
-        }
-        glGenVertexArrays(1, &vao);
-        glBindVertexArray(vao);
-        auto art = glyphshift::art_parameters(settings);
-        for (const auto current : {analysis, program}) {
-            glUseProgram(current);
-            glUniform1i(glGetUniformLocation(current, "source_image"), 0);
-            glUniform1i(glGetUniformLocation(current, "atlas_image"), 1);
-            glUniform1i(glGetUniformLocation(current, "ramp_image"), 2);
-            glUniform1i(glGetUniformLocation(current, "cell_image"), 3);
-            glUniform2f(glGetUniformLocation(current, "size"),
-                static_cast<float>(width),
-                static_cast<float>(height));
-            glUniform2f(glGetUniformLocation(current, "cell"),
-                static_cast<float>(settings.cell_width),
-                static_cast<float>(settings.cell_height));
-            glUniform1ui(glGetUniformLocation(current, "source_color"), settings.source_color);
-            glUniform1ui(glGetUniformLocation(current, "ramp_count"), characters.count);
-            glUniform1f(glGetUniformLocation(current, "glyph_strength"), settings.glyph_strength);
-        }
         glDisable(GL_DITHER);
+        bool reported = false;
         for (int frame = 0; 2 * frame + 3 < argc; ++frame) {
             if (frame) {
                 unsigned next_width = 0, next_height = 0;
@@ -236,6 +148,7 @@ int main(int argc, char** argv) {
                     "Sequence frames must share dimensions");
             }
             if (settings.enabled) {
+                // Upload bottom-up, like a captured GL back buffer.
                 flip(pixels, width, height);
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, source);
@@ -248,22 +161,13 @@ int main(int argc, char** argv) {
                     GL_RGB,
                     GL_UNSIGNED_BYTE,
                     pixels.data());
-                // The first frame has no history.
-                art[glyphshift::art_stability] = frame ? settings.art.stability : 0;
-                const unsigned current = static_cast<unsigned>(frame) % 2;
-                glActiveTexture(GL_TEXTURE3);
-                glBindTexture(GL_TEXTURE_2D, cells[1 - current]);
-                glBindFramebuffer(GL_FRAMEBUFFER, cell_fbos[current]);
-                glViewport(0, 0, static_cast<GLsizei>(columns), static_cast<GLsizei>(rows));
-                glUseProgram(analysis);
-                glUniform4fv(glGetUniformLocation(analysis, "art[0]"), 6, art.data());
-                glDrawArrays(GL_TRIANGLES, 0, 3);
-                glBindTexture(GL_TEXTURE_2D, cells[current]);
-                glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-                glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-                glUseProgram(program);
-                glUniform4fv(glGetUniformLocation(program, "art[0]"), 6, art.data());
-                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+                passes.draw(source, width, height, false, settings);
+                if (!reported && passes.diagnostic()[0]) {
+                    std::cerr << passes.diagnostic() << '\n';
+                    reported = true;
+                }
+                glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
                 glReadPixels(0,
                     0,
                     static_cast<GLsizei>(width),
@@ -276,13 +180,9 @@ int main(int argc, char** argv) {
             require(glGetError() == GL_NO_ERROR, "OpenGL preview error");
             write_ppm(argv[2 * frame + 3], pixels, width, height);
         }
-        const GLuint textures[] = {source, atlas, ramp, output, cells[0], cells[1]};
-        glDeleteTextures(6, textures);
-        glDeleteFramebuffers(1, &fbo);
-        glDeleteFramebuffers(2, cell_fbos);
-        glDeleteProgram(analysis);
-        glDeleteVertexArrays(1, &vao);
-        glDeleteProgram(program);
+        glDeleteFramebuffers(1, &framebuffer);
+        glDeleteTextures(1, &output);
+        glDeleteTextures(1, &source);
         std::cout << "Preview " << width << 'x' << height << " strength=" << settings.glyph_strength
                   << " frames=" << (argc - 2) / 2 << '\n';
     } catch (const std::exception& error) {
