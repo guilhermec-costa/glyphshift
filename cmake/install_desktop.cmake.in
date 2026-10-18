@@ -1,0 +1,17 @@
+# Writes the desktop entry at install time: Exec names the installed program,
+# and `cmake --install --prefix` can differ from the configured prefix.
+set(program "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_BINDIR@/glyphshift-overlay")
+# Desktop Entry Exec quoting: quote reserved characters, escape " ` $ \ inside
+# the quotes, then double backslashes (string escaping) and percent signs.
+set(exec "${program}")
+if(exec MATCHES "[^A-Za-z0-9_./+=:@,-]")
+    string(REGEX REPLACE "([\"`$\\\\])" "\\\\\\1" exec "${exec}")
+    set(exec "\"${exec}\"")
+endif()
+string(REPLACE "\\" "\\\\" exec "${exec}")
+string(REPLACE "%" "%%" exec "${exec}")
+file(READ "@CMAKE_CURRENT_SOURCE_DIR@/data/glyphshift.desktop.in" entry)
+string(REPLACE "GLYPHSHIFT_OVERLAY_EXEC" "${exec}" entry "${entry}")
+set(target "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_DATADIR@/applications")
+message(STATUS "Installing: ${target}/glyphshift.desktop")
+file(WRITE "${target}/glyphshift.desktop" "${entry}")

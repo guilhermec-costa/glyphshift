@@ -189,9 +189,14 @@ target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
 # M6 capture overlay: reads a chosen window through X Composite and draws the
 # glyph effect in its own input-transparent window; it never enters the game.
 pkg_check_modules(X11_CAPTURE REQUIRED IMPORTED_TARGET xcomposite xdamage xfixes)
+# Platform layer, Linux: desktop integration (autostart, notifications) and
+# process facilities. Operating-system interfaces only.
+add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
+    src/platform/linux/process.cpp)
+target_include_directories(glyphshift_platform PUBLIC include)
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/tracker.cpp
     apps/overlay/daemon.cpp)
-target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline OpenGL::GL X11::X11
+target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform OpenGL::GL X11::X11
     PkgConfig::X11_CAPTURE)
 target_include_directories(glyphshift_vk PRIVATE "${GLYPH_GENERATED}")
 
@@ -256,9 +261,43 @@ if(BUILD_TESTING)
     add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
     target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
     add_test(NAME core COMMAND glyphshift-core-tests)
+    add_executable(glyphshift-platform-tests tests/unit/platform_test.cpp)
+    target_link_libraries(glyphshift-platform-tests PRIVATE glyphshift_platform)
+    add_test(NAME platform COMMAND glyphshift-platform-tests)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME install COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/install_test.py"
+            "${CMAKE_COMMAND}" "${CMAKE_BINARY_DIR}")
+    endif()
     add_test(NAME glx-help COMMAND glyphshift-glx-fixture --help)
     add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
 endif()
+
+# Installation: the launcher, overlay, libraries and layer manifest find each
+# other through $ORIGIN, so they stay together in a private directory, with
+# links in bin/. The desktop entry starts the background overlay.
+include(GNUInstallDirs)
+set(GLYPHSHIFT_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/glyphshift")
+set_target_properties(glyphshift glyphshift-overlay glyphshift_gl glyphshift_vk glyphshift_editor
+    PROPERTIES INSTALL_RPATH "$ORIGIN")
+install(TARGETS glyphshift glyphshift-overlay glyphshift_gl glyphshift_vk glyphshift_editor
+    RUNTIME DESTINATION "${GLYPHSHIFT_INSTALL_DIR}"
+    LIBRARY DESTINATION "${GLYPHSHIFT_INSTALL_DIR}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/layers/VK_LAYER_GLYPHSHIFT_overlay.json"
+    DESTINATION "${GLYPHSHIFT_INSTALL_DIR}/layers")
+foreach(program glyphshift glyphshift-overlay)
+    install(CODE "
+        set(link \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${program}\")
+        file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+        file(REMOVE \"\${link}\")
+        file(CREATE_LINK \"../${GLYPHSHIFT_INSTALL_DIR}/${program}\" \"\${link}\" SYMBOLIC)
+        message(STATUS \"Installing: \${link}\")")
+endforeach()
+configure_file(cmake/install_desktop.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/install_desktop.cmake"
+    @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_desktop.cmake")
+install(FILES data/glyphshift.svg
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)

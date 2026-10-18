@@ -29,7 +29,10 @@ the overlay to native SuperTux and to Windows SuperTux through GE-Proton
 checked; latency and GPU cost were measured against the launcher (see
 [Closing M6](#closing-m6-real-games-latency-and-gpu-cost)). Game and validation
 test assets now live in a persistent test environment
-(`tests/smoke/test_env.py`) instead of `/tmp`.
+(`tests/smoke/test_env.py`) instead of `/tmp`. M6 step 5 makes the background
+overlay an installable desktop application: `cmake --install` with a menu
+entry and icon, optional start at login, one daemon per display, and desktop
+notifications when started without a terminal.
 
 ## Roadmap
 
@@ -39,12 +42,12 @@ only when the user requests it.
 1. **Close M6.** Done on 2026-10-18: attached through the hotkey to native
    SuperTux and an offline Proton game; measured end-to-end latency and GPU
    cost of the overlay against the launcher.
-2. **M6 step 5: background app packaging.** A `glyphshift.desktop` entry and
-   icon installed by `cmake --install`, optional autostart
-   (`~/.config/autostart`), and a single instance: a second launch reports that
-   GlyphShift is already running instead of exiting silently on the hotkey
-   conflict. A system tray icon (preset choice, attached games, quit) follows
-   as a separate step.
+2. **M6 step 5: background app packaging.** Done on 2026-10-18 (see
+   [M6 step 5](#m6-step-5-background-app-packaging)): a `glyphshift.desktop`
+   entry and icon installed by `cmake --install`, optional autostart
+   (`~/.config/autostart`), and a single instance that reports the running
+   daemon. A system tray icon (preset choice, attached games, quit) follows
+   as a separate step, not started.
 3. **Open-source release readiness.** Choose and add the license (see Later
    Linux support below), CI (build and CPU tests; graphics smoke on Mesa
    llvmpipe), an animated capture at the top of the main README, an AUR
@@ -1029,6 +1032,15 @@ removed incrementally, each step verified by the existing tests:
 
 This migration is a roadmap prerequisite for Wayland and M7 and is done
 before them, not mixed into feature work.
+
+Code added since this list was written already follows the rules: the Linux
+platform layer exists as `src/platform/linux/` (static library
+`glyphshift_platform`, headers in `include/glyphshift/platform/`) with XDG
+autostart, notifications, `config_home()` and `executable_path()`. Step 3
+above should resolve preset paths through its `config_home()`, which
+duplicates the rule in `presets.cpp` for now. The daemon's single-instance
+selection (`claim_instance` in `daemon.cpp`) moves with its hotkey grab into
+the X11 `display::GlobalHotkey` in step 5.
 
 ### Repository layout (target)
 
@@ -3028,7 +3040,8 @@ Verification on 2026-10-18 (NVIDIA, i3 with picom):
 
 - Invalid arguments (`--hotkey` with `--window`, unknown modifier) exit 2 with
   usage; a second daemon on the same combination exits 1 with the conflict
-  diagnostic, and the first exits 0 on SIGTERM.
+  diagnostic, and the first exits 0 on SIGTERM. (Step 5 replaces this: a
+  second daemon on the same display now reports the running one and exits 0.)
 - New focused driver `tests/smoke/overlay_daemon.py` (real XTest keyboard
   input; `RealInput.key` now accepts several modifiers) passed: the GLX fixture
   started without launcher showed 0.01% of its area different on screen from
@@ -3214,6 +3227,96 @@ game, the overlay follows the window and detaches cleanly, and latency and
 cost are documented. Proton coverage is one game (SuperTux; which graphics path
 it used under Proton in this run was not checked); other Proton games,
 other GPUs and compositors, and Wayland remain unverified.
+
+#### M6 step 5: background app packaging
+
+Roadmap item 2, done on 2026-10-18 on the same setup. The background overlay is
+now a desktop application.
+
+**Installation.** `cmake --install BUILD [--prefix PREFIX]` installs the
+launcher, the overlay, the three shared libraries and the layer manifest
+together in `PREFIX/lib/glyphshift/` (they find each other through `$ORIGIN`
+and `/proc/self/exe`; install RPATH `$ORIGIN`), with symbolic links
+`PREFIX/bin/glyphshift` and `PREFIX/bin/glyphshift-overlay`, the desktop entry
+`PREFIX/share/applications/glyphshift.desktop` and the icon
+`PREFIX/share/icons/hicolor/scalable/apps/glyphshift.svg` (`data/`, a
+pixel "G" of glyph cells, no font). The entry starts the background overlay
+(`Exec` is the installed `bin/glyphshift-overlay`, written at install time by
+`cmake/install_desktop.cmake.in` so `--prefix` is honored and quoted per the
+Desktop Entry Specification), `Categories=Game`, no terminal, no startup
+notification. The launcher still refuses module paths with whitespace or
+colons, so such prefixes support only the overlay.
+
+**Single instance.** One daemon per X display. Before grabbing its hotkey,
+the daemon takes ownership of the selection `_GLYPHSHIFT_DAEMON_S<screen>`
+through a hidden input-only window carrying its hotkey in
+`_GLYPHSHIFT_HOTKEY`, inside `XGrabServer` so checking and taking are one step;
+the X server releases it when the process exits. A second launch prints and
+notifies "GlyphShift is already running. Press Ctrl+Alt+G in a game..." with
+the running daemon's hotkey and exits 0. This replaces the step 4 behavior
+where a second daemon failed the hotkey grab with status 1; a hotkey taken by
+another application still exits 1, now also with a notification.
+
+**Notifications.** Started from a menu or at login there is no terminal, so
+when stderr is not a terminal the daemon also shows a desktop notification
+(`notify-send`, freedesktop notifications) on start ("GlyphShift is running.
+Press Ctrl+Alt+G in a game to attach or detach."), when already running and on
+a hotkey conflict. The notifier is double-forked and never waited for; without
+`notify-send` or a notification service nothing is shown and nothing fails.
+
+**Autostart.** `glyphshift-overlay --autostart on [--hotkey KEYS] [--preset
+NAME]` validates the options and writes `$XDG_CONFIG_HOME/autostart/glyphshift.desktop`
+(or `~/.config/autostart`) atomically, running the absolute path of the
+current executable with those options; `--autostart off` removes it. It
+starts nothing by itself. The entry is the XDG autostart standard: desktops
+such as GNOME, KDE and Xfce run it; i3 needs a runner such as `dex
+--autostart`.
+
+New code follows the layer rules: autostart, notifications, `config_home()`
+and `executable_path()` form the Linux platform layer (`src/platform/linux/`,
+standard library and POSIX only); the selection lives with the X11 hotkey
+grab in the daemon.
+
+Verification on 2026-10-18:
+
+- New CPU test `platform`: Exec quoting (plain, space, `"`, `\`, `$`, `%`,
+  empty, line break rejected), `config_home` (relative `XDG_CONFIG_HOME`
+  ignored), autostart write/replace/remove with no temporary file left,
+  relative program rejected, own executable path, and `notify` returning
+  without `notify-send`.
+- New CPU test `install`: installs into a prefix containing a space and into
+  a plain one; checks the layout, the links, the layer manifest's relative
+  library path, the desktop entry (`Exec` quoted, `desktop-file-validate`
+  clean), that the installed launcher runs `/usr/bin/true` from the plain
+  prefix and reports the whitespace limit from the other (status 126), that
+  the installed overlay loads and rejects bad `--autostart` and hotkey
+  arguments with status 2, and that `--autostart on/off` writes a valid entry
+  with the installed private path and options, then removes it.
+- The overlay smoke (GLX smoke) gained a single-instance phase without input:
+  a second daemon exits 0 naming the first one's hotkey; of two started
+  together exactly one stays; a new daemon runs after the first exits. Twenty
+  repeated simultaneous starts left exactly one daemon each time.
+- With a stand-in `notify-send` that records its arguments, a daemon started
+  with stderr in a file notified "GlyphShift is running" and a second launch
+  "GlyphShift is already running", both with Ctrl+Alt+Shift+F12, the hotkey of
+  the running daemon. This machine runs no notification service (the real
+  `notify-send` reports the name is not activatable), so no notification was
+  seen on screen. The hotkey-conflict notification was not exercised.
+- Debug built without warnings and passed `ctest --preset dev` 14/14; Release
+  built without warnings and passed 16/16 with the persistent validation
+  layer and `VK_LAYER_VALIDATE_SYNC=1` (107 s). `overlay_daemon.py` (XTest)
+  passed on the Release build.
+- Not verified: launching the entry from a menu (rofi `drun` lists
+  `~/.local/share/applications`), login autostart (this i3 configuration runs
+  `dex --autostart`, but dex is not installed), icon rendering in a desktop's
+  menu, and installation into a system prefix.
+
+```bash
+cmake --install build/release --prefix ~/.local
+glyphshift-overlay --autostart on
+ctest --preset dev -R 'platform|install'
+python3 tests/smoke/overlay.py --build build/dev --output /tmp/glyphshift-overlay-smoke
+```
 
 #### M6 technical debt (tracked)
 

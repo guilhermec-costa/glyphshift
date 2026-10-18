@@ -83,6 +83,17 @@ For an optimized build, use `cmake --preset release` followed by
 `cmake --build --preset release`; executables will be in `build/release`.
 Builds use the vendored Dear ImGui sources and do not download dependencies.
 
+To install for your user, with a menu entry and icon:
+
+```bash
+cmake --install build/release --prefix ~/.local
+```
+
+This puts `glyphshift` and `glyphshift-overlay` in `~/.local/bin` (their files
+stay together in `~/.local/lib/glyphshift`) and **GlyphShift** in your
+application menu. Use a prefix without spaces or colons if you want the
+launcher too; the overlay works from any prefix.
+
 ## Try the effect
 
 Start with the included OpenGL demo, without needing a game:
@@ -137,6 +148,20 @@ GlyphShift to the focused window; press it again to detach. It works with any
 number of games, and each overlay ends when its game closes. Use
 `--hotkey super+shift+F9` (any of `ctrl`, `shift`, `alt`, `super` plus a key) if
 the combination is taken. Stop it with Ctrl+C; attached overlays end with it.
+
+After installing, you can also start **GlyphShift** from your application
+menu: it runs in the background and, when your desktop shows notifications,
+tells you which key to press. Only one runs per display; starting it again
+just reminds you that it is already running. To start it automatically when
+you log in (with the same options, if you add them):
+
+```bash
+glyphshift-overlay --autostart on          # or: --autostart off
+```
+
+This uses the standard `~/.config/autostart` entry, which GNOME, KDE, Xfce and
+similar desktops run; with i3, start a runner such as `dex --autostart` in
+your configuration.
 
 | Key | Action |
 | --- | --- |

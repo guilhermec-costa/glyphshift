@@ -71,7 +71,9 @@ try:
     with daemon_log.open('w') as stream:
         daemon = subprocess.Popen([str(build / 'glyphshift-overlay'), '--preset', 'art-comic',
                                    '--log'], env=env, stdout=stream, stderr=subprocess.STDOUT)
-    eventually(lambda: 'running;' in daemon_log.read_text(), 'daemon did not start')
+    eventually(lambda: 'running' in daemon_log.read_text(), 'daemon did not start')
+    if 'already running' in daemon_log.read_text():
+        raise SystemExit('stop your own GlyphShift daemon first: only one runs per display')
     with fixture_log.open('w') as stream:
         fixture = subprocess.Popen([str(build / 'glyphshift-glx-fixture'), '--fixed-time', '1.25'],
                                    env=env, stdout=stream, stderr=subprocess.STDOUT)

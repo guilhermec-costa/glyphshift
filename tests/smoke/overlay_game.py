@@ -145,7 +145,9 @@ try:
     with daemon_log.open('w') as stream:
         daemon = subprocess.Popen([str(build / 'glyphshift-overlay'), '--log'], env=env,
                                   stdout=stream, stderr=subprocess.STDOUT)
-    eventually(lambda: 'running;' in daemon_log.read_text(), 'daemon did not start')
+    eventually(lambda: 'running' in daemon_log.read_text(), 'daemon did not start')
+    if 'already running' in daemon_log.read_text():
+        raise SystemExit('stop your own GlyphShift daemon first: only one runs per display')
     with game_log.open('w') as stream:
         game = subprocess.Popen(game_command, env=env, stdout=stream, stderr=subprocess.STDOUT)
     eventually(lambda: x.windows(test_env.SUPERTUX_TITLE), 'game window did not appear', 90)

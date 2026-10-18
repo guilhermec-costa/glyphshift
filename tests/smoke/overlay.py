@@ -4,6 +4,7 @@ import ctypes as c
 import ctypes.util as util
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import time
@@ -200,6 +201,57 @@ with fixture_log.open('w') as stream:
     fixture = subprocess.Popen([str(build / 'glyphshift-glx-fixture'), '--fixed-time', '1.25',
                                 '--frames', '9000'], env=env, stdout=stream,
                                stderr=subprocess.STDOUT)
+def single_instance():
+    # One daemon per display; no keyboard input. An unusual hotkey avoids
+    # other applications' grabs, and notify-send is kept off PATH.
+    local = dict(env, PATH=str(output / 'no-programs'))
+
+    def start(name, hotkey):
+        log = output / f'daemon-{name}.log'
+        with log.open('w') as stream:
+            process = subprocess.Popen([str(build / 'glyphshift-overlay'), '--hotkey', hotkey],
+                                       env=local, stdout=stream, stderr=subprocess.STDOUT)
+        return process, log
+
+    def running(log):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            text = log.read_text()
+            if 'running;' in text or 'already running' in text:
+                return 'running;' in text
+            time.sleep(.05)
+        raise RuntimeError('daemon did not report: ' + log.read_text())
+
+    first, first_log = start('first', 'ctrl+alt+shift+F12')
+    if not running(first_log):
+        first.wait(timeout=10)
+        print('Single instance: SKIPPED, another GlyphShift daemon runs on this display')
+        return
+    second, second_log = start('second', 'ctrl+alt+g')
+    assert second.wait(timeout=10) == 0, second_log.read_text()
+    assert 'already running' in second_log.read_text() and \
+        'Ctrl+Alt+Shift+F12' in second_log.read_text(), second_log.read_text()
+    first.send_signal(signal.SIGTERM)
+    assert first.wait(timeout=10) == 0, first_log.read_text()
+    # Started together, exactly one daemon stays; the other leaves cleanly.
+    pair = [start('pair-a', 'ctrl+alt+shift+F11'), start('pair-b', 'ctrl+alt+shift+F12')]
+    states = [running(log) for _, log in pair]
+    assert sorted(states) == [False, True], [log.read_text() for _, log in pair]
+    for (process, log), state in zip(pair, states):
+        if state:
+            time.sleep(.5)
+            assert process.poll() is None, log.read_text()
+            process.send_signal(signal.SIGTERM)
+        assert process.wait(timeout=10) == 0, log.read_text()
+    # The selection is released when a daemon exits.
+    again, again_log = start('again', 'ctrl+alt+shift+F12')
+    assert running(again_log), again_log.read_text()
+    again.send_signal(signal.SIGTERM)
+    assert again.wait(timeout=10) == 0, again_log.read_text()
+    print('Single instance: a second daemon reports the running one\'s hotkey and exits 0; '
+          'of two started together one stays; a new daemon runs after the first exits')
+
+
 overlay = None
 try:
     window = wait_window(f'GlyphShift GLX fixture{suffix}', fixture, fixture_log)
@@ -262,6 +314,7 @@ try:
     print('Capture overlay: independent fixture transformed on screen, output equals the '
           'preview, input shape empty, clean exit with the target')
     tracking()
+    single_instance()
 finally:
     for process in [overlay, fixture]:
         if process and process.poll() is None:

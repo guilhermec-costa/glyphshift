@@ -320,6 +320,12 @@ CPU, configuration, preset, launcher, and interposition tests:
 ctest --preset dev
 ```
 
+These include `platform` (autostart entries and their quoting) and `install`,
+which runs `cmake --install` into temporary prefixes and starts the installed
+programs. The overlay smoke, part of the GLX graphics smoke, also checks that
+only one background daemon runs per display, without keyboard input; it
+reports a skip for that phase if your own daemon is already running.
+
 Sequential graphics smoke tests, with X11/GPU access and the Khronos layer
 available:
 

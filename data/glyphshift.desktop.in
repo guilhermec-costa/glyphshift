@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=GlyphShift
+GenericName=Glyph art overlay
+Comment=Turn games into live glyph art; press Ctrl+Alt+G in a game
+Exec=GLYPHSHIFT_OVERLAY_EXEC
+Icon=glyphshift
+Terminal=false
+StartupNotify=false
+Categories=Game;
+Keywords=ascii;glyph;overlay;shader;art;

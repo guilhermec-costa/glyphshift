@@ -9,11 +9,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <glyphshift/platform/desktop.hpp>
+#include <glyphshift/platform/process.hpp>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -151,12 +152,84 @@ Window focused_game(Display* display) {
     return result;
 }
 
-std::string self_path() {
-    std::array<char, 4096> path{};
-    const auto size = readlink("/proc/self/exe", path.data(), path.size() - 1);
-    if (size <= 0)
-        throw std::runtime_error("cannot locate glyphshift-overlay itself");
-    return std::string(path.data(), static_cast<std::size_t>(size));
+// "ctrl+alt+g" as "Ctrl+Alt+G" for messages.
+std::string display_name(const std::string& hotkey) {
+    std::string result;
+    bool start = true;
+    for (const char c : hotkey) {
+        const auto ch = static_cast<unsigned char>(c);
+        result += start ? static_cast<char>(std::toupper(ch)) : c;
+        start = c == '+';
+    }
+    return result;
+}
+
+// Background launches (menu, autostart) have no terminal: tell the user
+// through a desktop notification instead.
+void tell(const std::string& summary, const std::string& body) {
+    std::fprintf(stderr, "glyphshift-overlay: %s. %s\n", summary.c_str(), body.c_str());
+    if (!isatty(STDERR_FILENO))
+        platform::notify(summary, body);
+}
+
+std::string read_text(Display* display, Window window, Atom property) {
+    Atom type = None;
+    int format = 0;
+    unsigned long items = 0, remaining = 0;
+    unsigned char* data = nullptr;
+    std::string text;
+    if (XGetWindowProperty(display,
+            window,
+            property,
+            0,
+            64,
+            False,
+            AnyPropertyType,
+            &type,
+            &format,
+            &items,
+            &remaining,
+            &data) == Success &&
+        data && format == 8)
+        text.assign(reinterpret_cast<const char*>(data), items);
+    if (data)
+        XFree(data);
+    return text;
+}
+
+// One daemon per X display. Like window managers and compositors, it owns a
+// selection, held by a hidden window that also publishes its hotkey; the
+// selection is released when the process exits. Returns the owner window, or
+// 0 with `other` set to the running daemon's hotkey.
+Window claim_instance(Display* display, const std::string& hotkey, std::string& other) {
+    const Window root = DefaultRootWindow(display);
+    const Atom selection = XInternAtom(display,
+        ("_GLYPHSHIFT_DAEMON_S" + std::to_string(DefaultScreen(display))).c_str(),
+        False);
+    const Atom property = XInternAtom(display, "_GLYPHSHIFT_HOTKEY", False);
+    // The server grab makes looking for an owner and taking ownership one
+    // step, so of two daemons started together exactly one stays.
+    XGrabServer(display);
+    const Window owner = XGetSelectionOwner(display, selection);
+    Window window = 0;
+    if (owner) {
+        other = read_text(display, owner, property);
+    } else {
+        window =
+            XCreateWindow(display, root, -1, -1, 1, 1, 0, 0, InputOnly, CopyFromParent, 0, nullptr);
+        XChangeProperty(display,
+            window,
+            property,
+            XA_STRING,
+            8,
+            PropModeReplace,
+            reinterpret_cast<const unsigned char*>(hotkey.data()),
+            static_cast<int>(hotkey.size()));
+        XSetSelectionOwner(display, selection, window, CurrentTime);
+    }
+    XUngrabServer(display);
+    XSync(display, False);
+    return window;
 }
 
 pid_t spawn(const std::string& program, Window window, const DaemonOptions& options) {
@@ -184,9 +257,13 @@ pid_t spawn(const std::string& program, Window window, const DaemonOptions& opti
 }
 }  // namespace
 
+void check_hotkey(const std::string& hotkey) {
+    (void)parse_hotkey(hotkey);
+}
+
 int run_daemon(const DaemonOptions& options) {
     const auto hotkey = parse_hotkey(options.hotkey);
-    const std::string program = self_path();
+    const std::string program = platform::executable_path();
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         throw std::runtime_error("cannot open X11 display");
@@ -195,6 +272,14 @@ int run_daemon(const DaemonOptions& options) {
     if (!code)
         throw std::invalid_argument("the hotkey's key is not on this keyboard");
     XSetErrorHandler(record_error);
+    std::string other;
+    if (!claim_instance(display, options.hotkey, other)) {
+        XCloseDisplay(display);
+        tell("GlyphShift is already running",
+            other.empty() ? "Press its hotkey in a game to attach or detach."
+                          : "Press " + display_name(other) + " in a game to attach or detach.");
+        return 0;
+    }
     // Grab with and without CapsLock and NumLock so the hotkey always works.
     for (const unsigned locks :
         {0U, unsigned{LockMask}, unsigned{Mod2Mask}, unsigned{LockMask | Mod2Mask}})
@@ -202,9 +287,12 @@ int run_daemon(const DaemonOptions& options) {
     XSync(display, False);
     if (grab_failed) {
         XCloseDisplay(display);
-        throw std::runtime_error(
-            "the hotkey " + options.hotkey +
-            " is already taken (another GlyphShift daemon or application); choose --hotkey");
+        if (!isatty(STDERR_FILENO))
+            platform::notify("GlyphShift could not start",
+                "The hotkey " + display_name(options.hotkey) +
+                    " is taken by another application; choose another with --hotkey.");
+        throw std::runtime_error("the hotkey " + options.hotkey +
+                                 " is already taken by another application; choose --hotkey");
     }
     struct sigaction action{};
     action.sa_handler = [](int) {
@@ -215,6 +303,9 @@ int run_daemon(const DaemonOptions& options) {
     std::fprintf(stderr,
         "glyphshift-overlay: running; press %s in a game to attach or detach\n",
         options.hotkey.c_str());
+    if (!isatty(STDERR_FILENO))
+        platform::notify("GlyphShift is running",
+            "Press " + display_name(options.hotkey) + " in a game to attach or detach.");
     std::map<Window, pid_t> attached;
     auto last = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     while (!stop) {

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>GlyphShift</title>
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#ef8a3c"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="#151824"/>
+  <rect x="20" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="32" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="44" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="92" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="104" y="14" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="26" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="32" y="26" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="41" y="23" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="53" y="23" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="65" y="23" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="77" y="23" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="92" y="26" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="104" y="26" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="29" y="35" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="44" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="89" y="35" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="104" y="38" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="29" y="47" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="44" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="92" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="104" y="50" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="62" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="29" y="59" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="44" y="62" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="62" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="65" y="59" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="77" y="59" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="89" y="59" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="104" y="62" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="29" y="71" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="44" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="89" y="71" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="104" y="74" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="29" y="83" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="44" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="89" y="83" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="104" y="86" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="98" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="32" y="98" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="41" y="95" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="53" y="95" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="65" y="95" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="77" y="95" width="10" height="10" rx="2" fill="url(#ink)"/>
+  <rect x="92" y="98" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="104" y="98" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="20" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="32" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="44" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="56" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="68" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="80" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="92" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+  <rect x="104" y="110" width="4" height="4" rx="1" fill="#2c3349"/>
+</svg>

@@ -18,11 +18,14 @@
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <glyphshift/editor/editor.hpp>
+#include <glyphshift/platform/desktop.hpp>
+#include <glyphshift/platform/process.hpp>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../../src/render/opengl/gpu_timer.hpp"
 #include "../../src/render/opengl/pipeline.hpp"
@@ -57,6 +60,7 @@ struct Options {
     Window target = 0;
     std::string preset;
     std::string hotkey;
+    std::string autostart;
     bool log = false;
 };
 
@@ -70,6 +74,8 @@ Options parse(int argc, char** argv) {
             options.preset = argv[++i];
         else if (argument == "--hotkey" && i + 1 < argc)
             options.hotkey = argv[++i];
+        else if (argument == "--autostart" && i + 1 < argc)
+            options.autostart = argv[++i];
         else if (argument == "--log")
             options.log = true;
         else
@@ -77,7 +83,34 @@ Options parse(int argc, char** argv) {
     }
     if (options.target && !options.hotkey.empty())
         throw std::invalid_argument("--hotkey applies only without --window");
+    if (!options.autostart.empty() &&
+        (options.target || (options.autostart != "on" && options.autostart != "off")))
+        throw std::invalid_argument("--autostart takes on or off, without --window");
     return options;
+}
+
+// Start-on-login for the background mode, with the same hotkey and style.
+int autostart(const Options& options) {
+    if (options.autostart == "off") {
+        const bool removed = glyphshift::platform::disable_autostart();
+        std::cout << (removed ? "GlyphShift will no longer start at login\n"
+                              : "GlyphShift was not set to start at login\n");
+        return 0;
+    }
+    std::vector<std::string> command{glyphshift::platform::executable_path().string()};
+    if (!options.hotkey.empty()) {
+        glyphshift::overlay::check_hotkey(options.hotkey);
+        command.insert(command.end(), {"--hotkey", options.hotkey});
+    }
+    if (!options.preset.empty()) {
+        if (!glyphshift::builtin_preset(options.preset))
+            throw std::invalid_argument("unknown included style: " + options.preset);
+        command.insert(command.end(), {"--preset", options.preset});
+    }
+    glyphshift::platform::enable_autostart(command);
+    std::cout << "GlyphShift will start in the background at login ("
+              << glyphshift::platform::autostart_entry().string() << ")\n";
+    return 0;
 }
 
 // Presets are kept per game: profile "overlay-CLASS" from the target's
@@ -500,6 +533,8 @@ private:
 int main(int argc, char** argv) {
     try {
         const auto options = parse(argc, argv);
+        if (!options.autostart.empty())
+            return autostart(options);
         // Without a window, run in the background and attach with the hotkey.
         if (!options.target) {
             glyphshift::overlay::DaemonOptions daemon;
@@ -519,9 +554,11 @@ int main(int argc, char** argv) {
         overlay.run();
         return 0;
     } catch (const std::invalid_argument& error) {
-        std::cerr << "glyphshift-overlay: " << error.what()
-                  << "\nUsage: glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]\n"
-                     "       glyphshift-overlay --window ID [--preset NAME] [--log]\n";
+        std::cerr
+            << "glyphshift-overlay: " << error.what()
+            << "\nUsage: glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]\n"
+               "       glyphshift-overlay --window ID [--preset NAME] [--log]\n"
+               "       glyphshift-overlay --autostart on|off [--hotkey KEYS] [--preset NAME]\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << "glyphshift-overlay: " << error.what() << '\n';
