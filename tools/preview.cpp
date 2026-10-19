@@ -12,6 +12,7 @@
 
 #include "../src/display/x11/glx_loader.hpp"
 #include "../src/render/opengl/pipeline.hpp"
+#include "ppm.hpp"
 
 namespace {
 void require(bool value, const char* message) {
@@ -64,32 +65,6 @@ void flip(std::vector<unsigned char>& pixels, unsigned width, unsigned height) {
         for (std::size_t x = 0; x < row; ++x)
             std::swap(pixels[y * row + x], pixels[(height - 1 - y) * row + x]);
 }
-
-std::vector<unsigned char> read_ppm(const char* path, unsigned& width, unsigned& height) {
-    std::ifstream input(path, std::ios::binary);
-    std::string magic;
-    unsigned maximum = 0;
-    input >> magic >> width >> height >> maximum;
-    require(magic == "P6" && maximum == 255 && width && height && width <= 8192 && height <= 8192,
-        "Expected P6 RGB PPM, no comments, dimensions 1..8192");
-    require(input.get() == '\n', "Expected newline before PPM pixels");
-    std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * height * 3);
-    require(static_cast<bool>(input.read(reinterpret_cast<char*>(pixels.data()),
-                static_cast<std::streamsize>(pixels.size()))),
-        "Cannot read input pixels");
-    return pixels;
-}
-
-void write_ppm(const char* path,
-    const std::vector<unsigned char>& pixels,
-    unsigned width,
-    unsigned height) {
-    std::ofstream destination(path, std::ios::binary);
-    destination << "P6\n" << width << ' ' << height << "\n255\n";
-    destination.write(reinterpret_cast<const char*>(pixels.data()),
-        static_cast<std::streamsize>(pixels.size()));
-    require(static_cast<bool>(destination), "Cannot write output");
-}
 }  // namespace
 
 // Developer-only, real GPU preview on fixed images. Readback belongs here,
@@ -106,7 +81,7 @@ int main(int argc, char** argv) {
     }
     try {
         unsigned width = 0, height = 0;
-        auto pixels = read_ppm(argv[1], width, height);
+        auto pixels = glyphshift::tools::read_ppm(argv[1], width, height);
         std::ifstream config(argv[2]);
         require(static_cast<bool>(config), "Cannot read settings");
         const auto parsed = glyphshift::parse_settings(
@@ -148,7 +123,7 @@ int main(int argc, char** argv) {
         for (int frame = 0; 2 * frame + 3 < argc; ++frame) {
             if (frame) {
                 unsigned next_width = 0, next_height = 0;
-                pixels = read_ppm(argv[2 * frame + 2], next_width, next_height);
+                pixels = glyphshift::tools::read_ppm(argv[2 * frame + 2], next_width, next_height);
                 require(next_width == width && next_height == height,
                     "Sequence frames must share dimensions");
             }
@@ -178,7 +153,7 @@ int main(int argc, char** argv) {
                 flip(pixels, width, height);
             }
             require(glGetError() == GL_NO_ERROR, "OpenGL preview error");
-            write_ppm(argv[2 * frame + 3], pixels, width, height);
+            glyphshift::tools::write_ppm(argv[2 * frame + 3], pixels, width, height);
         }
         target.release();
         glDeleteFramebuffers(1, &framebuffer);

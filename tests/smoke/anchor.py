@@ -71,7 +71,7 @@ def render(name, settings, inputs):
     config.write_text(
         'render_style=illustrated\ncolor_mode=source\nglyph_strength=1\n'
         f'cell_width={CW}\ncell_height={CH}\ncharacter_set=custom\n'
-        'characters=" .:-=+*#%@"\nedge_detector=dog\n' + settings)
+        'characters=" .:-=+*#%@"\nedge_detector=dog\n' + settings, encoding='utf-8')
     outputs = [args.output / f'{name}-{k}.ppm' for k in range(len(inputs))]
     command = [str(args.build / 'glyphshift-preview'), str(inputs[0]), str(config), str(outputs[0])]
     for source, output in zip(inputs[1:], outputs[1:]):

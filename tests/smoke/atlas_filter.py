@@ -17,7 +17,7 @@ for glyph in ['▌', '▘']:
         config = args.output / (name + '.conf')
         mode = 'source' if glyph == '▌' else 'mono'
         palette = '' if glyph == '▌' else 'foreground=0.2,0.4,0.8\nbackground=0.05,0.1,0.15\n'
-        config.write_text(f'{palette}render_style=illustrated\ncolor_mode={mode}\nglyph_strength=1\ncell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="{glyph}"\nedge_strength=0\n')
+        config.write_text(f'{palette}render_style=illustrated\ncolor_mode={mode}\nglyph_strength=1\ncell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="{glyph}"\nedge_strength=0\n', encoding='utf-8')
         output = args.output / (name + '.ppm')
         subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
         rgb = output.read_bytes().split(b'\n', 3)[3]
@@ -45,7 +45,7 @@ for ink in [0, 1]:
     source = args.output / (name + '-source.ppm')
     source.write_bytes(f'P6\n{w} {h}\n255\n'.encode() + b''.join(bytes([0 if x < 40 else 255]) * 3 for y in range(h) for x in range(w)))
     config = args.output / (name + '.conf')
-    config.write_text(f'render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\ncell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="█"\nforeground={ink},{ink},{ink}\nbackground={1-ink},{1-ink},{1-ink}\n')
+    config.write_text(f'render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\ncell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="█"\nforeground={ink},{ink},{ink}\nbackground={1-ink},{1-ink},{1-ink}\n', encoding='utf-8')
     output = args.output / (name + '.ppm')
     subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
     rgb = output.read_bytes().split(b'\n', 3)[3]
@@ -67,7 +67,7 @@ for cw, ch in [(3, 5), (8, 12), (13, 19), (64, 96)]:
     config = args.output / (name + '.conf')
     config.write_text('render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\n'
         f'cell_width={cw}\ncell_height={ch}\ncharacter_set=custom\ncharacters="▘"\n'
-        'edge_strength=0\ncrisp_glyphs=true\nforeground=1,1,1\nbackground=0,0,0\n')
+        'edge_strength=0\ncrisp_glyphs=true\nforeground=1,1,1\nbackground=0,0,0\n', encoding='utf-8')
     output = args.output / (name + '.ppm')
     subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
     rgb = output.read_bytes().split(b'\n', 3)[3]
@@ -91,7 +91,7 @@ def dog_case(name, pixel):
     config = args.output / (name + '.conf')
     config.write_text('render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\n'
         f'cell_width={cw}\ncell_height={ch}\nfill_enabled=false\ncontour_overlay=false\n'
-        'edge_detector=dog\nforeground=1,1,1\nbackground=0,0,0\n')
+        'edge_detector=dog\nforeground=1,1,1\nbackground=0,0,0\n', encoding='utf-8')
     output = args.output / (name + '.ppm')
     subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
     rgb = output.read_bytes().split(b'\n', 3)[3]
@@ -128,7 +128,7 @@ for mode in ['source', 'mono']:
         'cell_width=8\ncell_height=12\ncharacter_set=custom\n'
         'characters=" █▘▝▀▖▌▞▛▗▚▐▜▄▙▟"\nshape_matching=true\n'
         'shape_threshold=0.2\nscene_paper=1\n'
-        'foreground=0,0,0\nbackground=1,1,1\nedge_threshold=0.01\n')
+        'foreground=0,0,0\nbackground=1,1,1\nedge_threshold=0.01\n', encoding='utf-8')
     output = args.output / (name + '.ppm')
     subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
     rgb = output.read_bytes().split(b'\n', 3)[3]
@@ -140,7 +140,7 @@ for mode in ['source', 'mono']:
             expected = pixels[i:i+3] if mode == 'source' else bytes([255 if lit else 0])*3
             assert all(abs(a-b) <= 1 for a,b in zip(rgb[i:i+3], expected)), (mode,x,y)
     # Strength zero must still bypass the entire structural renderer exactly.
-    config.write_text(config.read_text().replace('glyph_strength=1','glyph_strength=0').replace('color_mode=mono','color_mode=source'))
+    config.write_text(config.read_text(encoding='utf-8').replace('glyph_strength=1','glyph_strength=0').replace('color_mode=mono','color_mode=source'), encoding='utf-8')
     subprocess.run([str(args.build / 'glyphshift-preview'), str(source), str(config), str(output)], check=True, stdout=subprocess.DEVNULL)
     assert output.read_bytes().split(b'\n',3)[3] == pixels
 print('28 GPU silhouette cases passed (14 masks x source/reversed mono), plus exact strength-zero bypass')

@@ -48,6 +48,12 @@ public:
         history_ = false;
     }
 
+    // Frame interval used for exposure adaptation; 0 (the default) measures
+    // real time. The preview sets it for reproducible frame sequences.
+    void set_frame_interval(double seconds) noexcept {
+        frame_interval_ = seconds;
+    }
+
     // Target `index` samples `source` and renders into `output`, a view of an
     // image of the pipeline's format and extent.
     void set_target(unsigned index, VkImageView source, VkImageView output);
@@ -136,6 +142,7 @@ private:
     VkPipeline meter_pipeline_ = VK_NULL_HANDLE;
     bool metered_ = false;
     std::chrono::steady_clock::time_point meter_time_{};
+    double frame_interval_ = 0;
     // World-anchored grid: the previous frame's luminance, the motion search
     // costs and two camera states alternating with the grids, and the cell
     // size the camera state belongs to.

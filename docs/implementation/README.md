@@ -4152,6 +4152,83 @@ Not established by the prototype: capture of other processes' windows and of
 games, frame pacing, resizing (the pool must be recreated with the new size),
 and other GPUs or drivers.
 
+**Step 6, Vulkan offscreen preview and the image oracles (2026-10-19).**
+`tools/vulkan_preview.cpp` renders through `vulkan::Pipeline` offscreen (no
+window or surface), with the GL preview's command line, PPM files and frame
+sequences: Windows builds it as `glyphshift-preview`, so the oracles run
+unchanged; Linux builds it as `glyphshift-vulkan-preview` next to the GL
+preview. Source and output are `R8G8B8A8_UNORM` images; rows stay top-down
+(Vulkan samples the source that way); the pipeline's final layout is
+`COLOR_ATTACHMENT_OPTIMAL` and the preview transitions the output for the
+readback copy. `GLYPHSHIFT_PREVIEW_VALIDATION=1` enables Khronos validation
+with synchronization checks, and any warning or error fails the preview. The
+first validated run reported a read-after-write hazard: the readback copy was
+not ordered after the composition pass's own final layout transition (the
+pass has only the implicit external dependency); leaving the output a color
+attachment and transitioning it in the preview removed it. `vulkan::Pipeline`
+gained `set_frame_interval` like the GL pipeline (0, the default, keeps real
+time, so the Linux layer is unchanged). PPM reading and writing moved to
+`tools/ppm.hpp`, shared by both previews.
+
+The oracles needed one portability fix: they wrote their configs with
+Python's default encoding, which is cp1252 on Windows and cannot encode the
+Unicode block characters; their text reads and writes now say UTF-8
+(unchanged on Linux, where it is the default). `exposure.py` passes 151 frames
+on one command line, which exceeds Windows's 32,767-character limit with a
+long output directory (error 206); a short output path such as
+`build/windows-dev/oracles/exposure` works.
+
+Results with the Vulkan preview and validation, the same in `windows-dev` and
+`windows-release`, against the records above (GL preview on Linux):
+
+| Oracle | Windows (Vulkan) | Linux record (GL) |
+| --- | --- | --- |
+| `atlas_filter.py` | 14 area-filter cases (error ≤ 1/255), 2 contour-over-fill, 4 crisp, 3 DoG, 28 silhouette cases and the strength-zero bypass passed | same cases passed |
+| `temporal.py` | flicker churn 0.367 → 0.000, stale cells after a real change 0.005 | 36.7% → 0.0%, 0.5% |
+| `exposure.py` | half brightness 1.000 (fixed) → 0.000 (automatic); after a cut 1.000 → 0.000 within two seconds | 100% → 0%; 100% → 0% |
+| `anchor.py` | 0.979 of interior cells change per frame on a fixed grid, 0.000 anchored | 97.6% → 0 |
+
+The anchored-grid oracle passed; its fixed-grid share differs by 0.3 points
+from the Linux record, which is a measurement, not a pass criterion.
+
+Cross-check against images rendered on Linux: the nine gallery images
+(`docs/presets/`, GL preview on Linux) were re-rendered from the same source
+frames (`docs/illustration-original.png`; `docs/presets/dark-scene.png` for
+Ink & Edges, as the gallery notes) by the Windows Vulkan preview. Blueprint,
+which uses no font (built-in classic glyphs, procedural strokes), was
+byte-identical with the discovered font. With the Linux machine's font
+(Hack 3.003 Bold, downloaded from the project's GitHub release into a scratch
+directory, SHA-256 `0c2604…f8290ac`, passed as `glyph_font`), Sepia, Newsprint,
+Chalk, Ink & Edges and CRT were byte-identical too, Comic differed in 3 of
+480,000 pixels and Midnight in 1, by one level, and Digital rain in 1,225
+pixels: in 613 cells the tips of the crisp `0` glyph are one pixel narrower,
+the 40% crisp-glyph threshold falling the other way. Whether that comes from
+GL versus Vulkan filtering or from FreeType's build options (the same 2.14.3
+version, Arch's package versus vcpkg's) is not isolated; running
+`glyphshift-vulkan-preview` on Linux would tell. With Consolas Bold, the
+Windows default, the font-based styles differ widely (14–99% of pixels), as
+expected from different glyph shapes; glow and paper wash spread a glyph's
+difference to its neighborhood. Two harness mistakes were found and fixed
+during this check, not counted as results: a `Select-Object -First` stopping
+a PNG conversion early, and Windows PowerShell 5.1 reading the configs as
+cp1252, which turned `█` into three other characters.
+
+Verification: `windows-dev` and `windows-release` built without warnings,
+passed 9/9 CTest tests, and passed all four oracles with validation and no
+validation message; `tools/format.py --check` and `git diff --check` passed.
+Not verified: the Linux build of `glyphshift-vulkan-preview`, the GL preview
+after its PPM helpers moved, and the oracles' UTF-8 change on Linux (the CI's
+`build` job compiles the first two; the oracles run in the manual graphics
+job or the Linux smoke).
+
+```powershell
+$env:GLYPHSHIFT_PREVIEW_VALIDATION = '1'
+python tests/smoke/atlas_filter.py --build build/windows-dev --output build/windows-dev/oracles/atlas-filter
+python tests/smoke/temporal.py --build build/windows-dev --output build/windows-dev/oracles/temporal
+python tests/smoke/exposure.py --build build/windows-dev --output build/windows-dev/oracles/exposure
+python tests/smoke/anchor.py --build build/windows-dev --output build/windows-dev/oracles/anchor
+```
+
 ## Definition of MVP done
 
 The target workflow is:

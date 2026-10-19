@@ -725,9 +725,11 @@ void Pipeline::offscreen(VkCommandBuffer command,
 // Share of the way toward this frame's measurement: 1 without a previous value.
 float Pipeline::adaptation() {
     const auto now = std::chrono::steady_clock::now();
-    const float seconds = std::chrono::duration<float>(now - meter_time_).count();
+    const double seconds = frame_interval_ > 0
+                               ? frame_interval_
+                               : std::chrono::duration<double>(now - meter_time_).count();
     meter_time_ = now;
-    return metered_ ? exposure_adaptation(seconds) : 1.0F;
+    return metered_ ? exposure_adaptation(static_cast<float>(seconds)) : 1.0F;
 }
 
 // Host-visible and coherent, written while recording each frame: the

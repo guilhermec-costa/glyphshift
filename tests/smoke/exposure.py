@@ -47,7 +47,7 @@ def render(name, auto, inputs):
         'render_style=illustrated\ncolor_mode=mono\nglyph_strength=1\n'
         f'cell_width={CW}\ncell_height={CH}\ncharacter_set=custom\n'
         'characters=" .:-=+*#%@"\nedge_strength=0\n' +
-        (f'auto_exposure={auto}\n' if auto is not None else ''))
+        (f'auto_exposure={auto}\n' if auto is not None else ''), encoding='utf-8')
     outputs = [args.output / f'{name}-{k}.ppm' for k in range(len(inputs))]
     command = [str(args.build / 'glyphshift-preview'), str(inputs[0]), str(config), str(outputs[0])]
     for source, output in zip(inputs[1:], outputs[1:]):

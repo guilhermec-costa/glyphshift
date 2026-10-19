@@ -58,7 +58,7 @@ def render(name, stability, inputs):
         f'cell_width={CW}\ncell_height={CH}\ncharacter_set=custom\n'
         'characters=" .:-=+*#%@"\nshape_matching=true\nshape_threshold=0.3\n'
         'shape_characters="/\\\\|_()<>^v"\nedge_threshold=0.3\n'
-        f'stability={stability}\n')
+        f'stability={stability}\n', encoding='utf-8')
     outputs = [args.output / f'{name}-{stability}-{k}.ppm' for k in range(len(inputs))]
     command = [str(args.build / 'glyphshift-preview'), str(inputs[0]), str(config), str(outputs[0])]
     for source, output in zip(inputs[1:], outputs[1:]):

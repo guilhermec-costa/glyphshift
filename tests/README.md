@@ -323,7 +323,13 @@ ctest --preset dev
 On Windows, from a Visual Studio developer shell, `ctest --preset windows-dev`
 runs the portable ones (configuration, presets, characters, editor, glyph
 semantics, the illustration logic and the pre-commit hook); the Linux launcher,
-injection, X11, platform and install tests are not built there.
+injection, X11, platform and install tests are not built there. The GPU image
+oracles (`atlas_filter.py`, `temporal.py`, `exposure.py`, `anchor.py`) run
+there unchanged against the Vulkan offscreen `glyphshift-preview`; set
+`GLYPHSHIFT_PREVIEW_VALIDATION=1` to fail on any Khronos validation message,
+and keep `--output` short (for example `build/windows-dev/oracles/NAME`),
+since the exposure oracle's command line is long. On Linux the same Vulkan
+preview is built as `glyphshift-vulkan-preview`.
 
 These include `platform` (autostart entries and their quoting) and `install`,
 which runs `cmake --install` into temporary prefixes and starts the installed
