@@ -134,6 +134,11 @@ PrivateDirectory::Status PrivateDirectory::read(const std::string& name,
         const DWORD error = GetLastError();
         if (missing(error))
             return Status::missing;
+        // A directory cannot be opened as a file here; it is not a regular file.
+        const DWORD attributes = GetFileAttributesW((path_ / name).c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            !(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            return Status::invalid;
         system_error_ = windows::message(error);
         return Status::failed;
     }

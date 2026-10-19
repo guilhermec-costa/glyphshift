@@ -342,7 +342,15 @@ if(BUILD_TESTING)
     add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
     target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
     add_test(NAME core COMMAND glyphshift-core-tests)
+    add_executable(glyphshift-platform-files-tests tests/unit/platform_files_test.cpp)
+    target_link_libraries(glyphshift-platform-files-tests PRIVATE glyphshift_platform)
+    add_test(NAME platform-files COMMAND glyphshift-platform-files-tests)
     if(GLYPHSHIFT_WINDOWS)
+        target_link_libraries(glyphshift-platform-files-tests PRIVATE advapi32)
+        add_executable(glyphshift-platform-windows-tests tests/unit/platform_windows_test.cpp)
+        target_link_libraries(glyphshift-platform-windows-tests PRIVATE glyphshift_platform shell32
+            ole32)
+        add_test(NAME platform-windows COMMAND glyphshift-platform-windows-tests)
         target_link_libraries(glyphshift-presets-tests PRIVATE advapi32 shell32 ole32)
         # MSVC Debug gives each character atlas these tests build (about
         # 570 KB) its own stack slot in main.

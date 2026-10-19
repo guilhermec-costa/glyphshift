@@ -4054,8 +4054,9 @@ turned on Developer Mode, the presets test ran them in both presets and
 passed: a symbolic link at a preset is refused on reading, and saving replaces
 the link without writing to its target. All
 nine generated SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
-`tools/format.py --check` and `git diff --check` passed. Not verified here:
-the Linux build and tests (they need the CI or the Linux boot), and any
+`tools/format.py --check` and `git diff --check` passed. After the user
+pushed `7d4c72b`, the CI's Linux `build` job passed (format check, Debug and
+Release builds and CPU tests; seen by the user on GitHub). Not verified: any
 Vulkan rendering on Windows, which starts with the preview in step 6.
 
 ```powershell
@@ -4066,6 +4067,47 @@ cmake --preset windows-release
 cmake --build --preset windows-release
 ctest --preset windows-release
 ```
+
+**Step 4, platform tests (2026-10-19).** Two CTest tests cover the platform
+layer directly; until now the Windows implementations were only exercised
+through the configuration tests.
+
+- `platform-files` (Linux and Windows, `tests/unit/platform_files_test.cpp`)
+  tests the step 3 interface itself, so the Linux code moved there is checked
+  directly too: a missing directory and file reported as missing; replace and
+  read back, replace an existing file, owner-only result (mode 0600 / the
+  protected access list); a file at the limit read and one byte over refused;
+  a directory refused as a file; no temporary file left; with symbolic links
+  available, a link to a file refused on reading, a replacement replacing the
+  link and not its target, a link to a directory refused; file stamps for a
+  missing file, a regular file, a directory, and an atomic replacement with
+  the same size and modification time (the stamp must change); the live config
+  read, its size limit, a missing file and a directory; `write_stderr` reaching
+  a child process's redirected standard error.
+- `platform-windows` (`tests/unit/platform_windows_test.cpp`), the counterpart
+  of the Linux `platform` test's paths, executable and font parts:
+  `config_home` with an absolute `APPDATA`, a relative one ignored and none
+  (both the roaming folder); `executable_path` absolute, existing, this test's
+  file; fonts: the default is Consolas Bold, a missing family falls back to it
+  rather than to a substitute, Courier New gives `courbd.ttf`, Lucida Console
+  (no bold face) and Cascadia Mono (variable font; checked when installed) fall
+  back. Process, autostart and the remaining parts of the Linux platform test
+  come with the daemon.
+
+The first Windows run of `platform-files` found that reading a directory as a
+preset gave `failed` on Windows (`CreateFileW` refuses a directory without
+backup semantics) where Linux gives `invalid`; Windows now reports `invalid`
+for a directory that is not a reparse point. Two temporary mutations of the
+Windows implementation made the test fail as intended and were reverted:
+dropping the file identity from the stamp ("atomic replacement with equal size
+and time changes the stamp") and creating preset files without the private
+access list ("replaced file readable by the user only").
+
+Verification on Windows: `windows-dev` and `windows-release` built without
+warnings and passed 9/9 CTest tests each, with Developer Mode on (no skipped
+symbolic-link checks). `tools/format.py --check` and `git diff --check`
+passed. Not verified: `platform-files` on Linux (it runs in the CI's `build`
+job after a push).
 
 ## Definition of MVP done
 
