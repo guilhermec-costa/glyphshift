@@ -4048,9 +4048,11 @@ Verification on Windows (MSVC 19.40, CMake 3.30.1, Ninja from Visual Studio,
 Vulkan SDK 1.4.363.0, vcpkg FreeType 2.14.3): `windows-dev` and
 `windows-release` built from scratch without warnings and passed 7/7 CTest
 tests each (`format-hook`, `illustration`, `characters`, `presets`, `editor`,
-`glyph-semantics`, `core`). The presets test printed "SKIPPED: symbolic link
-checks" (this account lacks the symbolic-link privilege; Developer Mode is
-off), so link refusal and replacing a link are not verified on Windows. All
+`glyph-semantics`, `core`). The first runs printed "SKIPPED: symbolic link
+checks" (the account lacked the symbolic-link privilege); after the user
+turned on Developer Mode, the presets test ran them in both presets and
+passed: a symbolic link at a preset is refused on reading, and saving replaces
+the link without writing to its target. All
 nine generated SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
 `tools/format.py --check` and `git diff --check` passed. Not verified here:
 the Linux build and tests (they need the CI or the Linux boot), and any
