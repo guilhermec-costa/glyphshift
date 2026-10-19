@@ -3866,7 +3866,8 @@ model, and it carries anti-cheat risk that capture avoids.
 - Rendering: reuse the Vulkan renderer through `VK_KHR_external_memory_win32`
   import of the captured D3D11 texture, or the OpenGL renderer through
   `WGL_NV_DX_interop2`; a D3D11 renderer (shaders generated with SPIRV-Cross)
-  only if neither interop is reliable. Decide in the first step.
+  only if neither interop is reliable. Decided in step 5 of the
+  [M7 record](#m7-record): Vulkan, importing the captured texture.
 - Reuse unchanged: settings, presets, profiles, the ImGui editor model and
   the two-pass pipeline design.
 
@@ -4108,6 +4109,48 @@ warnings and passed 9/9 CTest tests each, with Developer Mode on (no skipped
 symbolic-link checks). `tools/format.py --check` and `git diff --check`
 passed. Not verified: `platform-files` on Linux (it runs in the CI's `build`
 job after a push).
+
+**Step 5, renderer decision (2026-10-19): Vulkan.** The overlay renders with
+the existing `vulkan::Pipeline`, fed by the captured D3D11 texture imported
+through `VK_KHR_external_memory_win32`; the OpenGL renderer through
+`WGL_NV_DX_interop2` and a D3D11 renderer are not needed. This follows the
+architecture's preference for extending Vulkan, and it was validated before
+committing to it with a scratch prototype (outside the repository) on this
+machine:
+
+1. A D3D11 device is created on the DXGI adapter whose LUID equals the Vulkan
+   device's (`VkPhysicalDeviceIDProperties`), so both use the RTX 3060 Ti.
+2. A test window (red left half, blue right half, shown without activation)
+   is captured with Windows.Graphics.Capture: a free-threaded frame pool in
+   `B8G8R8A8UIntNormalized`, cursor capture off. On this Windows build,
+   `GraphicsCaptureAccess::RequestAccessAsync(Borderless)` returned `Allowed`
+   and `IsBorderRequired(false)` took effect, so the yellow capture border can
+   be turned off for an unpackaged program. The frame was 386×293 for a
+   400×300 window (the capture covers the visible frame, without the
+   invisible resize borders).
+3. Each frame is copied (`CopyResource`) into a texture created with
+   `D3D11_RESOURCE_MISC_SHARED_NTHANDLE`, then a shared `ID3D11Fence` is
+   signaled. The frame pool recycles its own textures, so the copy decouples
+   the overlay from the pool.
+4. Vulkan 1.2 imports the NT handle as a dedicated allocation
+   (`VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT`; the driver reports it
+   importable and dedicated-only) bound to a `B8G8R8A8_UNORM` optimal image,
+   and the fence as a timeline semaphore
+   (`VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D11_FENCE_BIT`). The submission waits
+   on the fence value, acquires the image from `VK_QUEUE_FAMILY_EXTERNAL`
+   (general layout), copies it and releases it back.
+
+Result: the Vulkan copy of the imported image equaled a D3D11 staging readback
+of the same texture byte for byte (0 of 293 rows differed) and showed the
+window's colors (255,0,0) and (0,0,255); Khronos validation with
+synchronization validation reported no message; the synchronous handoff (copy,
+signal, Vulkan wait and copy, CPU wait) took 0.384 ms per frame over 300
+frames at that size, an upper bound, not the M7 cost measurement. The frame
+pool's textures carry the shared flags themselves (misc 0x802); importing them
+directly instead of copying is a possible later optimization, not used.
+Not established by the prototype: capture of other processes' windows and of
+games, frame pacing, resizing (the pool must be recreated with the new size),
+and other GPUs or drivers.
 
 ## Definition of MVP done
 
