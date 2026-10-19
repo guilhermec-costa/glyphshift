@@ -1,28 +1,118 @@
+#ifdef _WIN32
+#include <windows.h>
+// After windows.h:
+#include <aclapi.h>
+#include <shlobj.h>
+#else
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <glyphshift/config/presets.hpp>
 #include <iostream>
+#include <string_view>
 #include <thread>
+
+#include "test_support.hpp"
 
 namespace {
 void check(bool ok, const char* name) {
     if (!ok)
         throw std::runtime_error(name);
 }
+
+const glyphshift::Settings expected{21, 19, false, false, 0.37F};
+
+// A later process finds the saved selection and settings.
+int read_saved(const std::filesystem::path& root) {
+    std::string error;
+    glyphshift::PresetStore restarted(root, "game-a");
+    glyphshift::Settings result;
+    return restarted.selected(error) == "night" && restarted.load("night", result, error) &&
+                   result == expected
+               ? 0
+               : 1;
+}
+
+#ifdef _WIN32
+std::filesystem::path own_executable() {
+    std::wstring path(32768, L'\0');
+    path.resize(GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size())));
+    return path;
+}
+
+// Runs this test again as a separate process that only reads the store.
+bool restarted_reader(const std::filesystem::path& root) {
+    const auto self = own_executable();
+    std::wstring command = L"\"" + self.wstring() + L"\" --read-saved \"" + root.wstring() + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof startup;
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(self.c_str(),
+            command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &startup,
+            &process))
+        return false;
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return code == 0;
+}
+
+// The equivalent of mode 0600: a protected access list (nothing inherited)
+// with one entry, allowing the current user.
+bool owner_only(const std::filesystem::path& file) {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    DWORD size = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::string user(size, '\0');
+    const bool known = GetTokenInformation(token, TokenUser, user.data(), size, &size);
+    CloseHandle(token);
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!known || GetNamedSecurityInfoW(file.c_str(),
+                      SE_FILE_OBJECT,
+                      DACL_SECURITY_INFORMATION,
+                      nullptr,
+                      nullptr,
+                      &dacl,
+                      nullptr,
+                      &descriptor) != ERROR_SUCCESS)
+        return false;
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    void* ace = nullptr;
+    const bool ok = GetSecurityDescriptorControl(descriptor, &control, &revision) &&
+                    (control & SE_DACL_PROTECTED) && dacl && dacl->AceCount == 1 &&
+                    GetAce(dacl, 0, &ace) &&
+                    static_cast<ACE_HEADER*>(ace)->AceType == ACCESS_ALLOWED_ACE_TYPE &&
+                    EqualSid(&static_cast<ACCESS_ALLOWED_ACE*>(ace)->SidStart,
+                        reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid);
+    LocalFree(descriptor);
+    return ok;
+}
+#endif
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     using namespace glyphshift;
-    char pattern[] = "/tmp/glyphshift-presets-XXXXXX";
-    const char* root = mkdtemp(pattern);
-    if (!root)
-        return 1;
-    const std::filesystem::path path = root;
+    if (argc == 3 && std::string_view(argv[1]) == "--read-saved")
+        return read_saved(argv[2]);
+    const std::filesystem::path path = test::temporary_directory("glyphshift-presets");
     try {
         PresetStore first(path, "game-a"), other(path, "game-b");
         std::string error;
@@ -44,21 +134,19 @@ int main() {
         check(!std::filesystem::exists(first.directory()),
             "browsing included styles does not write to the profile");
         check(first.selected(error) == "default" && error.empty(), "missing default");
-        const Settings expected{21, 19, false, false, 0.37F};
         check(first.save("night", expected, error) && first.select("night", error),
             "atomic save/select");
+#ifdef _WIN32
+        check(restarted_reader(path), "presets survive process restart");
+#else
         const auto child = fork();
         check(child >= 0, "fork");
-        if (!child) {
-            PresetStore restarted(path, "game-a");
-            Settings result;
-            const bool ok = restarted.selected(error) == "night" &&
-                            restarted.load("night", result, error) && result == expected;
-            _exit(ok ? 0 : 1);
-        }
+        if (!child)
+            _exit(read_saved(path));
         int status = 0;
         waitpid(child, &status, 0);
         check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "presets survive process restart");
+#endif
         check(!other.load("night", actual, error) && error.empty(), "per-game isolation");
         check(first.select("art-newsprint", error) && first.selected(error) == "art-newsprint",
             "included style selection remembered");
@@ -115,17 +203,33 @@ int main() {
         std::ofstream(first.directory() / "broken.conf") << "cell_width=invalid\n";
         check(!first.load("broken", actual, error) && actual == Settings{} && !error.empty(),
             "invalid preset safe defaults");
-        std::filesystem::create_symlink(path / "external", first.directory() / "link.conf");
-        check(!first.load("link", actual, error) && !error.empty(), "symlink reads rejected");
-        check(first.save("link", expected, error) && !std::filesystem::exists(path / "external"),
-            "atomic save replaces symlink, never follows it");
+        std::error_code link_error;
+        std::filesystem::create_symlink(path / "external",
+            first.directory() / "link.conf",
+            link_error);
+#ifndef _WIN32
+        check(!link_error, "symbolic link created for the test");
+#endif
+        if (!link_error) {
+            check(!first.load("link", actual, error) && !error.empty(), "symlink reads rejected");
+            check(
+                first.save("link", expected, error) && !std::filesystem::exists(path / "external"),
+                "atomic save replaces symlink, never follows it");
+        } else {
+            // Windows creates symbolic links only in Developer Mode or with the privilege.
+            std::cout << "SKIPPED: symbolic link checks (" << link_error.message() << ")\n";
+        }
         std::ofstream(first.directory() / "large.conf") << std::string(4097, 'x');
         check(!first.load("large", actual, error), "oversized preset rejected");
         std::ofstream(first.directory() / "active") << "../escape\n";
         check(first.selected(error) == "default" && !error.empty(), "invalid selection fallback");
+#ifdef _WIN32
+        check(owner_only(first.directory() / "night.conf"), "private preset file");
+#else
         struct stat file{};
         stat((first.directory() / "night.conf").c_str(), &file);
         check((file.st_mode & 0777) == 0600, "private preset file");
+#endif
         check(!first.save("invalid", Settings{1, 12, true, true}, error),
             "invalid dimensions rejected");
         for (const auto& entry : std::filesystem::directory_iterator(first.directory()))
@@ -136,19 +240,33 @@ int main() {
             "stable path profile");
         // The default store resolves the user's configuration directory and
         // the profile from the environment, else from the executable's path.
-        setenv("XDG_CONFIG_HOME", (path / "xdg").c_str(), 1);
-        setenv("GLYPHSHIFT_PROFILE", "env-game", 1);
+        test::set_env(test::config_home_variable, (path / "xdg").string());
+        test::set_env("GLYPHSHIFT_PROFILE", "env-game");
         check(PresetStore().directory() == path / "xdg/glyphshift/profiles/env-game",
-            "XDG_CONFIG_HOME and GLYPHSHIFT_PROFILE used");
-        setenv("XDG_CONFIG_HOME", "relative", 1);
-        setenv("HOME", (path / "home").c_str(), 1);
-        unsetenv("GLYPHSHIFT_PROFILE");
+            "configuration directory and GLYPHSHIFT_PROFILE used");
+        test::set_env(test::config_home_variable, "relative");
+        test::unset_env("GLYPHSHIFT_PROFILE");
+#ifdef _WIN32
+        // A relative APPDATA is ignored: the roaming application data folder.
+        PWSTR folder = nullptr;
+        check(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &folder) ==
+                  S_OK,
+            "roaming application data folder");
+        const std::filesystem::path roaming = folder;
+        CoTaskMemFree(folder);
+        const auto own = profile_id(own_executable().string());
+        check(
+            PresetStore().directory() == roaming / "glyphshift/profiles" / std::string(own.data()),
+            "relative APPDATA ignored; profile from the executable");
+        test::unset_env(test::config_home_variable);
+#else
+        test::set_env("HOME", (path / "home").string());
         const auto own = profile_id(std::filesystem::read_symlink("/proc/self/exe").string());
         check(PresetStore().directory() ==
                   path / "home/.config/glyphshift/profiles" / std::string(own.data()),
             "relative XDG_CONFIG_HOME ignored; profile from the executable");
-        unsetenv("XDG_CONFIG_HOME");
-        unsetenv("HOME");
+        test::unset_env("XDG_CONFIG_HOME");
+        test::unset_env("HOME");
         bool refused = false;
         try {
             PresetStore unavailable;
@@ -156,6 +274,7 @@ int main() {
             refused = true;
         }
         check(refused, "no configuration directory refused");
+#endif
         std::filesystem::remove_all(path);
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

@@ -8,7 +8,8 @@
 namespace glyphshift {
 inline constexpr std::string_view default_characters = " .:-=+*#%@";
 inline constexpr unsigned glyph_size = 8;
-inline constexpr unsigned atlas_width = glyph_size * default_characters.size();
+inline constexpr unsigned atlas_width =
+    glyph_size * static_cast<unsigned>(default_characters.size());
 inline constexpr unsigned atlas_height = glyph_size;
 inline constexpr std::array<std::uint8_t, 10> default_ramp{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 // Original 8x8 bitmap font for the M3 ramp, row zero at the top. This is data,

@@ -5,6 +5,8 @@
 #include <iostream>
 #include <thread>
 
+#include "test_support.hpp"
+
 namespace {
 int failures = 0;
 
@@ -19,10 +21,11 @@ void check(bool ok, const char* name) {
 int main() {
     using namespace glyphshift::editor;
     check(IM_UNICODE_CODEPOINT_MAX == 0x10FFFF, "full Unicode input representation");
-    unsetenv("GLYPHSHIFT_CONFIG");
-    unsetenv("GLYPHSHIFT_PRESET");
-    setenv("GLYPHSHIFT_PROFILE", "unit-editor", 1);
-    setenv("XDG_CONFIG_HOME", "/tmp/glyphshift-editor-unit-empty", 1);
+    glyphshift::test::unset_env("GLYPHSHIFT_CONFIG");
+    glyphshift::test::unset_env("GLYPHSHIFT_PRESET");
+    glyphshift::test::set_env("GLYPHSHIFT_PROFILE", "unit-editor");
+    glyphshift::test::set_env(glyphshift::test::config_home_variable,
+        (std::filesystem::temp_directory_path() / "glyphshift-editor-unit-empty").string());
     void* display = reinterpret_cast<void*>(1);
     auto frame = [&] {
         return Frame(display, 42, 800, 600, "Test", "1.0");

@@ -1,11 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <glyphshift/config/api.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <mutex>
 struct ImDrawData;
 
 namespace glyphshift::editor {
-#define GS_EDITOR_API __attribute__((visibility("default")))
 
 struct Font {
     const unsigned char* pixels;

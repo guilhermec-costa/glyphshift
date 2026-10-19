@@ -94,6 +94,19 @@ For an optimized build, use `cmake --preset release` followed by
 `cmake --build --preset release`; executables will be in `build/release`.
 Builds use the vendored Dear ImGui sources and do not download dependencies.
 
+**Windows (in progress).** The Windows capture overlay is being built; for now
+the shared parts compile and their tests run. You need Visual Studio 2022 with
+C++ (MSVC and the Windows SDK), CMake 3.20+, Python 3, Git, the
+[Vulkan SDK](https://vulkan.lunarg.com/) and FreeType from
+[vcpkg](https://vcpkg.io/) (`vcpkg install freetype:x64-windows`, with
+`VCPKG_ROOT` set). From a *Developer PowerShell for VS 2022*:
+
+```powershell
+cmake --preset windows-dev
+cmake --build --preset windows-dev
+ctest --preset windows-dev
+```
+
 To install for your user, with a menu entry and icon:
 
 ```bash

@@ -7,9 +7,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <glyphshift/config/characters.hpp>
 #include <glyphshift/core/glyph.hpp>
 #include <glyphshift/platform/fonts.hpp>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -57,6 +60,22 @@ bool decode_characters(std::string_view text, Codepoints& output) noexcept {
 
 namespace {
 Codepoints selected(const CharacterSelection& selection);
+
+// An absolute path in the operating system's form: /... on Linux; C:\...,
+// C:/... or \\server\... on Windows.
+bool absolute_path(const char* path) noexcept {
+#ifdef _WIN32
+    const auto separator = [](char c) {
+        return c == '\\' || c == '/';
+    };
+    const auto letter = static_cast<unsigned char>(path[0]);
+    return (((letter | 0x20U) >= 'a' && (letter | 0x20U) <= 'z' && path[1] == ':' &&
+                separator(path[2])) ||
+            (separator(path[0]) && separator(path[1])));
+#else
+    return path[0] == '/';
+#endif
+}
 }  // namespace
 
 bool valid_characters(const CharacterSelection& selection) noexcept {
@@ -74,7 +93,7 @@ bool valid_characters(const CharacterSelection& selection) noexcept {
     if (selection.shapes[0] && (!decode_characters(selection.shapes.data(), points) ||
                                    points.count + selected(selection).count > 256))
         return false;
-    return !selection.font[0] || selection.font[0] == '/';
+    return !selection.font[0] || absolute_path(selection.font.data());
 }
 
 namespace {
@@ -181,7 +200,18 @@ std::string default_font() {
     return platform::bold_monospace_font(families);
 }
 
+// The font file's bytes, read through a UTF-8 path on every platform.
+std::string font_file(const std::string& path) {
+    std::ifstream file(std::filesystem::path(std::u8string(path.begin(), path.end())),
+        std::ios::binary);
+    if (!file)
+        return {};
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
 struct Font {
+    // FreeType reads from this buffer for the face's lifetime.
+    std::string data;
     FT_Library library = nullptr;
     FT_Face face = nullptr;
     // Shared tile metrics in pixels: every glyph sits on one baseline, so
@@ -238,8 +268,13 @@ CharacterAtlas build_character_atlas(const CharacterSelection& selection) {
                 return;
             if (!font.face) {
                 const std::string path = selection.font[0] ? selection.font.data() : default_font();
-                if (FT_Init_FreeType(&font.library) ||
-                    FT_New_Face(font.library, path.c_str(), 0, &font.face) ||
+                font.data = font_file(path);
+                if (font.data.empty() || FT_Init_FreeType(&font.library) ||
+                    FT_New_Memory_Face(font.library,
+                        reinterpret_cast<const FT_Byte*>(font.data.data()),
+                        static_cast<FT_Long>(font.data.size()),
+                        0,
+                        &font.face) ||
                     FT_Select_Charmap(font.face, FT_ENCODING_UNICODE))
                     throw std::runtime_error("cannot load Unicode font; using classic");
                 FT_Fixed advance = 0;

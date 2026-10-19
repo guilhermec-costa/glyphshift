@@ -320,6 +320,11 @@ CPU, configuration, preset, launcher, and interposition tests:
 ctest --preset dev
 ```
 
+On Windows, from a Visual Studio developer shell, `ctest --preset windows-dev`
+runs the portable ones (configuration, presets, characters, editor, glyph
+semantics, the illustration logic and the pre-commit hook); the Linux launcher,
+injection, X11, platform and install tests are not built there.
+
 These include `platform` (autostart entries and their quoting) and `install`,
 which runs `cmake --install` into temporary prefixes and starts the installed
 programs. The overlay smoke, part of the GLX graphics smoke, also checks that

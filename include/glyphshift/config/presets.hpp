@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <filesystem>
+#include <glyphshift/config/api.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <span>
 #include <string>
@@ -11,9 +12,8 @@ struct BuiltinPreset {
     std::string_view name, title, description, config;
 };
 
-__attribute__((visibility("default"))) std::span<const BuiltinPreset> builtin_presets() noexcept;
-__attribute__((visibility("default"))) const BuiltinPreset* builtin_preset(
-    std::string_view name) noexcept;
+GS_EDITOR_API std::span<const BuiltinPreset> builtin_presets() noexcept;
+GS_EDITOR_API const BuiltinPreset* builtin_preset(std::string_view name) noexcept;
 
 constexpr bool preset_name_valid(std::string_view name) noexcept {
     if (name.empty() || name.size() > 64 || name == "." || name == "..")
@@ -39,7 +39,7 @@ inline std::array<char, 17> profile_id(std::string_view executable) noexcept {
     return out;
 }
 
-class __attribute__((visibility("default"))) PresetStore {
+class GS_EDITOR_API PresetStore {
 public:
     PresetStore();
     PresetStore(std::filesystem::path config_home, std::string profile);
@@ -57,5 +57,5 @@ private:
     std::filesystem::path directory_;
 };
 
-__attribute__((visibility("default"))) std::string serialize_settings(const Settings& settings);
+GS_EDITOR_API std::string serialize_settings(const Settings& settings);
 }  // namespace glyphshift

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "test_support.hpp"
+
 namespace {
 void check(bool value, const char* message) {
     if (!value)
@@ -66,7 +68,7 @@ int main() {
                               default_atlas[(y / 3) * atlas_width + g * 8 + x / 2],
                         "classic scaled without changing its mask");
         selection.set = 4;
-        std::strcpy(selection.font.data(), "/missing/font.ttf");
+        std::strcpy(selection.font.data(), test::missing_font);
         auto atlas = build_character_atlas(selection);
         check(atlas.count == 5 && !atlas.diagnostic[0] && ink(atlas, 0) == 0 &&
                   ink(atlas, 4) == 16 * 24 * 255,
@@ -140,7 +142,7 @@ int main() {
             check((bad.warnings & invalid_characters) && bad.value.glyphs == CharacterSelection{},
                 "invalid selection safely defaults");
         }
-        std::strcpy(selection.font.data(), "/missing/font.ttf");
+        std::strcpy(selection.font.data(), test::missing_font);
         atlas = build_character_atlas(selection);
         check(atlas.count == 10 && atlas.diagnostic[0],
             "missing font falls back, does not terminate app");

@@ -1409,7 +1409,8 @@ the overlay's and daemon's event loops read Xlib events and wait on the X
 connection (`apps/overlay/`); the Vulkan layer tracks Xlib surfaces
 (`layer.cpp`) and, like the GLX module, uses the X11 editor input — both are
 Linux injection modules by design; `presets.cpp` saves atomically through POSIX
-directory descriptors and the editor writes diagnostics with `write(2)`.
+directory descriptors and the editor writes diagnostics with `write(2)` (both
+moved to the platform layer in M7 step 3, see the [M7 record](#m7-record)).
 
 ### Repository layout (target)
 
@@ -3966,6 +3967,103 @@ Vulkan SDK. Windows has no unprivileged network namespace, so the offline
 guarantee there is the game's own configuration, Steam's offline mode for Steam
 games, and, if the user permits, an outbound Windows Firewall rule for the
 game's executable (it needs administrator rights). Proton stays Linux-only.
+
+**Step 3, portable build (2026-10-19).** CMake accepts Windows x64 with MSVC
+besides Linux x86-64 and picks the implementations per operating system:
+Linux keeps every target and command (its blocks are only wrapped in
+`if(GLYPHSHIFT_LINUX)`); Windows builds the core, the configuration and editor
+library, ImGui, the Vulkan pipeline (`glyphshift_vk_pipeline`, its nine SPIR-V
+modules embedded) and a Windows platform layer, with the portable tests. New
+presets `windows-dev` and `windows-release` (Ninja, `cl`, vcpkg's toolchain
+from `VCPKG_ROOT`, triplet `x64-windows`) run from a Visual Studio developer
+shell. MSVC uses `/W4 /utf-8 /permissive-`.
+
+- The visibility attributes of the public configuration headers became
+  `GS_EDITOR_API` (`include/glyphshift/config/api.hpp`): the default visibility
+  on GCC, nothing on MSVC, where the editor library is static (one process
+  holds the overlay's editor; Linux keeps the shared object its injected
+  modules share).
+- The configuration code's remaining POSIX calls, listed under
+  [After the migration](#current-state-and-migration), moved to the platform
+  layer as `include/glyphshift/platform/files.hpp`: `PrivateDirectory`
+  (preset files read without following symbolic links, replaced atomically and
+  durably, owner-only), `file_stamp`/`read_regular_file` (the live config) and
+  `write_stderr` (diagnostics). Linux's implementation is the previous code
+  moved unchanged (`src/platform/linux/files.cpp`), with the same messages.
+- `src/platform/windows/`: `config_home()` is an absolute `APPDATA`, else the
+  roaming application data folder (relative values are ignored, as
+  `XDG_CONFIG_HOME` is on Linux), so presets live in
+  `%APPDATA%\glyphshift\profiles\PROFILE\`; `executable_path()` from
+  `GetModuleFileNameW` (the rest of `platform::Process` comes with the daemon);
+  files through handles opened with `FILE_FLAG_OPEN_REPARSE_POINT` (a link is
+  refused, not followed), `MoveFileExW` with write-through for the atomic
+  replace, and a protected access list allowing only the current user for new
+  preset files (the counterpart of mode 0600). Win32 has no `openat`, so files
+  are opened by full path while a handle keeps the checked directory open.
+- Fonts on Windows come from DirectWrite's system collection (it includes
+  per-user fonts). A preferred family counts only with a real bold face
+  (weight at least 700, not simulated, not a variable font); otherwise the
+  search continues, ending at Consolas Bold, then Courier New Bold. Here
+  Cascadia Mono is a variable font (the atlas loads a file's default instance,
+  regular), and JetBrains Mono is installed only as SemiBold; a probe of the
+  font-dependent shape checks of the `illustration` test (`|` and `_` must
+  match a centered column and a bottom row) passed with Consolas Bold and Lucida
+  Console, and failed with Cascadia Mono's default instance (`_`), Courier New
+  Bold (`|`) and JetBrains Mono SemiBold (both). Discovery now selects
+  `C:\Windows\Fonts\consolab.ttf` on this machine.
+- Two portability fixes in shared code: the font file is read through a UTF-8
+  `std::filesystem` path and given to FreeType from memory, so non-ASCII paths
+  work on Windows (FreeType opens files with the ANSI `fopen` there); and an
+  explicit `glyph_font` must be absolute in the system's own form (a leading
+  `/` on Linux as before; `C:\`, `C:/` or `\\server\` on Windows), checked
+  without allocating.
+- Windows executables get an 8 MB stack (`/STACK`), the main-thread stack Linux
+  gives: a character atlas is about 570 KB and is built on the stack. The
+  first Windows runs of `illustration`, `characters` and `presets` died with
+  stack overflow (0xC00000FD) at the default 1 MB. MSVC Debug also gives each
+  atlas temporary of those three tests its own slot in `main`, so they link
+  with 32 MB; with that the `characters` test passed where 8 MB still
+  overflowed.
+- Two implicit conversions MSVC reported (`atlas_width`, two range limits in
+  `settings.cpp`) are explicit now; ImGui is compiled without the project's
+  warning level.
+- The pre-commit hook runs `python3`, which on this Windows is the Microsoft
+  Store placeholder (exit 9009); the hook now uses `python3` or `python`,
+  whichever runs Python 3. `C:\Program Files\LLVM\bin` is not on this
+  machine's `PATH`, so commits made outside a shell that adds it would stop
+  at the hook's "clang-format is required".
+
+Tests ported as planned: a shared `tests/unit/test_support.hpp` (environment
+variables, temporary directories, the configuration variable `APPDATA` or
+`XDG_CONFIG_HOME`, a missing font path in the system's form); `glyph-semantics`
+and `editor` use it; `presets` reads the saved store from a second process
+(`--read-saved`) on Windows, checks the owner-only access list instead of mode
+0600, checks `APPDATA` and the roaming folder instead of `XDG_CONFIG_HOME` and
+`HOME`, and reports the symbolic-link case as skipped when links cannot be
+created. Linux keeps `fork`, the mode check, the refusal without a
+configuration directory, and now fails if it cannot create the link. The
+Linux-only tests are switched off on Windows.
+
+Verification on Windows (MSVC 19.40, CMake 3.30.1, Ninja from Visual Studio,
+Vulkan SDK 1.4.363.0, vcpkg FreeType 2.14.3): `windows-dev` and
+`windows-release` built from scratch without warnings and passed 7/7 CTest
+tests each (`format-hook`, `illustration`, `characters`, `presets`, `editor`,
+`glyph-semantics`, `core`). The presets test printed "SKIPPED: symbolic link
+checks" (this account lacks the symbolic-link privilege; Developer Mode is
+off), so link refusal and replacing a link are not verified on Windows. All
+nine generated SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
+`tools/format.py --check` and `git diff --check` passed. Not verified here:
+the Linux build and tests (they need the CI or the Linux boot), and any
+Vulkan rendering on Windows, which starts with the preview in step 6.
+
+```powershell
+cmake --preset windows-dev
+cmake --build --preset windows-dev
+ctest --preset windows-dev
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --preset windows-release
+```
 
 ## Definition of MVP done
 

@@ -2,4 +2,11 @@
 # Check staged bytes without rewriting the index or unrelated worktree changes.
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-exec python3 tools/format.py --staged
+# Windows may have python3 only as a Microsoft Store placeholder; use python.
+for python in python3 python; do
+    if "$python" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1; then
+        exec "$python" tools/format.py --staged
+    fi
+done
+echo 'pre-commit: Python 3 is required (python3 or python).' >&2
+exit 1

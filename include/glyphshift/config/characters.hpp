@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <glyphshift/config/api.hpp>
 #include <span>
 #include <string_view>
 
@@ -27,10 +28,8 @@ struct Codepoints {
     unsigned count = 0;
 };
 
-__attribute__((visibility("default"))) bool decode_characters(std::string_view text,
-    Codepoints& output) noexcept;
-__attribute__((visibility("default"))) bool valid_characters(
-    const CharacterSelection& selection) noexcept;
+GS_EDITOR_API bool decode_characters(std::string_view text, Codepoints& output) noexcept;
+GS_EDITOR_API bool valid_characters(const CharacterSelection& selection) noexcept;
 inline constexpr unsigned character_tile_width = 16, character_tile_height = 24;
 inline constexpr unsigned character_atlas_width = 16 * character_tile_width;
 inline constexpr unsigned character_atlas_height = 17 * character_tile_height;
@@ -64,12 +63,11 @@ inline constexpr float shape_fit = .06F;
 // Mirrors the analysis shader's shape matching for 4x4 region luminances
 // (row-major). Returns the best-fitting matchable glyph, or -1 for a flat
 // cell or when no glyph fits within shape_fit. `invert` matches the dark group.
-__attribute__((visibility("default"))) int shape_glyph(const CharacterAtlas& atlas,
+GS_EDITOR_API int shape_glyph(const CharacterAtlas& atlas,
     std::span<const float, 16> levels,
     bool invert) noexcept;
 
 // CPU-only, called at lazy renderer initialization or selection changes.
 // Invalid/unavailable fonts or characters fall back to the built-in classic.
-__attribute__((visibility("default"))) CharacterAtlas build_character_atlas(
-    const CharacterSelection& selection);
+GS_EDITOR_API CharacterAtlas build_character_atlas(const CharacterSelection& selection);
 }  // namespace glyphshift

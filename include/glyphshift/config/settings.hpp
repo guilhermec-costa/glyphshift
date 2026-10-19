@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <glyphshift/config/api.hpp>
 #include <glyphshift/config/characters.hpp>
 #include <string_view>
 
@@ -36,7 +37,7 @@ struct ArtSettings {
     bool operator==(const ArtSettings&) const = default;
 };
 
-__attribute__((visibility("default"))) bool valid_art(const ArtSettings&) noexcept;
+GS_EDITOR_API bool valid_art(const ArtSettings&) noexcept;
 
 struct Settings {
     unsigned cell_width = 8;
@@ -110,9 +111,8 @@ struct ParsedSettings {
     std::uint32_t warnings = 0;
 };
 
-__attribute__((visibility("default"))) ParsedSettings parse_settings(
-    std::string_view text) noexcept;
+GS_EDITOR_API ParsedSettings parse_settings(std::string_view text) noexcept;
 // GLYPHSHIFT_CONFIG is optional. Stat is allocation-free on the steady path;
 // files are read only after a change, never framebuffer data. No graphics API.
-__attribute__((visibility("default"))) Settings runtime_settings() noexcept;
+GS_EDITOR_API Settings runtime_settings() noexcept;
 }  // namespace glyphshift

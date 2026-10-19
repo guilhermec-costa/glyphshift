@@ -1,12 +1,9 @@
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <glyphshift/config/settings.hpp>
+#include <glyphshift/platform/files.hpp>
 #include <mutex>
 #include <string>
 
@@ -98,28 +95,13 @@ bool rgb(std::string_view text, std::array<float, 3>& output) {
 }
 
 void warning(const char* message, std::size_t size) noexcept {
-    const auto ignored = write(STDERR_FILENO, message, size);
-    (void)ignored;
+    platform::write_stderr({message, size});
 }
 
 template <std::size_t N>
 void warning(const char (&message)[N]) noexcept {
     warning(message, N - 1);
 }
-
-struct Stamp {
-    dev_t device{};
-    ino_t inode{};
-    off_t size{};
-    timespec modified{};
-    int error = -1;
-
-    bool operator==(const Stamp& other) const {
-        return device == other.device && inode == other.inode && size == other.size &&
-               modified.tv_sec == other.modified.tv_sec &&
-               modified.tv_nsec == other.modified.tv_nsec && error == other.error;
-    }
-};
 
 class Runtime {
 public:
@@ -132,40 +114,30 @@ public:
         if (path_.empty())
             return {};
         const std::lock_guard lock(mutex_);
-        struct stat status{};
-        Stamp stamp;
-        if (stat(path_.c_str(), &status) != 0)
-            stamp.error = errno;
-        else
-            stamp = {status.st_dev, status.st_ino, status.st_size, status.st_mtim, 0};
+        const auto stamp = platform::file_stamp(path_);
         if (stamp == previous_)
             return current_;
         previous_ = stamp;
         current_ = {};
-        if (stamp.error || !S_ISREG(status.st_mode) || status.st_size > 4096) {
+        if (stamp.error || !stamp.regular || stamp.size > 4096) {
             warning(
                 "glyphshift: config must be a readable regular file of at most 4096 "
                 "bytes; using defaults\n");
             return current_;
         }
-        const int fd = open(path_.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
-        if (fd < 0) {
+        std::string text;
+        const auto read = platform::read_regular_file(path_, 4096, text);
+        if (read == platform::ReadStatus::open_failed) {
             warning("glyphshift: cannot read config; using defaults\n");
             return current_;
         }
-        char buffer[4097];
-        struct stat opened{};
-        const auto count = fstat(fd, &opened) == 0 && S_ISREG(opened.st_mode)
-                               ? read(fd, buffer, sizeof(buffer))
-                               : -1;
-        close(fd);
-        if (count < 0 || count > 4096) {
+        if (read != platform::ReadStatus::ok) {
             warning(
                 "glyphshift: cannot read config or config too large; using "
                 "defaults\n");
             return current_;
         }
-        const auto parsed = parse_settings({buffer, static_cast<std::size_t>(count)});
+        const auto parsed = parse_settings(text);
         current_ = parsed.value;
         if (parsed.warnings & invalid_art)
             warning("glyphshift: invalid illustration setting; using safe defaults\n");
@@ -187,9 +159,9 @@ public:
     }
 
 private:
-    std::string path_;
+    std::filesystem::path path_;
     std::mutex mutex_;
-    Stamp previous_;
+    platform::FileStamp previous_;
     Settings current_;
 };
 }  // namespace
@@ -257,7 +229,7 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
             *target = fallback;
             const bool edge =
                 key.starts_with("edge_") || key == "shape_threshold" || key == "scene_paper";
-            if (!number(value, *target, edge ? 0 : .25F, edge ? 1 : 4))
+            if (!number(value, *target, edge ? 0 : .25F, edge ? 1.0F : 4.0F))
                 parsed.warnings |= invalid_art;
         } else if (key == "edge_detector") {
             parsed.value.art.dog_edges = value == "dog";
@@ -288,7 +260,7 @@ ParsedSettings parse_settings(std::string_view text) noexcept {
                      : key == "stability"     ? defaults.art.stability
                      : key == "auto_exposure" ? defaults.art.auto_exposure
                                               : defaults.art.saturation;
-            if (!number(value, target, 0, unit ? 1 : 2))
+            if (!number(value, target, 0, unit ? 1.0F : 2.0F))
                 parsed.warnings |= invalid_art;
         } else if (key == "fill_enabled" || key == "contour_overlay" || key == "shape_matching" ||
                    key == "paper_wash" || key == "crisp_glyphs" || key == "anchor_grid") {

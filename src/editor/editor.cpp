@@ -1,5 +1,4 @@
 #include <imgui.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -9,6 +8,7 @@
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/editor/editor.hpp>
+#include <glyphshift/platform/files.hpp>
 #include <map>
 #include <memory>
 
@@ -77,13 +77,9 @@ struct Runtime {
                 preset_names.emplace_back(preset.name);
         }
         if (error[0]) {
-            const char prefix[] = "glyphshift: presets: ";
-            const auto a = write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
-            const auto b = write(STDERR_FILENO, error.data(), std::strlen(error.data()));
-            const auto c = write(STDERR_FILENO, "\n", 1);
-            (void)a;
-            (void)b;
-            (void)c;
+            platform::write_stderr("glyphshift: presets: ");
+            platform::write_stderr({error.data(), std::strlen(error.data())});
+            platform::write_stderr("\n");
         }
     }
 

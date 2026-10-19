@@ -1,9 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(GlyphShift VERSION 0.1.0 LANGUAGES CXX)
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8
+# Linux builds every mode (launcher, injected modules, X11 overlay). Windows
+# (M7) builds the portable core, configuration, editor and Vulkan pipeline with
+# the Windows platform layer; its capture overlay follows.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GLYPHSHIFT_LINUX ON)
+elseif(WIN32 AND MSVC)
+    set(GLYPHSHIFT_WINDOWS ON)
+endif()
+if(NOT (GLYPHSHIFT_LINUX OR GLYPHSHIFT_WINDOWS) OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8
    OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
-    message(FATAL_ERROR "GlyphShift currently requires Linux x86-64")
+    message(FATAL_ERROR "GlyphShift requires Linux x86-64, or Windows x64 with MSVC")
 endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,26 +21,52 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # backends and vendor sources, including characters outside the BMP.
 add_compile_definitions(IMGUI_USE_WCHAR32)
 set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
-add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+if(MSVC)
+    # Sources are UTF-8; the Windows API is used in its UTF-16 form.
+    add_compile_options(/W4 /utf-8 /permissive- /Zc:__cplusplus)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+    # The 8 MB main-thread stack Linux gives: a character atlas (about 570 KB)
+    # is built on the stack, beyond Windows's default 1 MB with its callers.
+    add_link_options(/STACK:8388608)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+endif()
 
-find_package(X11 REQUIRED)
-find_package(OpenGL REQUIRED)
+if(GLYPHSHIFT_LINUX)
+    find_package(X11 REQUIRED)
+    find_package(OpenGL REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    pkg_check_modules(XCB_INPUT REQUIRED IMPORTED_TARGET xcb xcb-keysyms)
+endif()
 find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Freetype REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-pkg_check_modules(XCB_INPUT REQUIRED IMPORTED_TARGET xcb xcb-keysyms)
-find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
+find_program(GLSLANG_VALIDATOR glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin" REQUIRED)
 
 add_library(glyphshift_imgui STATIC third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp
     third_party/imgui/imgui_widgets.cpp)
 set_target_properties(glyphshift_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
-target_compile_options(glyphshift_imgui PRIVATE -w)
+if(MSVC)
+    # Vendor sources: no project warning level (MSVC reports /W4 overridden).
+    get_target_property(imgui_options glyphshift_imgui COMPILE_OPTIONS)
+    list(REMOVE_ITEM imgui_options /W4)
+    set_target_properties(glyphshift_imgui PROPERTIES COMPILE_OPTIONS "${imgui_options};/w")
+else()
+    target_compile_options(glyphshift_imgui PRIVATE -w)
+endif()
 target_include_directories(glyphshift_imgui SYSTEM PUBLIC third_party/imgui)
-add_library(glyphshift_editor SHARED src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp src/config/characters.cpp src/config/builtin_presets.cpp)
+# Linux shares one editor session between the injected GL and Vulkan modules,
+# so the library is a shared object there; Windows links it into the overlay.
+set(editor_sources src/editor/editor.cpp src/config/settings.cpp src/config/presets.cpp
+    src/config/characters.cpp src/config/builtin_presets.cpp)
+if(GLYPHSHIFT_LINUX)
+    add_library(glyphshift_editor SHARED ${editor_sources})
+else()
+    add_library(glyphshift_editor STATIC ${editor_sources})
+endif()
 # Embed the shipped styles so the overlay works outside the source checkout.
 # Changes to a config trigger reconfiguration; the .conf files remain the source.
 set(BUILTIN_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/presets")
@@ -48,21 +82,35 @@ endforeach()
 target_include_directories(glyphshift_editor PRIVATE "${BUILTIN_GENERATED}")
 set_target_properties(glyphshift_editor PROPERTIES CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
-set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
-target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
-set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
+if(GLYPHSHIFT_LINUX)
+    set(editor_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/exports.map")
+    target_link_options(glyphshift_editor PRIVATE "LINKER:--version-script=${editor_exports}")
+    set_property(TARGET glyphshift_editor APPEND PROPERTY LINK_DEPENDS "${editor_exports}")
+endif()
 target_include_directories(glyphshift_editor PUBLIC include)
-# Platform layer, Linux: desktop integration (autostart, notifications),
-# process facilities, XDG paths and font discovery (Fontconfig). Operating-system
-# interfaces only; the shared editor library links it as well.
-add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
-    src/platform/linux/process.cpp src/platform/linux/fonts.cpp src/platform/linux/paths.cpp)
+if(GLYPHSHIFT_LINUX)
+    # Platform layer, Linux: desktop integration (autostart, notifications),
+    # process facilities, XDG paths, font discovery (Fontconfig) and file
+    # access. Operating-system interfaces only; the shared editor library
+    # links it as well.
+    add_library(glyphshift_platform STATIC src/platform/linux/desktop.cpp
+        src/platform/linux/process.cpp src/platform/linux/fonts.cpp src/platform/linux/paths.cpp
+        src/platform/linux/files.cpp)
+    target_link_libraries(glyphshift_platform PRIVATE PkgConfig::FONTCONFIG)
+else()
+    # Platform layer, Windows: the configuration folder, the executable's
+    # path, font discovery (DirectWrite) and file access.
+    add_library(glyphshift_platform STATIC src/platform/windows/paths.cpp
+        src/platform/windows/process.cpp src/platform/windows/fonts.cpp
+        src/platform/windows/files.cpp)
+    target_link_libraries(glyphshift_platform PRIVATE dwrite shell32 ole32 advapi32)
+endif()
 set_target_properties(glyphshift_platform PROPERTIES POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_platform PUBLIC include)
-target_link_libraries(glyphshift_platform PRIVATE PkgConfig::FONTCONFIG)
 target_link_libraries(glyphshift_editor PRIVATE glyphshift_imgui Threads::Threads Freetype::Freetype
     glyphshift_platform)
+if(GLYPHSHIFT_LINUX)
 # Window-system layer, X11: the editor's input surface (own XCB connection).
 # Linked into each module that presents the editor; the first module to give a
 # window its input source keeps it, so one window never gets two connections.
@@ -100,6 +148,7 @@ target_link_libraries(glyphshift_gl PRIVATE ${CMAKE_DL_LIBS} glyphshift_core gly
 set(opengl_exports "${CMAKE_CURRENT_SOURCE_DIR}/src/display/x11/glx_exports.map")
 target_link_options(glyphshift_gl PRIVATE "LINKER:--version-script=${opengl_exports}")
 set_property(TARGET glyphshift_gl APPEND PROPERTY LINK_DEPENDS "${opengl_exports}")
+endif()  # GLYPHSHIFT_LINUX
 # The Vulkan glyph pipeline, independent of the loader layer: device-function
 # table, resources, analysis/composition passes and editor drawing.
 add_library(glyphshift_vk_pipeline STATIC src/render/vulkan/resources.cpp
@@ -109,6 +158,7 @@ set_target_properties(glyphshift_vk_pipeline PROPERTIES POSITION_INDEPENDENT_COD
 target_include_directories(glyphshift_vk_pipeline SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_vk_pipeline PUBLIC ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(glyphshift_vk_pipeline PUBLIC glyphshift_core glyphshift_editor)
+if(GLYPHSHIFT_LINUX)
 # The Vulkan loader layer (Linux injection module) around that pipeline.
 add_library(glyphshift_vk SHARED
     src/render/vulkan/layer.cpp src/render/vulkan/dispatch.cpp src/render/vulkan/renderer.cpp)
@@ -128,6 +178,7 @@ configure_file(layers/VK_LAYER_GLYPHSHIFT_overlay.json.in
 add_executable(glyphshift apps/launcher/main.cpp)
 target_include_directories(glyphshift PRIVATE include)
 add_dependencies(glyphshift glyphshift_gl glyphshift_vk)
+endif()  # GLYPHSHIFT_LINUX
 
 # Keep the development compilation database at the checkout root for LSPs.
 # Release builds never replace it, and existing user-owned files are preserved.
@@ -153,9 +204,11 @@ endif()
 add_library(glyphshift_core STATIC src/core/fixture.cpp src/core/glyph.cpp)
 set_target_properties(glyphshift_core PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_core PUBLIC include)
-add_library(fixture_window STATIC tests/fixtures/window.cpp)
-target_include_directories(fixture_window PUBLIC tests/fixtures)
-target_link_libraries(fixture_window PUBLIC glyphshift_core X11::X11 ${CMAKE_DL_LIBS})
+if(GLYPHSHIFT_LINUX)
+    add_library(fixture_window STATIC tests/fixtures/window.cpp)
+    target_include_directories(fixture_window PUBLIC tests/fixtures)
+    target_link_libraries(fixture_window PUBLIC glyphshift_core X11::X11 ${CMAKE_DL_LIBS})
+endif()
 
 # Compile the very same gradient source for the two APIs. Files are read at
 # startup by these development fixtures; no installation is required for M0.
@@ -227,6 +280,8 @@ foreach(stage vert frag)
         DEPENDS "shaders/editor/editor.${stage}" cmake/embed_spirv.cmake VERBATIM)
     target_sources(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}/editor_${stage}_spv.hpp")
 endforeach()
+target_include_directories(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}")
+if(GLYPHSHIFT_LINUX)
 target_include_directories(glyphshift_gl PRIVATE "${GLYPH_GENERATED}")
 target_include_directories(glyphshift_gl_pipeline PRIVATE "${GLYPH_GENERATED}")
 # M6 capture overlay: reads a chosen window through X Composite and draws the
@@ -247,7 +302,6 @@ target_link_libraries(glyphshift_x11_overlay PUBLIC X11::X11 OpenGL::GL
 add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/daemon.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
     glyphshift_x11_input glyphshift_x11_overlay glyphshift_x11_tray)
-target_include_directories(glyphshift_vk_pipeline PRIVATE "${GLYPH_GENERATED}")
 
 add_executable(glyphshift-glx-fixture tests/fixtures/glx.cpp)
 target_link_libraries(glyphshift-glx-fixture PRIVATE fixture_window OpenGL::GL)
@@ -257,6 +311,7 @@ add_dependencies(glyphshift-vulkan-fixture fixture_shaders)
 foreach(target glyphshift-glx-fixture glyphshift-vulkan-fixture)
     target_compile_definitions(${target} PRIVATE FIXTURE_SHADER_DIR="${FIXTURE_SHADER_DIR}")
 endforeach()
+endif()  # GLYPHSHIFT_LINUX
 
 include(CTest)
 if(BUILD_TESTING)
@@ -267,6 +322,37 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/format_test.py"
             "${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
+    # Portable logic tests: every platform.
+    add_executable(glyphshift-art-tests tests/unit/art_test.cpp)
+    target_link_libraries(glyphshift-art-tests PRIVATE glyphshift_core glyphshift_editor)
+    add_test(NAME illustration COMMAND glyphshift-art-tests)
+    add_executable(glyphshift-character-tests tests/unit/characters_test.cpp)
+    target_link_libraries(glyphshift-character-tests PRIVATE glyphshift_editor)
+    add_test(NAME characters COMMAND glyphshift-character-tests)
+    add_executable(glyphshift-presets-tests tests/unit/presets_test.cpp)
+    target_link_libraries(glyphshift-presets-tests PRIVATE glyphshift_editor Threads::Threads)
+    add_test(NAME presets COMMAND glyphshift-presets-tests)
+    add_executable(glyphshift-editor-tests tests/unit/editor_test.cpp)
+    target_include_directories(glyphshift-editor-tests SYSTEM PRIVATE third_party/imgui)
+    target_link_libraries(glyphshift-editor-tests PRIVATE glyphshift_editor Threads::Threads)
+    add_test(NAME editor COMMAND glyphshift-editor-tests)
+    add_executable(glyphshift-glyph-tests tests/unit/glyph_test.cpp)
+    target_link_libraries(glyphshift-glyph-tests PRIVATE glyphshift_core glyphshift_editor Threads::Threads)
+    add_test(NAME glyph-semantics COMMAND glyphshift-glyph-tests)
+    add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
+    target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
+    add_test(NAME core COMMAND glyphshift-core-tests)
+    if(GLYPHSHIFT_WINDOWS)
+        target_link_libraries(glyphshift-presets-tests PRIVATE advapi32 shell32 ole32)
+        # MSVC Debug gives each character atlas these tests build (about
+        # 570 KB) its own stack slot in main.
+        foreach(test glyphshift-art-tests glyphshift-character-tests glyphshift-presets-tests)
+            target_link_options(${test} PRIVATE /STACK:33554432)
+        endforeach()
+    endif()
+endif()
+# Linux tests: launcher, injected modules, X11, Linux platform and install.
+if(BUILD_TESTING AND GLYPHSHIFT_LINUX)
     add_executable(glyphshift-launcher-probe tests/unit/launcher_probe.cpp)
     add_test(NAME launcher COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/launcher_test.py"
@@ -291,28 +377,9 @@ if(BUILD_TESTING)
     target_link_libraries(glyphshift-vulkan-layer-tests PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     target_link_options(glyphshift-vulkan-layer-tests PRIVATE -Wl,--export-dynamic)
     add_test(NAME vulkan-layer COMMAND glyphshift-vulkan-layer-tests "$<TARGET_FILE:glyphshift_vk>")
-    add_executable(glyphshift-art-tests tests/unit/art_test.cpp)
-    target_link_libraries(glyphshift-art-tests PRIVATE glyphshift_core glyphshift_editor)
-    add_test(NAME illustration COMMAND glyphshift-art-tests)
-    add_executable(glyphshift-character-tests tests/unit/characters_test.cpp)
-    target_link_libraries(glyphshift-character-tests PRIVATE glyphshift_editor)
-    add_test(NAME characters COMMAND glyphshift-character-tests)
-    add_executable(glyphshift-presets-tests tests/unit/presets_test.cpp)
-    target_link_libraries(glyphshift-presets-tests PRIVATE glyphshift_editor Threads::Threads)
-    add_test(NAME presets COMMAND glyphshift-presets-tests)
-    add_executable(glyphshift-editor-tests tests/unit/editor_test.cpp)
-    target_include_directories(glyphshift-editor-tests SYSTEM PRIVATE third_party/imgui)
-    target_link_libraries(glyphshift-editor-tests PRIVATE glyphshift_editor Threads::Threads)
-    add_test(NAME editor COMMAND glyphshift-editor-tests)
     add_executable(glyphshift-x11-keys-tests tests/unit/x11_keys_test.cpp)
     target_link_libraries(glyphshift-x11-keys-tests PRIVATE glyphshift_editor)
     add_test(NAME x11-keys COMMAND glyphshift-x11-keys-tests)
-    add_executable(glyphshift-glyph-tests tests/unit/glyph_test.cpp)
-    target_link_libraries(glyphshift-glyph-tests PRIVATE glyphshift_core glyphshift_editor Threads::Threads)
-    add_test(NAME glyph-semantics COMMAND glyphshift-glyph-tests)
-    add_executable(glyphshift-core-tests tests/unit/fixture_test.cpp)
-    target_link_libraries(glyphshift-core-tests PRIVATE glyphshift_core)
-    add_test(NAME core COMMAND glyphshift-core-tests)
     add_executable(glyphshift-platform-tests tests/unit/platform_test.cpp)
     target_link_libraries(glyphshift-platform-tests PRIVATE glyphshift_platform)
     add_test(NAME platform COMMAND glyphshift-platform-tests)
@@ -325,6 +392,7 @@ if(BUILD_TESTING)
     add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
 endif()
 
+if(GLYPHSHIFT_LINUX)
 # Installation: the launcher, overlay, libraries and layer manifest find each
 # other through $ORIGIN, so they stay together in a private directory, with
 # links in bin/. The desktop entry starts the background overlay.
@@ -355,6 +423,8 @@ install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/glyphshift"
 install(FILES third_party/imgui/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/glyphshift"
     RENAME LICENSE.imgui.txt)
 
+endif()  # GLYPHSHIFT_LINUX
+
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_custom_target(format
@@ -366,7 +436,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 option(GLYPHSHIFT_GPU_SMOKE_TESTS "Enable X11/GPU smoke tests in CTest" OFF)
-if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+if(BUILD_TESTING AND Python3_Interpreter_FOUND AND GLYPHSHIFT_LINUX)
     foreach(api glx vulkan)
         add_custom_target(smoke-${api}
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/run.py"

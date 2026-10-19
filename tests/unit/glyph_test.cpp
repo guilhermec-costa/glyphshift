@@ -1,13 +1,14 @@
-#include <unistd.h>
-
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <glyphshift/config/settings.hpp>
 #include <glyphshift/core/glyph.hpp>
 #include <iostream>
 #include <limits>
 #include <string>
+
+#include "test_support.hpp"
 
 namespace {
 int failures = 0;
@@ -81,19 +82,20 @@ int main() {
         check((parsed.warnings & invalid_strength) && parsed.value == Settings{},
             "invalid strength defaults safely");
     }
-    char path[] = "/tmp/glyphshift-config-test-XXXXXX";
-    const int descriptor = mkstemp(path);
-    if (descriptor < 0)
-        return 2;
-    close(descriptor);
-    setenv("GLYPHSHIFT_CONFIG", path, 1);
+    const auto directory = test::temporary_directory("glyphshift-config-test");
+    const auto path = directory / "live.conf";
+    std::ofstream(path).close();
+    test::set_env("GLYPHSHIFT_CONFIG", path.string());
     auto replace = [&](const char* contents) {
-        const std::string temporary = std::string(path) + ".new";
+        auto temporary = path;
+        temporary += ".new";
         {
-            std::ofstream output(temporary);
+            std::ofstream output(temporary, std::ios::binary);
             output << contents;
         }
-        if (rename(temporary.c_str(), path) != 0)
+        std::error_code error;
+        std::filesystem::rename(temporary, path, error);
+        if (error)
             std::abort();
     };
     replace("cell_width=13\ncell_height=19\ncolor_mode=mono\nenabled=false\n");
@@ -106,8 +108,9 @@ int main() {
     check(runtime_settings() == Settings{}, "atomic file replacement immediately reloaded");
     replace("cell_width=invalid\n");
     check(runtime_settings() == Settings{}, "invalid reload nonfatal");
-    unlink(path);
+    std::filesystem::remove(path);
     check(runtime_settings() == Settings{}, "missing file nonfatal");
+    std::filesystem::remove_all(directory);
     if (!failures)
         std::cout << "Glyph semantics, atlas, validation and live configuration passed\n";
     return failures ? 1 : 0;

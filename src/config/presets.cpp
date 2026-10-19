@@ -1,30 +1,17 @@
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include <algorithm>
-#include <atomic>
-#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
+#include <glyphshift/platform/files.hpp>
 #include <glyphshift/platform/paths.hpp>
 #include <glyphshift/platform/process.hpp>
+#include <memory>
 #include <stdexcept>
 
 namespace glyphshift {
 namespace {
-struct File {
-    int fd;
-
-    ~File() {
-        if (fd >= 0)
-            close(fd);
-    }
-};
-
 std::string profile() {
     if (const char* value = std::getenv("GLYPHSHIFT_PROFILE")) {
         if (!preset_name_valid(value))
@@ -34,88 +21,63 @@ std::string profile() {
     return profile_id(platform::executable_path().string()).data();
 }
 
-int open_directory(const std::filesystem::path& path, bool create, std::string& error) {
+using Directory = std::unique_ptr<platform::PrivateDirectory>;
+using Status = platform::PrivateDirectory::Status;
+
+Directory open_directory(const std::filesystem::path& path, bool create, std::string& error) {
     if (create) {
         std::error_code ec;
         std::filesystem::create_directories(path, ec);
         if (ec) {
             error = "cannot create preset directory: " + ec.message();
-            return -1;
+            return nullptr;
         }
     }
-    const int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0 && (create || errno != ENOENT))
-        error = "cannot open preset directory: " + std::string(std::strerror(errno));
-    return fd;
+    auto directory = std::make_unique<platform::PrivateDirectory>(path);
+    if (directory->status() == Status::ok)
+        return directory;
+    if (create || directory->status() != Status::missing)
+        error = "cannot open preset directory: " + directory->system_error();
+    return nullptr;
 }
 
-bool read_file(int dir, const std::string& name, std::string& text, std::string& error) {
-    const File file{openat(dir, name.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)};
-    if (file.fd < 0) {
-        if (errno != ENOENT)
-            error = "cannot read preset: " + std::string(std::strerror(errno));
-        return false;
-    }
-    struct stat status{};
-    if (fstat(file.fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size > 4096) {
-        error = "preset must be a regular file of at most 4096 bytes";
-        return false;
-    }
-    std::array<char, 4097> buffer{};
-    std::size_t count = 0;
-    while (count < buffer.size()) {
-        const auto n = read(file.fd, buffer.data() + count, buffer.size() - count);
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n < 0) {
-            error = "cannot read preset: " + std::string(std::strerror(errno));
+bool read_file(platform::PrivateDirectory& dir,
+    const std::string& name,
+    std::string& text,
+    std::string& error) {
+    switch (dir.read(name, 4096, text)) {
+        case Status::ok:
+            return true;
+        case Status::missing:
             return false;
-        }
-        if (!n)
+        case Status::invalid:
+            error = "preset must be a regular file of at most 4096 bytes";
+            return false;
+        case Status::too_large:
+            error = "preset too large";
+            return false;
+        case Status::failed:
             break;
-        count += static_cast<std::size_t>(n);
     }
-    if (count > 4096) {
-        error = "preset too large";
-        return false;
-    }
-    text.assign(buffer.data(), count);
-    return true;
+    error = "cannot read preset: " + dir.system_error();
+    return false;
 }
 
-bool atomic_file(int dir, const std::string& name, std::string_view text, std::string& error) {
-    static std::atomic<unsigned> serial{0};
-    const std::string temporary =
-        ".tmp-" + std::to_string(getpid()) + "-" + std::to_string(serial.fetch_add(1));
-    const File file{
-        openat(dir, temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
-    if (file.fd < 0) {
-        error = "cannot create preset temporary file: " + std::string(std::strerror(errno));
-        return false;
-    }
-    std::size_t count = 0;
-    bool ok = true;
-    while (count < text.size()) {
-        const auto n = write(file.fd, text.data() + count, text.size() - count);
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0) {
-            ok = false;
+bool atomic_file(platform::PrivateDirectory& dir,
+    const std::string& name,
+    std::string_view text,
+    std::string& error) {
+    switch (dir.replace(name, text)) {
+        case platform::PrivateDirectory::Write::ok:
+            return true;
+        case platform::PrivateDirectory::Write::temporary_failed:
+            error = "cannot create preset temporary file: " + dir.system_error();
+            return false;
+        case platform::PrivateDirectory::Write::commit_failed:
             break;
-        }
-        count += static_cast<std::size_t>(n);
     }
-    if (ok)
-        ok = fsync(file.fd) == 0;
-    if (ok)
-        ok = renameat(dir, temporary.c_str(), dir, name.c_str()) == 0;
-    if (ok)
-        ok = fsync(dir) == 0;
-    if (!ok) {
-        error = "cannot commit preset: " + std::string(std::strerror(errno));
-        unlinkat(dir, temporary.c_str(), 0);
-    }
-    return ok;
+    error = "cannot commit preset: " + dir.system_error();
+    return false;
 }
 }  // namespace
 
@@ -203,9 +165,9 @@ bool PresetStore::load(std::string_view name, Settings& settings, std::string& e
             "64)";
         return false;
     }
-    const File dir{open_directory(directory_, false, error)};
+    const auto dir = open_directory(directory_, false, error);
     std::string text;
-    if (dir.fd < 0 || !read_file(dir.fd, std::string(name) + ".conf", text, error)) {
+    if (!dir || !read_file(*dir, std::string(name) + ".conf", text, error)) {
         // A saved per-game copy takes precedence. Corrupt or unreadable saved
         // files must report their error rather than silently loading another style.
         const auto* included = builtin_preset(name);
@@ -248,15 +210,15 @@ bool PresetStore::save(std::string_view name, const Settings& settings, std::str
         error = "invalid preset cell dimensions";
         return false;
     }
-    const File dir{open_directory(directory_, true, error)};
-    if (dir.fd < 0)
+    const auto dir = open_directory(directory_, true, error);
+    if (!dir)
         return false;
     const auto text = serialize_settings(settings);
     if (text.size() > 4096) {
         error = "serialized preset exceeds 4096 bytes";
         return false;
     }
-    return atomic_file(dir.fd, std::string(name) + ".conf", text, error);
+    return atomic_file(*dir, std::string(name) + ".conf", text, error);
 }
 
 bool PresetStore::select(std::string_view name, std::string& error) const {
@@ -265,19 +227,19 @@ bool PresetStore::select(std::string_view name, std::string& error) const {
         error = "invalid preset name";
         return false;
     }
-    const File dir{open_directory(directory_, true, error)};
-    if (dir.fd < 0)
+    const auto dir = open_directory(directory_, true, error);
+    if (!dir)
         return false;
-    return atomic_file(dir.fd, "active", std::string(name) + "\n", error);
+    return atomic_file(*dir, "active", std::string(name) + "\n", error);
 }
 
 std::string PresetStore::selected(std::string& error) const {
     error.clear();
-    const File dir{open_directory(directory_, false, error)};
-    if (dir.fd < 0)
+    const auto dir = open_directory(directory_, false, error);
+    if (!dir)
         return "default";
     std::string text;
-    if (!read_file(dir.fd, "active", text, error))
+    if (!read_file(*dir, "active", text, error))
         return "default";
     if (!text.empty() && text.back() == '\n')
         text.pop_back();
