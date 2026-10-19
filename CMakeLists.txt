@@ -205,9 +205,22 @@ add_library(glyphshift_core STATIC src/core/fixture.cpp src/core/glyph.cpp)
 set_target_properties(glyphshift_core PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(glyphshift_core PUBLIC include)
 if(GLYPHSHIFT_LINUX)
-    add_library(fixture_window STATIC tests/fixtures/window.cpp)
+    add_library(fixture_window STATIC tests/fixtures/window.cpp tests/fixtures/common.cpp)
     target_include_directories(fixture_window PUBLIC tests/fixtures)
     target_link_libraries(fixture_window PUBLIC glyphshift_core X11::X11 ${CMAKE_DL_LIBS})
+else()
+    # The Vulkan fixture's Win32 window (M7): the capture overlay's test target.
+    add_library(fixture_window STATIC tests/fixtures/window_win32.cpp tests/fixtures/common.cpp)
+    target_include_directories(fixture_window PUBLIC tests/fixtures)
+    target_link_libraries(fixture_window PUBLIC glyphshift_core user32)
+    add_executable(glyphshift-vulkan-fixture tests/fixtures/vulkan.cpp)
+    target_link_libraries(glyphshift-vulkan-fixture PRIVATE fixture_window Vulkan::Vulkan)
+    add_dependencies(glyphshift-vulkan-fixture fixture_shaders)
+    target_compile_definitions(glyphshift-vulkan-fixture PRIVATE
+        FIXTURE_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/fixture-shaders")
+    if(BUILD_TESTING)
+        add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
+    endif()
 endif()
 
 # Compile the very same gradient source for the two APIs. Files are read at
@@ -453,6 +466,21 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 option(GLYPHSHIFT_GPU_SMOKE_TESTS "Enable X11/GPU smoke tests in CTest" OFF)
+if(BUILD_TESTING AND Python3_Interpreter_FOUND AND GLYPHSHIFT_WINDOWS)
+    # Windows graphics smoke (M7): the Win32 Vulkan fixture, then the overlay,
+    # and the image oracles through the Vulkan preview.
+    add_custom_target(smoke-windows
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/smoke/windows_run.py"
+            --build "${CMAKE_BINARY_DIR}"
+        DEPENDS glyphshift-vulkan-fixture glyphshift-preview
+        USES_TERMINAL VERBATIM)
+    if(GLYPHSHIFT_GPU_SMOKE_TESTS)
+        add_test(NAME smoke-windows COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/smoke/windows_run.py" --build "${CMAKE_BINARY_DIR}")
+        set_tests_properties(smoke-windows PROPERTIES LABELS "graphics" RUN_SERIAL TRUE
+            TIMEOUT 180 SKIP_RETURN_CODE 77)
+    endif()
+endif()
 if(BUILD_TESTING AND Python3_Interpreter_FOUND AND GLYPHSHIFT_LINUX)
     foreach(api glx vulkan)
         add_custom_target(smoke-${api}

@@ -1,0 +1,134 @@
+"""Windows graphics smoke (M7): the Win32 Vulkan fixture, then the capture overlay.
+
+Opt-in, needs an interactive desktop and a Vulkan GPU; no network or
+installation. It never takes the desktop keyboard, pointer or focus: windows
+open without activation and input is posted to their message queues. Third-party
+implicit Vulkan layers (overlays and capture hooks) are disabled for the tested
+processes, so their drawing cannot change the images.
+"""
+import argparse
+import contextlib
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+import win32
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--build', type=pathlib.Path, required=True)
+parser.add_argument('--output', type=pathlib.Path)
+args = parser.parse_args()
+build = args.build.resolve()
+if sys.platform != 'win32':
+    print('SKIP: Windows only')
+    sys.exit(77)
+output = (args.output or build / 'smoke-evidence' / 'windows').resolve()
+output.mkdir(parents=True, exist_ok=True)
+env = os.environ.copy()
+for name in ['GLYPHSHIFT_CONFIG', 'GLYPHSHIFT_PROFILE', 'GLYPHSHIFT_PRESET', 'GLYPHSHIFT_LOG',
+             'GLYPHSHIFT_FIXTURE_MULTI', 'GLYPHSHIFT_FIXTURE_SRGB', 'GLYPHSHIFT_FIXTURE_SCROLL']:
+    env.pop(name, None)
+env.update(APPDATA=str(output / 'config'), GLYPHSHIFT_FIXTURE_NO_FOCUS='1',
+           GLYPHSHIFT_FIXTURE_INPUT_LOG='1', VK_LAYER_VALIDATE_SYNC='1',
+           VK_LOADER_LAYERS_DISABLE='VK_LAYER_OBS_HOOK,VK_LAYER_RTSS,'
+                                    'VK_LAYER_VALVE_steam_overlay,VK_LAYER_VALVE_steam_fossilize')
+sequence = 0
+
+
+@contextlib.contextmanager
+def fixture(label, extra=None, frames=9000):
+    """Starts the Vulkan fixture with validation at a fixed time; yields (process, window, log)."""
+    global sequence
+    sequence += 1
+    suffix = f' {os.getpid()}-{sequence}'
+    local = dict(env, GLYPHSHIFT_FIXTURE_TITLE_SUFFIX=suffix, **(extra or {}))
+    log = output / f'{label}.log'
+    with log.open('w') as stream:
+        process = subprocess.Popen([str(build / 'glyphshift-vulkan-fixture'), '--validation',
+                                    '--fixed-time', '1.25', '--frames', str(frames)],
+                                   env=local, stdout=stream, stderr=subprocess.STDOUT)
+    try:
+        window = win32.wait_window(f'GlyphShift Vulkan fixture{suffix}', process, log)
+        yield process, window, log
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+
+
+settle = float(os.environ.get('GLYPHSHIFT_SMOKE_SETTLE', '0.25'))
+
+
+def image(window, label):
+    time.sleep(max(.15, settle))
+    picture = win32.image(window)
+    win32.save(output / f'{label}.ppm', picture)
+    return picture
+
+
+def finish(process, log):
+    # The fixture exits nonzero on any validation or loader error; the loader's
+    # notes on the disabled layers are expected.
+    assert process.wait(timeout=15) == 0, log.read_text(errors='replace')
+    text = log.read_text(errors='replace')
+    assert 'Vulkan validation:' not in text, text
+    return text
+
+
+def pixel(picture, x, y):
+    width, _, pixels = picture
+    at = (y * width + x) * 3
+    return tuple(pixels[at:at + 3])
+
+
+def fixture_phase():
+    """The Win32 fixture alone: deterministic image, gradient, resizes, input, exits."""
+    sizes = [(320, 240), (1024, 768), (640, 480), (1000, 300), (300, 800), (800, 600)] * 2
+    with fixture('fixture') as (process, window, log):
+        win32.move(window, 40, 40)
+        assert win32.resize(window, 800, 600), win32.client_size(window)
+        original = image(window, 'fixture-original')
+        # Red grows to the right, green downwards (the shared gradient).
+        assert pixel(original, 760, 300)[0] > pixel(original, 40, 300)[0] + 100, \
+            (pixel(original, 40, 300), pixel(original, 760, 300))
+        assert pixel(original, 400, 560)[1] > pixel(original, 400, 40)[1] + 100, \
+            (pixel(original, 400, 40), pixel(original, 400, 560))
+        assert len(set(original[2][i:i + 3] for i in range(0, len(original[2]), 3 * 97))) > 50
+        for index, (width, height) in enumerate(sizes):
+            assert win32.resize(window, width, height), \
+                f'resize {width}x{height} gave {win32.client_size(window)}'
+            picture = image(window, f'fixture-resize-{index}')
+            assert picture[:2] == (width, height), picture[:2]
+        assert image(window, 'fixture-again')[2] == original[2], \
+            'fixed-time image changed after the resizes'
+        win32.key(window, ord('A'), 'a')
+        win32.click(window, 100, 100)
+        time.sleep(.3)
+        win32.close(window)
+        text = finish(process, log)
+        events = [line for line in text.splitlines() if line.startswith('Fixture input:')]
+        assert events == ['Fixture input: key down 65', 'Fixture input: key up 65',
+                          'Fixture input: button down 1', 'Fixture input: button up 1'], events
+    with fixture('fixture-escape') as (process, window, log):
+        win32.key(window, win32.VK_ESCAPE)
+        finish(process, log)
+    with fixture('fixture-multi', {'GLYPHSHIFT_FIXTURE_MULTI': '1'}, frames=60) as \
+            (process, _, log):
+        assert 'two swapchains / one device' in finish(process, log)
+    print('Fixture: deterministic gradient, 12 confirmed resizes, posted input, '
+          'close/Escape/multi-swapchain clean exits, no validation message or loader error')
+
+
+def oracles():
+    """The GPU image oracles through the Vulkan preview, with validation."""
+    oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
+    here = pathlib.Path(__file__).resolve().parent
+    for name in ['atlas_filter', 'temporal', 'exposure', 'anchor']:
+        subprocess.run([sys.executable, str(here / f'{name}.py'), '--build', str(build),
+                        '--output', str(output / name)], env=oracle_env, check=True)
+
+
+fixture_phase()
+oracles()

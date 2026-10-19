@@ -4229,6 +4229,51 @@ python tests/smoke/exposure.py --build build/windows-dev --output build/windows-
 python tests/smoke/anchor.py --build build/windows-dev --output build/windows-dev/oracles/anchor
 ```
 
+**Step 7, part 1: the Win32 fixture and the Windows smoke (2026-10-19).** The
+overlay's test target and the start of the `run.py`/`overlay.py` counterpart.
+
+- `glyphshift-vulkan-fixture` builds on Windows: `tests/fixtures/vulkan.cpp`
+  picks its surface per system (`VK_KHR_win32_surface` or Xlib), and
+  `tests/fixtures/window_win32.cpp` is the Win32 `fixture::Window` (client area
+  of the requested size in physical pixels, the process being per-monitor DPI
+  aware; Escape or closing ends it; `GLYPHSHIFT_FIXTURE_TITLE_SUFFIX`,
+  `GLYPHSHIFT_FIXTURE_NO_FOCUS` (shown without activation) and
+  `GLYPHSHIFT_FIXTURE_INPUT_LOG` (virtual-key codes and buttons) as on X11).
+  The window-independent helpers moved from `window.cpp` to
+  `tests/fixtures/common.cpp`, shared by both. `vulkan-help` runs in CTest.
+- `tests/smoke/win32.py` is the Windows counterpart of `x11.py` (ctypes only):
+  windows by title, the client area as DWM composes it (`PrintWindow` with
+  `PW_RENDERFULLCONTENT`, Vulkan content included), the composed screen, input
+  posted to a window's queue, moves and resizes without activation, z-order
+  and hit tests.
+- `tests/smoke/windows_run.py` (target `smoke-windows`; CTest `smoke-windows`
+  with `GLYPHSHIFT_GPU_SMOKE_TESTS=ON`, skip code 77) starts the fixture
+  directly with Khronos core and synchronization validation and checks: the
+  fixed-time image is the shared gradient (red to the right, green downwards)
+  and is unchanged after twelve confirmed resizes through the M0 sizes; posted
+  `A` and a click reach the fixture in order; `WM_CLOSE`, Escape and the
+  two-swapchain mode exit 0 without validation messages; then it runs the four
+  image oracles through the Vulkan preview with validation.
+
+Two machine findings. The loader reported "Failed to open JSON file" for two
+implicit-layer entries the Epic Games Launcher had left in
+`HKCU\SOFTWARE\Khronos\Vulkan\ImplicitLayers` (files and launcher gone); the
+fixture counts loader errors during instance creation, as on Linux, so every
+run failed. With the user's permission the two values were deleted (the key
+was exported first). And four third-party implicit layers load into every
+Vulkan process here (OBS's capture hook, RivaTuner Statistics Server, Steam's
+overlay and Fossilize); an on-screen display would change the captured images,
+so the smoke disables them by name with `VK_LOADER_LAYERS_DISABLE`.
+`~implicit~` would also disable NVIDIA's own `VK_LAYER_NV_optimus` and
+`VK_LAYER_NV_present`, which stay.
+
+Verification: both Windows presets built without warnings and passed 11/11
+CTest tests including `smoke-windows` (about 24 s); the fixture ran 120 frames
+and the two-swapchain mode 60 frames with validation in both presets; a
+capture of the fixture was inspected. Not verified: the Linux build after the
+fixture helpers moved to `common.cpp` (CI), and the Windows fixture on other
+GPUs.
+
 ## Definition of MVP done
 
 The target workflow is:

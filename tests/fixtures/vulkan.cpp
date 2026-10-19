@@ -1,4 +1,8 @@
+#ifdef _WIN32
+#define VK_USE_PLATFORM_WIN32_KHR
+#else
 #define VK_USE_PLATFORM_XLIB_KHR
+#endif
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
@@ -108,6 +112,9 @@ public:
     }
 
     void init(bool validation, const Renderer* shared = nullptr) {
+#ifdef _WIN32
+        window.create("GlyphShift Vulkan fixture");
+#else
         XVisualInfo visual_template{};
         visual_template.visualid =
             XVisualIDFromVisual(DefaultVisual(window.display, DefaultScreen(window.display)));
@@ -118,6 +125,7 @@ public:
         if (!visual || count == 0)
             throw std::runtime_error("Cannot get X11 visual");
         window.create(visual.get(), "GlyphShift Vulkan fixture");
+#endif
         const char* layer = "VK_LAYER_KHRONOS_validation";
         if (shared) {
             borrowed = true;
@@ -127,8 +135,13 @@ public:
             queue = shared->queue;
             family = shared->family;
         } else {
+#ifdef _WIN32
+            std::vector<const char*> extensions{VK_KHR_SURFACE_EXTENSION_NAME,
+                VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
+#else
             std::vector<const char*> extensions{VK_KHR_SURFACE_EXTENSION_NAME,
                 VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
+#endif
             auto debug = info<VkDebugUtilsMessengerCreateInfoEXT>(
                 VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
             debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -172,12 +185,21 @@ public:
                 vk_check(make(instance, &debug, nullptr, &messenger), "create debug messenger");
             }
         }
+#ifdef _WIN32
+        auto surface_info =
+            info<VkWin32SurfaceCreateInfoKHR>(VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
+        surface_info.hinstance = GetModuleHandleW(nullptr);
+        surface_info.hwnd = window.handle;
+        vk_check(vkCreateWin32SurfaceKHR(instance, &surface_info, nullptr, &surface),
+            "create Win32 surface");
+#else
         auto surface_info =
             info<VkXlibSurfaceCreateInfoKHR>(VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR);
         surface_info.dpy = window.display;
         surface_info.window = window.handle;
         vk_check(vkCreateXlibSurfaceKHR(instance, &surface_info, nullptr, &surface),
             "create Xlib surface");
+#endif
         if (!shared)
             select_device();
         else {

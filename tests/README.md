@@ -331,6 +331,18 @@ and keep `--output` short (for example `build/windows-dev/oracles/NAME`),
 since the exposure oracle's command line is long. On Linux the same Vulkan
 preview is built as `glyphshift-vulkan-preview`.
 
+The Windows graphics smoke runs the Win32 Vulkan fixture with validation
+(gradient, resizes, posted input, clean exits) and then those oracles, without
+taking the keyboard, pointer or focus:
+
+```powershell
+cmake --build --preset windows-dev --target smoke-windows
+```
+
+Add `-DGLYPHSHIFT_GPU_SMOKE_TESTS=ON` when configuring to include it in CTest.
+It disables the OBS, RivaTuner and Steam implicit Vulkan layers for the
+processes it starts, so their on-screen drawing cannot change the captures.
+
 These include `platform` (autostart entries and their quoting) and `install`,
 which runs `cmake --install` into temporary prefixes and starts the installed
 programs. The overlay smoke, part of the GLX graphics smoke, also checks that
