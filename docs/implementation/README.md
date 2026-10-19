@@ -76,7 +76,8 @@ the user requests it.
    listed under [Platform architecture](#platform-architecture) were removed,
    so platform, window system and renderer are independent layers.
    Prerequisite for items 6 and 7.
-6. **M7 — Windows capture overlay** (below). Next in priority.
+6. **M7 — Windows capture overlay** (below). Started on 2026-10-19; see the
+   [M7 record](#m7-record).
 7. **Wayland**, after M7. First check the current overlay under XWayland with
    X11 games (cheap, unverified); then add a Wayland window-system adapter
    (portal/PipeWire capture).
@@ -3844,7 +3845,7 @@ hand.
 - Add Steam-specific installation and profile UX.
 - Expand tested Proton compatibility, still restricted to offline use.
 
-### M7 — Windows capture overlay (planned, next in priority)
+### M7 — Windows capture overlay (in progress)
 
 This milestone extends the platform scope beyond Linux. It is the next item
 of the roadmap (item 6), before Wayland; its prerequisite, the platform
@@ -3871,6 +3872,100 @@ model, and it carries anti-cheat risk that capture avoids.
 Exit condition: as for M6, an independently started offline game on Windows is
 transformed live, input reaches the game, the overlay follows the window and
 detaches cleanly, and latency/cost are measured.
+
+#### M7 record
+
+Started on 2026-10-19 at the user's request, on the machine used for the Linux
+work, booted into Windows (dual boot): Windows 11 Pro 10.0.26200, NVIDIA
+GeForce RTX 3060 Ti with driver 591.86 (Vulkan device API 1.4.325, loader
+1.4.321), one 1920×1080 monitor at 254 Hz. One step at a time, each verified
+and committed before the next. Linux tests cannot run here, so after each step
+that touches shared code or CMake the user pushes and confirms the Linux CI
+`build` job. Tests that take the desktop keyboard or pointer, or start a game,
+run only with the user's permission.
+
+**Step 1, environment (2026-10-19).** Already present: Visual Studio
+Community 2022 17.10 (MSVC 14.40, with its Ninja), Windows SDK 10.0.22621
+(including the C++/WinRT `Windows.Graphics.Capture` headers and
+`windows.graphics.capture.interop.h`), CMake 3.30.1, Python 3.12.0 and Git
+2.46.2. Installed by the user for M7: Vulkan SDK 1.4.363.0 (`glslangValidator`,
+`spirv-val`, headers, loader library and the Khronos validation layer, the
+layer version used on Linux), LLVM 22.1.8 for `clang-format` (the version used
+on Linux and in CI; Visual Studio ships 17.0.3), and vcpkg at `C:\dev\vcpkg`
+with `freetype:x64-windows` 2.14.3 (the FreeType version used on Linux).
+
+After booting from Linux the Windows clock was three hours ahead: Linux keeps
+the hardware clock in UTC and Windows reads it as local time. Files written
+meanwhile, the whole vcpkg checkout included, had future modification times
+after the clock was corrected, and Ninja stopped with "manifest 'build.ninja'
+still dirty after 100 tries"; their times were reset and the FreeType build
+then succeeded. The
+same skew will recur after each Linux boot unless one of the systems is set to
+the other's convention (`RealTimeIsUniversal` on Windows or
+`timedatectl set-local-rtc 1` on Linux); that choice is the user's. The
+checkout has CRLF line endings (Git's global `core.autocrlf=true`); its effect
+on embedded presets and shaders is checked in step 3.
+
+**Step 2, test plan (2026-10-19).** Windows gets the coverage Linux has, as
+equivalents of the existing tests rather than unrelated new ones. Each row is
+implemented with the part it tests, and its result is recorded here like the
+Linux ones. Python tests keep using only the standard library (`ctypes` for the
+Windows API). Linux-specific tests stay as they are and are only switched off
+on Windows.
+
+CTest (no display):
+
+| Linux test | What it covers | Windows equivalent |
+| --- | --- | --- |
+| `core`, `illustration` | Fixture options and timing; tone, contours, exposure, art parameters, shape matching, summed-area atlas | Unchanged (step 3). |
+| `glyph-semantics` | Luminance, ramp, settings validation, live config reload (`mkdtemp`, `setenv`) | Same checks; temporary directory and environment through portable helpers (step 3). |
+| `editor` | ImGui model, hotkeys, capture and release, input sources (`setenv`, `/tmp`) | Same checks with the same helpers (step 3). |
+| `characters` | UTF-8, atlas, procedural blocks, font rasterization and placement, default font | Same checks; the default font comes from the Windows `platform::Fonts` (steps 3–4). |
+| `presets` | Store, restart (forked reader), per-game isolation, malformed and oversized files, symlink rejection, mode 0600, atomic replacement, directory from `XDG_CONFIG_HOME`/`HOME`, profile from `/proc/self/exe` | Same checks: the restart reads from a second process (the test starts itself again) instead of `fork`; owner-only access is checked on the file's ACL instead of mode bits; the symlink case runs where the account may create symbolic links (Developer Mode) and is reported as skipped otherwise; the directory comes from `%APPDATA%`; the profile from `GetModuleFileNameW` (steps 3–4). |
+| `platform` (Linux) | Desktop `Exec` quoting, `config_home`, autostart entry, `executable_path`, fonts, child processes (stop, failed exec, parent killed, `SIGTERM`), terminal check | New `platform-windows`: `config_home`, `executable_path`, `bold_monospace_font` (installed family found, missing family not substituted, default file exists) in step 4; command-line quoting for `CreateProcessW`, autostart under `HKCU\...\Run` written, replaced and removed, child stopped on request, failed start, child ending when its parent is killed (job object with kill-on-close), stop requests (console Ctrl+C / close), terminal check, with the process and autostart work. |
+| `x11-keys` | X11 keysym translation | New `win32-keys`: virtual-key and `WM_CHAR` translation to `editor::Key` and characters, with the Win32 editor input. |
+| `vulkan-help` | Fixture `--help` | The Win32 Vulkan fixture's `--help`, with the fixture. |
+| `format-hook` | Pre-commit hook on staged bytes | Same test where Git's `sh` and `clang-format` are available (step 3). |
+| `launcher`, `interpose`, `vulkan-layer`, `install`, `glx-help` | Linux injection, GLX, install layout | Off on Windows. Injection is out of scope; no Windows install rules exist yet, and a Windows install test would come with them. |
+
+GPU oracles: `atlas_filter.py`, `temporal.py`, `exposure.py` and `anchor.py`
+run unchanged against a Vulkan offscreen `glyphshift-preview` with the same
+command line and PPM files (step 6), and their measurements are compared with
+the ones recorded above (for example temporal 36.7% → 0.0% and one cell after a
+real change; exposure 100% → 0%; anchor 97.6% → 0).
+
+Graphics smoke, without taking the desktop (synthetic window messages and
+window or screen reads only):
+
+| Linux test | Windows equivalent |
+| --- | --- |
+| `run.py` (injected GLX/Vulkan): original vs. transformed, F10, editor open/close, host input restored, strength 0/1/0.37 through the widget, binary set through the editor, named preset and restart, live character and illustration switching, anchored grid on live frames, six resizes with the editor, two contexts/swapchains, failure pass-through, no validation errors | A Windows smoke on the overlay attached by window handle to a Win32 Vulkan fixture started on its own, judged on the overlay's pixels: the same sequence with editor input posted as window messages to the overlay, the overlay restarted to check the named preset, the same live config list, `GLYPHSHIFT_FIXTURE_SCROLL` for the anchored grid, six resizes with the editor, two fixtures with two overlays at once, a test-only renderer failure that leaves the game's image untouched with one diagnostic, and Khronos validation in the overlay with no `Vulkan validation:` line. GLX state probes, procedure-address swaps and unsupported present chains test injection and have no Windows counterpart. |
+| `overlay.py`: overlay pixels equal the preview, screen shows the overlay, empty input shape, exit with the target, tracking (move/resize, directly above, under later windows, rises with the target, unmap/map, destroy), single instance | Same checks: the overlay's own pixels against the Vulkan preview, the composited screen over the fixture, input transparency (`WS_EX_TRANSPARENT` and a `WindowFromPoint` hit test over the overlay returning the fixture), tracking with test-owned windows (`SetWindowPos`, z-order directly above the target, a later window above it stays above, raising the target, minimize/restore, destroy ends the overlay with status 0), and one daemon per session in the same three phases. |
+| `overlay_tray.py`: icon docks, manager restart, menu, style, start at login, Escape/click outside, Quit | Notification-area icon: present (`Shell_NotifyIconGetRect`), added again after `TaskbarCreated` (an Explorer restart), menu opened through the icon's callback message and driven with keyboard messages, style choice, start at login on/off (the `Run` value with its options), dismissal, Quit with status 0. Showing a popup menu needs the daemon in the foreground for a moment, like the menu's brief grab on X11. |
+
+Focused drivers with real input (`SendInput`; they take the keyboard and
+pointer, so each run waits for the user's permission):
+
+| Linux driver | Windows equivalent |
+| --- | --- |
+| `editor_apps.py` (`overlay-fixture`, `--illustrated`, `--presets`) | The same editor script on the Win32 fixture with the overlay attached. |
+| `overlay_daemon.py` | Ctrl+Alt+G (`RegisterHotKey`) attaches, detaches and attaches again; detach from the notification-icon menu; closing the fixture ends its overlay; the daemon stops with status 0. |
+| `overlay_game.py` (native SuperTux, SuperTux through Proton) | Windows SuperTux 0.7.0 run natively (the archive pinned in `test_env.py`), plus an offline single-player Steam game from the user's library chosen with the user (online or anti-cheat games are excluded): attach by hotkey, holding Right moves the game, editor open/close, resize followed, detach, attach, game exit. |
+| `overlay_measure.py` | Latency: the Win32 fixture alternates black and white frames and records `QueryPerformanceCounter` before each present; the composited screen is polled at the window's center (Desktop Duplication or GDI, chosen when measuring); direct vs. overlay (there is no launcher on Windows). Cost: GPU time of the overlay's passes from Vulkan timestamp queries (`GLYPHSHIFT_GPU_TIMING=1`) and `nvidia-smi`, SuperTux's title screen alone and with the overlay at 1280×720 and 1920×1080. |
+
+Supporting pieces: the fixture window (`tests/fixtures/window.cpp`, Xlib) gets
+a Win32 implementation for the Vulkan fixture (`VK_KHR_win32_surface`, same
+gradient and test variables); a GL/WGL fixture is not needed, since capture
+does not depend on the game's API. `x11.py` and `real_input.py` get Windows
+counterparts (window lookup, window and screen capture, posted messages;
+`SendInput` that checks and restores the foreground window and the pointer).
+`test_env.py` gains a Windows part: the pinned SuperTux archive and its test
+profile (networking, release checks, Discord, audio and pausing on focus loss
+off) under `%LOCALAPPDATA%\glyphshift-test`, and the validation layer from the
+Vulkan SDK. Windows has no unprivileged network namespace, so the offline
+guarantee there is the game's own configuration, Steam's offline mode for Steam
+games, and, if the user permits, an outbound Windows Firewall rule for the
+game's executable (it needs administrator rights). Proton stays Linux-only.
 
 ## Definition of MVP done
 
