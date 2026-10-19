@@ -1,7 +1,6 @@
 #include <X11/Xlib.h>
 #include <sys/select.h>
 
-#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +24,7 @@
 #include "../../src/display/x11/tracker.hpp"
 #include "../../src/render/opengl/owned.hpp"
 #include "daemon.hpp"
+#include "options.hpp"
 
 // Standalone capture overlay (M6). Never touches the target process: the X11
 // window system captures the target window's pixels (display::Capture), the
@@ -35,38 +35,7 @@
 namespace {
 namespace x11 = glyphshift::display::x11;
 
-struct Options {
-    unsigned long target = 0;
-    std::string preset;
-    std::string hotkey;
-    std::string autostart;
-    bool log = false;
-};
-
-Options parse(int argc, char** argv) {
-    Options options;
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view argument = argv[i];
-        if (argument == "--window" && i + 1 < argc)
-            options.target = std::strtoul(argv[++i], nullptr, 0);
-        else if (argument == "--preset" && i + 1 < argc)
-            options.preset = argv[++i];
-        else if (argument == "--hotkey" && i + 1 < argc)
-            options.hotkey = argv[++i];
-        else if (argument == "--autostart" && i + 1 < argc)
-            options.autostart = argv[++i];
-        else if (argument == "--log")
-            options.log = true;
-        else
-            throw std::invalid_argument("unknown argument: " + std::string(argument));
-    }
-    if (options.target && !options.hotkey.empty())
-        throw std::invalid_argument("--hotkey applies only without --window");
-    if (!options.autostart.empty() &&
-        (options.target || (options.autostart != "on" && options.autostart != "off")))
-        throw std::invalid_argument("--autostart takes on or off, without --window");
-    return options;
-}
+using glyphshift::overlay::Options;
 
 // Start-on-login for the background mode, with the same hotkey and style.
 int autostart(const Options& options) {
@@ -92,27 +61,6 @@ int autostart(const Options& options) {
     return 0;
 }
 
-// Presets are kept per game: profile "overlay-CLASS" from the target's
-// application class, unless the user chose GLYPHSHIFT_PROFILE. Profile names
-// allow 1-64 ASCII letters, digits, dots, underscores and hyphens.
-void choose_profile(const std::string& application) {
-    if (const char* chosen = std::getenv("GLYPHSHIFT_PROFILE"); chosen && *chosen)
-        return;
-    std::string profile = "overlay";
-    std::string suffix;
-    for (const char c : application) {
-        if (suffix.size() >= 55)
-            break;
-        const auto ch = static_cast<unsigned char>(c);
-        suffix += std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-'
-                      ? static_cast<char>(std::tolower(ch))
-                      : '-';
-    }
-    if (!suffix.empty())
-        profile += "-" + suffix;
-    setenv("GLYPHSHIFT_PROFILE", profile.c_str(), 1);
-}
-
 class Overlay {
 public:
     explicit Overlay(const Options& options) : options_(options) {
@@ -122,12 +70,12 @@ public:
         try {
             capture_ = std::make_unique<x11::Capture>(display_, options.target);
             tracker_ = std::make_unique<x11::Tracker>(display_, options.target);
-            choose_profile(tracker_->application_class());
+            glyphshift::overlay::choose_profile(tracker_->application_class());
             if (!options.preset.empty()) {
                 if (!glyphshift::builtin_preset(options.preset))
                     throw std::invalid_argument("unknown included style: " + options.preset);
                 // The starting style; the editor and saved presets take over from here.
-                setenv("GLYPHSHIFT_PRESET", options.preset.c_str(), 1);
+                glyphshift::platform::set_environment("GLYPHSHIFT_PRESET", options.preset);
             }
             capture_->start();
             const auto initial = tracker_->query();
@@ -306,7 +254,7 @@ private:
 
 int main(int argc, char** argv) {
     try {
-        const auto options = parse(argc, argv);
+        const auto options = glyphshift::overlay::parse(argc, argv);
         if (!options.autostart.empty())
             return autostart(options);
         // Without a window, run in the background and attach with the hotkey.
@@ -323,11 +271,7 @@ int main(int argc, char** argv) {
         overlay.run();
         return 0;
     } catch (const std::invalid_argument& error) {
-        std::cerr
-            << "glyphshift-overlay: " << error.what()
-            << "\nUsage: glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]\n"
-               "       glyphshift-overlay --window ID [--preset NAME] [--log]\n"
-               "       glyphshift-overlay --autostart on|off [--hotkey KEYS] [--preset NAME]\n";
+        std::cerr << "glyphshift-overlay: " << error.what() << '\n' << glyphshift::overlay::usage;
         return 2;
     } catch (const std::exception& error) {
         std::cerr << "glyphshift-overlay: " << error.what() << '\n';

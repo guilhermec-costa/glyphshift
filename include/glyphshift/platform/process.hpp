@@ -3,7 +3,8 @@
 #include <string>
 #include <vector>
 
-// Process facilities of the platform layer (Linux: /proc, fork/exec, signals).
+// Process facilities of the platform layer (Linux: /proc, fork/exec, signals;
+// Windows: module paths and console control events).
 namespace glyphshift::platform {
 // Absolute path of the running executable, symbolic links resolved.
 std::filesystem::path executable_path();
@@ -32,4 +33,7 @@ void request_stop() noexcept;
 
 // True when diagnostics on stderr reach a terminal the user can read.
 bool stderr_is_terminal() noexcept;
+
+// Sets an environment variable of this process (and its later children).
+void set_environment(const char* name, const std::string& value);
 }  // namespace glyphshift::platform

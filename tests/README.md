@@ -332,8 +332,10 @@ since the exposure oracle's command line is long. On Linux the same Vulkan
 preview is built as `glyphshift-vulkan-preview`.
 
 The Windows graphics smoke runs the Win32 Vulkan fixture with validation
-(gradient, resizes, posted input, clean exits) and then those oracles, without
-taking the keyboard, pointer or focus:
+(gradient, resizes, posted input, clean exits), attaches the capture overlay
+to it (its pixels must equal the preview of the captured frame, input must
+pass through, and it must end with the fixture), and then runs those oracles,
+without taking the keyboard, pointer or focus:
 
 ```powershell
 cmake --build --preset windows-dev --target smoke-windows

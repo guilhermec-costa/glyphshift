@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <csignal>
+#include <cstdlib>
 #include <glyphshift/platform/process.hpp>
 #include <stdexcept>
 
@@ -78,5 +79,9 @@ void request_stop() noexcept {
 
 bool stderr_is_terminal() noexcept {
     return isatty(STDERR_FILENO) != 0;
+}
+
+void set_environment(const char* name, const std::string& value) {
+    setenv(name, value.c_str(), 1);
 }
 }  // namespace glyphshift::platform

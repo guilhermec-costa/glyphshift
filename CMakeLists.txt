@@ -158,6 +158,17 @@ set_target_properties(glyphshift_vk_pipeline PROPERTIES POSITION_INDEPENDENT_COD
 target_include_directories(glyphshift_vk_pipeline SYSTEM PRIVATE third_party/imgui)
 target_include_directories(glyphshift_vk_pipeline PUBLIC ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(glyphshift_vk_pipeline PUBLIC glyphshift_core glyphshift_editor)
+# Vulkan rendering in a device and window this process owns (the capture
+# overlay), linked to the loader; kept apart from the pipeline library, which
+# the Linux layer uses without the loader. Windows adds the import of captured
+# D3D11 textures.
+add_library(glyphshift_vk_owned STATIC src/render/vulkan/owned.cpp)
+target_include_directories(glyphshift_vk_owned SYSTEM PRIVATE third_party/imgui)
+target_link_libraries(glyphshift_vk_owned PUBLIC glyphshift_vk_pipeline Vulkan::Vulkan)
+if(GLYPHSHIFT_WINDOWS)
+    target_sources(glyphshift_vk_owned PRIVATE src/render/vulkan/win32_import.cpp)
+    target_compile_definitions(glyphshift_vk_owned PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+endif()
 if(GLYPHSHIFT_LINUX)
 # The Vulkan loader layer (Linux injection module) around that pipeline.
 add_library(glyphshift_vk SHARED
@@ -212,7 +223,7 @@ else()
     # The Vulkan fixture's Win32 window (M7): the capture overlay's test target.
     add_library(fixture_window STATIC tests/fixtures/window_win32.cpp tests/fixtures/common.cpp)
     target_include_directories(fixture_window PUBLIC tests/fixtures)
-    target_link_libraries(fixture_window PUBLIC glyphshift_core user32)
+    target_link_libraries(fixture_window PUBLIC glyphshift_core user32 dwmapi)
     add_executable(glyphshift-vulkan-fixture tests/fixtures/vulkan.cpp)
     target_link_libraries(glyphshift-vulkan-fixture PRIVATE fixture_window Vulkan::Vulkan)
     add_dependencies(glyphshift-vulkan-fixture fixture_shaders)
@@ -221,6 +232,17 @@ else()
     if(BUILD_TESTING)
         add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
     endif()
+    # Window-system layer, Win32 (M7): Windows.Graphics.Capture of the target,
+    # the input-transparent overlay window and target tracking.
+    add_library(glyphshift_win32_overlay STATIC src/display/win32/capture.cpp
+        src/display/win32/overlay_window.cpp src/display/win32/tracker.cpp)
+    target_link_libraries(glyphshift_win32_overlay PUBLIC user32 PRIVATE d3d11 dxgi dwmapi
+        windowsapp)
+    # The capture overlay: the Win32 window system, the Windows platform layer
+    # and the Vulkan renderer.
+    add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/options.cpp)
+    target_link_libraries(glyphshift-overlay PRIVATE glyphshift_vk_owned glyphshift_platform
+        glyphshift_win32_overlay)
 endif()
 
 # Compile the very same gradient source for the two APIs. Files are read at
@@ -312,7 +334,8 @@ add_library(glyphshift_x11_overlay STATIC src/display/x11/capture.cpp
     src/display/x11/global_hotkey.cpp)
 target_link_libraries(glyphshift_x11_overlay PUBLIC X11::X11 OpenGL::GL
     PRIVATE PkgConfig::X11_CAPTURE)
-add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/daemon.cpp)
+add_executable(glyphshift-overlay apps/overlay/main.cpp apps/overlay/daemon.cpp
+    apps/overlay/options.cpp)
 target_link_libraries(glyphshift-overlay PRIVATE glyphshift_gl_pipeline glyphshift_platform
     glyphshift_x11_input glyphshift_x11_overlay glyphshift_x11_tray)
 

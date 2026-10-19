@@ -107,6 +107,10 @@ cmake --build --preset windows-dev
 ctest --preset windows-dev
 ```
 
+The Windows overlay can already be attached to one window by its handle:
+`build\windows-dev\glyphshift-overlay --window HANDLE --preset art-comic`.
+The hotkey, editor input, background mode and tray icon are not there yet.
+
 To install for your user, with a menu entry and icon:
 
 ```bash

@@ -121,6 +121,72 @@ def fixture_phase():
           'close/Escape/multi-swapchain clean exits, no validation message or loader error')
 
 
+def overlay_phase():
+    """The capture overlay on a fixture started on its own: its pixels equal the
+    preview of the captured frame, the screen shows them, input passes through,
+    and closing the target ends the overlay."""
+    with fixture('overlay-fixture') as (process, window, log):
+        win32.move(window, 60, 60)
+        assert win32.resize(window, 640, 400), win32.client_size(window)
+        original = image(window, 'overlay-original')
+        source = win32.save(output / 'overlay-source.ppm', original)
+        expected_path = output / 'overlay-expected.ppm'
+        subprocess.run([str(build / 'glyphshift-preview'), str(source),
+                        str(pathlib.Path(__file__).resolve().parents[2] / 'presets' /
+                            'art-newsprint.conf'), str(expected_path)],
+                       env=env, check=True, stdout=subprocess.DEVNULL)
+        expected = expected_path.read_bytes().split(b'\n', 3)[3]
+        overlay_log = output / 'overlay.log'
+        with overlay_log.open('w') as stream:
+            overlay = subprocess.Popen([str(build / 'glyphshift-overlay'), '--window',
+                                        str(window), '--preset', 'art-newsprint', '--log'],
+                                       env=dict(env, GLYPHSHIFT_VULKAN_VALIDATION='1'),
+                                       stdout=stream, stderr=subprocess.STDOUT)
+        try:
+            layer = win32.wait_window('GlyphShift overlay', overlay, overlay_log)
+            x, y = win32.client_origin(window)
+            # The first frame takes a moment (device, pipeline, capture).
+            deadline = time.monotonic() + 30
+            while True:
+                time.sleep(.25)
+                screen = win32.screen(x, y, 640, 400)
+                worst, close = win32.difference(screen[2], expected)
+                if (close >= .999 and worst <= 8) or time.monotonic() > deadline:
+                    break
+            win32.save(output / 'overlay-screen.ppm', screen)
+            assert close >= .999 and worst <= 8, ('screen over the target', worst, close)
+            screen_match = (worst, close)
+            own = win32.image(layer)
+            win32.save(output / 'overlay-own.ppm', own)
+            assert own[:2] == (640, 400), own[:2]
+            worst, close = win32.difference(own[2], expected)
+            assert close >= .999 and worst <= 8, ('overlay pixels', worst, close)
+            own_match = (worst, close)
+            _, still_original = win32.difference(screen[2], original[2])
+            assert still_original < .9, still_original
+            left, top, width, height = win32.window_rect(layer)
+            assert (left, top, width, height) == (x, y, 640, 400), (left, top, width, height)
+            # Input passes through: layered and transparent, and the hit test
+            # over the overlay finds the target.
+            style = win32.extended_style(layer)
+            assert style & win32.WS_EX_LAYERED and style & win32.WS_EX_TRANSPARENT, hex(style)
+            assert win32.window_at(x + 320, y + 200) == window, 'overlay takes the pointer'
+            win32.close(window)
+            finish(process, log)
+            assert overlay.wait(timeout=15) == 0, overlay_log.read_text(errors='replace')
+            text = overlay_log.read_text(errors='replace')
+            assert 'Vulkan validation:' not in text, text
+        finally:
+            if overlay.poll() is None:
+                overlay.terminate()
+                overlay.wait(timeout=10)
+    print('Capture overlay: independent fixture transformed on screen, output equals the '
+          'preview, input passes through, clean exit with the target, no validation message '
+          f'(overlay vs preview: max difference {own_match[0]}, {100 * own_match[1]:.2f}% '
+          f'identical pixels; screen: {screen_match[0]}, {100 * screen_match[1]:.2f}%; '
+          f'screen still original in {100 * still_original:.2f}%)')
+
+
 def oracles():
     """The GPU image oracles through the Vulkan preview, with validation."""
     oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
@@ -131,4 +197,5 @@ def oracles():
 
 
 fixture_phase()
+overlay_phase()
 oracles()

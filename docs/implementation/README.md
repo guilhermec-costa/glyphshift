@@ -4270,9 +4270,85 @@ so the smoke disables them by name with `VK_LOADER_LAYERS_DISABLE`.
 Verification: both Windows presets built without warnings and passed 11/11
 CTest tests including `smoke-windows` (about 24 s); the fixture ran 120 frames
 and the two-swapchain mode 60 frames with validation in both presets; a
-capture of the fixture was inspected. Not verified: the Linux build after the
-fixture helpers moved to `common.cpp` (CI), and the Windows fixture on other
-GPUs.
+capture of the fixture was inspected. Not verified: the Windows fixture on
+other GPUs. After the user pushed the commits up to this part (`c18c414`,
+`ed69c7b`, `b9720d1`, `65ca16d`), the CI's Linux `build` job passed (seen by
+the user on GitHub), covering `platform-files` on Linux, the GL preview's
+shared PPM helpers, `glyphshift-vulkan-preview` and the fixture helpers in
+`common.cpp`.
+
+**Step 7, part 2: capture, overlay window and `--window` (2026-10-19).**
+`glyphshift-overlay --window HANDLE [--preset NAME] [--log]` attaches to a
+window by handle and draws the effect over its client area.
+
+- `display::win32::Capture` (`src/display/win32/capture.{hpp,cpp}`): a D3D11
+  device on the Vulkan device's adapter (matched by LUID), a free-threaded
+  Windows.Graphics.Capture frame pool, cursor capture off and the capture
+  border off when Windows allows it (it did here). Each new frame's client
+  area, located inside the captured image from DWM's extended frame bounds,
+  is copied into a texture shared through an NT handle, recreated when its
+  size changes; the frame pool is recreated when the window's size changes. A
+  frame-arrived or closed event wakes the overlay. WinRT errors become
+  `std::runtime_error`.
+- One shared fence orders the shared texture's users: each D3D11 copy and each
+  Vulkan frame waits for the last reserved value and signals the next one; the
+  renderer reserves its values only right before submitting, so the producer
+  never waits for a value nobody signals.
+- `vulkan::OwnedRenderer` (`src/render/vulkan/owned.{hpp,cpp}`, library
+  `glyphshift_vk_owned`, kept apart from the pipeline library the Linux layer
+  links without the loader): its own instance, device (Vulkan 1.2 with
+  timeline semaphores when asked), swapchain (FIFO, recreated on resize or
+  when the character selection changes) and `vulkan::Pipeline`, on a surface
+  the window system creates. With the effect off and the editor open it shows
+  the original image, as the GL overlay does. `GLYPHSHIFT_VULKAN_VALIDATION=1`
+  enables Khronos and synchronization validation ("Vulkan validation:" and
+  "Vulkan loader:" lines on stderr). `vulkan::Win32Import` (Windows only)
+  imports the texture (dedicated allocation) and the fence (timeline
+  semaphore) and transfers the image from and back to the external owner
+  around each frame.
+- `display::win32::OverlayWindow`: a `WS_EX_LAYERED | WS_EX_TRANSPARENT |
+  WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` popup, fully opaque,
+  placed over the target's client area. A scratch prototype first confirmed
+  that a Vulkan swapchain presents into such a window on this driver (on screen
+  at the monitor's rate) and that hit tests pass through it, while a plain
+  window took them. `display::win32::Tracker`: whether the target exists and
+  is viewable (shown, not minimized, not cloaked on another virtual desktop),
+  its client area, and its executable name for the profile.
+- The app: option parsing, the usage text and the per-game profile rule moved
+  from the X11 `main.cpp` to `apps/overlay/options.{hpp,cpp}`, shared by
+  `main.cpp` (X11, otherwise unchanged) and `main_win32.cpp`; the profile is
+  `overlay-EXECUTABLE` on Windows. `platform::set_environment` and the Windows
+  stop requests (console Ctrl+C, Ctrl+Break, close, logoff, shutdown),
+  `stderr_is_terminal` joined the platform layer. The background mode and
+  `--autostart` report that they are not available on Windows yet.
+
+Smoke (`windows_run.py`, overlay phase, the counterpart of `overlay.py`'s
+first part): the fixture started on its own with Newsprint attached by handle.
+The overlay's own pixels and the screen over the target equal
+`glyphshift-preview` of the captured frame (observed: max difference 0, 100%
+identical pixels for both), the screen no longer shows the original (0% of
+pixels), the overlay sits exactly on the client area, it is layered and
+transparent and a hit test over it finds the target, and closing the target
+ends both processes with status 0 without validation messages. The first run
+differed in the two lower corners only (99.79% identical): Windows 11 rounds
+a window's lower corners into its client area, the capture lacks those pixels
+and the expected image (`PrintWindow`) has them. The fixture now asks for
+square corners (`DWMWA_WINDOW_CORNER_PREFERENCE`); on a rounded windowed game
+the glyph cells in those two corners see the corner's missing pixels
+(borderless fullscreen windows have no rounded corners).
+
+On the animated fixture (800×600, Comic, `--log`) the overlay averaged 48–50
+frames per second from its start, including the startup, over a 60 fps
+target, at 0.39 ms of overlay CPU per frame in Release (0.86 ms in Debug with
+validation); this is not the latency and cost measurement, which is a later
+part.
+
+Verification: both Windows presets built from scratch without warnings and
+passed 11/11 CTest tests, `smoke-windows` included (about 25 s, Debug and
+Release). Not verified: tracking beyond position and size (z-order, minimize,
+occluding windows, virtual desktops) and the editor, hotkeys, daemon and tray
+on Windows, which are the next parts; the Linux build of the shared options
+and `glyphshift_vk_owned` (CI).
 
 ## Definition of MVP done
 

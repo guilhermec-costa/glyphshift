@@ -1,3 +1,5 @@
+#include <dwmapi.h>
+
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -73,6 +75,11 @@ void Window::create(const char* title) {
         this);
     if (!handle)
         throw std::runtime_error("CreateWindowExW failed");
+    // Square corners: Windows 11 rounds a window's lower corners into its
+    // client area, which a window capture then lacks; tests compare captures
+    // with the whole client area.
+    const DWORD square = DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, &square, sizeof square);
     ShowWindow(handle, no_focus ? SW_SHOWNOACTIVATE : SW_SHOW);
     RECT client{};
     GetClientRect(handle, &client);
