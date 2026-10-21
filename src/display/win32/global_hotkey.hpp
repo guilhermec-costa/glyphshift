@@ -37,6 +37,13 @@ public:
     // already holds it.
     void grab();
 
+    // On a second launch: asks the running daemon to remind the user of its
+    // hotkey with a notification; false when it cannot be reached.
+    bool remind_running() const;
+
+    // True for that request, on the running daemon's window.
+    bool reminder(const MSG& message) const noexcept;
+
     // True for a press of the hotkey (a WM_HOTKEY of the daemon's window);
     // presses within 400 ms of the previous one are consumed without
     // reporting.

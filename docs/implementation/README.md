@@ -4580,7 +4580,75 @@ CTest tests; `windows_run.py` passed twice in each (fixture, overlay,
 tracking, editor, daemon, oracles; about 60 s). Not verified: attaching and
 detaching with the real Ctrl+Alt+G on a focused game (it takes the keyboard;
 the focused driver needs the user's permission), sign-in start by Windows
-itself, and the Linux build of the shared hotkey name (CI).
+itself, and the Linux build of the shared hotkey name (CI). After the user
+pushed `93f2b6b`, `4b2ebb6` and `6ff449a`, the CI's Linux `build` job passed
+for each (seen by the user).
+
+**Step 7, part 6: the notification-area icon (2026-10-21).** The counterpart
+of the M6 system tray. `display::win32::Tray` (`src/display/win32/tray.{hpp,cpp}`)
+adds the daemon's icon with `Shell_NotifyIcon` from a hidden top-level window
+(class `GlyphShiftTray`), so it also receives the `TaskbarCreated` broadcast
+and adds the icon again when Explorer restarts its taskbar (or the DPI
+changes). The icon is the application icon's "G" of glyph cells on its dark
+rounded tile, drawn at the small-icon size of the window's DPI; the tooltip
+names the hotkey.
+
+- Any click on the icon (`NIN_SELECT`, `NIN_KEYSELECT`, `WM_CONTEXTMENU`,
+  `NOTIFYICON_VERSION_4`) opens a popup menu with the Linux rows and choices:
+  the hotkey reminder; "Detach from TITLE" per attached game, or "No game
+  attached"; "Style for newly attached games" with "Each game's saved style"
+  and the nine included styles (checked when current; it changes the
+  `--preset` of overlays started afterwards); "Start at login" (checked when
+  the `Run` value exists; toggling writes it with the current hotkey and
+  style, or removes it); "Quit GlyphShift" (the daemon stops its overlays and
+  exits 0). Rows that cannot be chosen are grayed; ampersands in window
+  titles stay literal. The menu is opened from the daemon's loop, not inside
+  the icon's callback; the daemon takes the foreground while it is open, the
+  documented pattern for these menus (otherwise it would not close on a click
+  elsewhere), except under `GLYPHSHIFT_OVERLAY_NO_FOCUS=1` (tests). The menu
+  is modal: the daemon's loop waits until it closes.
+- Notifications: Windows shows them only from a notification-area icon, which
+  is window-system code, so `platform::notify` stays a no-op on Windows and the
+  daemon notifies through its icon (balloons, shown by Windows 11 as toasts):
+  "GlyphShift is running" when started without a terminal; "GlyphShift could
+  not start" when the hotkey is taken, the daemon keeping its icon until the
+  notification is hidden (at most 10 s) before exiting 1; and "GlyphShift is
+  already running" for a second launch without a terminal, which posts a
+  registered message to the running daemon's window
+  (`GlobalHotkey::remind_running`) so the running daemon's icon shows it.
+  `GLYPHSHIFT_NO_NOTIFICATIONS=1` (tests) turns notifications off.
+
+Tests: `windows_run.py` gained the tray phase, the counterpart of
+`overlay_tray.py`, with posted messages only (no keyboard or pointer, no
+foreground change, no notifications), on a daemon with
+`ctrl+alt+shift+F12` and a test-only `Run` value (`GLYPHSHIFT_AUTOSTART_VALUE`):
+the icon is present (`Shell_NotifyIconGetRect`); after the test removes it
+from the taskbar (`NIM_DELETE` with the daemon's window and id, what an
+Explorer restart does) and posts `TaskbarCreated`, it is present again; a
+second launch with stderr to a file exits 0 and the running daemon logs its
+reminder; the menu, opened by posting the icon's callback message, is read
+through `MN_GETHMENU` (labels, grayed and checked states) and driven with
+posted Down/Return/Escape: the hotkey row, "No game attached" and the style
+heading grayed, "Each game's saved style" checked; choosing Comic changes the
+style for new attachments and moves the check; "Start at login" writes
+`PATH\glyphshift-overlay.exe --hotkey ctrl+alt+shift+F12 --preset art-comic`
+and, chosen again, removes it; Escape closes the menu without a choice; Quit
+ends the daemon with status 0 and its icon window is gone. It is skipped when
+another daemon runs. With the `TaskbarCreated` handling removed, the phase
+failed with "the icon was not added again".
+
+Verification: both Windows presets built without warnings and passed 12/12
+CTest tests, `smoke-windows` included (about 68 s, fixture, overlay,
+tracking, editor, daemon, tray, oracles); the format check passed. A scratch
+probe without the test variables showed the three notifications in screen
+captures (toasts titled with the program name and the icon's "G"), and the
+daemon with a hotkey held by another process exited 1 within 7 s, once its
+notification was hidden. Here a new icon goes to the taskbar's overflow area;
+`Shell_NotifyIconGetRect` still reports it. Not verified: opening the menu
+with a real click and closing it by clicking elsewhere (the user's pointer),
+"Detach from" (it needs an attachment by the real hotkey, so it belongs to
+the `overlay_daemon` counterpart), a real Explorer restart, the icon at
+other DPIs, and notifications under Do Not Disturb.
 
 ## Definition of MVP done
 

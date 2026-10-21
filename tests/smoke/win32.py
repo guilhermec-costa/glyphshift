@@ -311,3 +311,99 @@ def difference(a, b):
     worst = max(abs(x - y) for x, y in zip(a, b))
     same = sum(1 for i in range(0, len(a), 3) if a[i:i + 3] == b[i:i + 3])
     return worst, same / (len(a) // 3)
+
+
+# The notification area and popup menus (the daemon's icon).
+shell32 = c.WinDLL('shell32', use_last_error=True)
+user32.FindWindowExW.restype = w.HWND
+user32.FindWindowExW.argtypes = [w.HWND, w.HWND, w.LPCWSTR, w.LPCWSTR]
+user32.GetClassNameW.restype, user32.GetClassNameW.argtypes = c.c_int, [w.HWND, w.LPWSTR, c.c_int]
+user32.RegisterWindowMessageW.restype, user32.RegisterWindowMessageW.argtypes = w.UINT, [w.LPCWSTR]
+user32.SendMessageW.restype = c.c_ssize_t
+user32.SendMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+user32.GetMenuItemCount.restype, user32.GetMenuItemCount.argtypes = c.c_int, [w.HMENU]
+user32.GetMenuStringW.restype = c.c_int
+user32.GetMenuStringW.argtypes = [w.HMENU, w.UINT, w.LPWSTR, c.c_int, w.UINT]
+user32.GetMenuState.restype, user32.GetMenuState.argtypes = w.UINT, [w.HMENU, w.UINT, w.UINT]
+MF_BYPOSITION, MF_GRAYED, MF_CHECKED, MF_HILITE, MF_SEPARATOR = 0x400, 0x1, 0x8, 0x80, 0x800
+WM_APP, WM_CONTEXTMENU, MN_GETHMENU = 0x8000, 0x007B, 0x01E1
+VK_UP, VK_DOWN = 0x26, 0x28
+
+
+class NotifyIconIdentifier(c.Structure):
+    _fields_ = [('cbSize', w.DWORD), ('hWnd', w.HWND), ('uID', w.UINT), ('guidItem', c.c_byte * 16)]
+
+
+class NotifyIconData(c.Structure):
+    # NOTIFYICONDATAW up to hBalloonIcon; NIM_DELETE reads cbSize, hWnd and uID.
+    _fields_ = [('cbSize', w.DWORD), ('hWnd', w.HWND), ('uID', w.UINT), ('uFlags', w.UINT),
+                ('uCallbackMessage', w.UINT), ('hIcon', w.HICON), ('szTip', w.WCHAR * 128),
+                ('dwState', w.DWORD), ('dwStateMask', w.DWORD), ('szInfo', w.WCHAR * 256),
+                ('uVersion', w.UINT), ('szInfoTitle', w.WCHAR * 64), ('dwInfoFlags', w.DWORD),
+                ('guidItem', c.c_byte * 16), ('hBalloonIcon', w.HICON)]
+
+
+shell32.Shell_NotifyIconGetRect.restype = c.c_long
+shell32.Shell_NotifyIconGetRect.argtypes = [c.POINTER(NotifyIconIdentifier), c.POINTER(w.RECT)]
+shell32.Shell_NotifyIconW.restype = w.BOOL
+shell32.Shell_NotifyIconW.argtypes = [w.DWORD, c.POINTER(NotifyIconData)]
+
+
+def class_name(window):
+    buffer = c.create_unicode_buffer(256)
+    user32.GetClassNameW(window, buffer, 256)
+    return buffer.value
+
+
+def process_of(window):
+    pid = w.DWORD()
+    user32.GetWindowThreadProcessId(window, c.byref(pid))
+    return pid.value
+
+
+def window_of(name, pid, visible_only=False):
+    """A top-level window of class `name` owned by process `pid`, or None."""
+    found = []
+
+    def visit(window, _):
+        if class_name(window) == name and process_of(window) == pid and \
+                (not visible_only or user32.IsWindowVisible(window)):
+            found.append(window)
+        return True
+    user32.EnumWindows(WNDENUMPROC(visit), 0)
+    return found[0] if found else None
+
+
+def icon_rect(window, icon_id=1):
+    """The screen rectangle of a window's notification-area icon, or None when
+    the taskbar does not have it."""
+    identifier = NotifyIconIdentifier(c.sizeof(NotifyIconIdentifier), window, icon_id)
+    rect = w.RECT()
+    if shell32.Shell_NotifyIconGetRect(c.byref(identifier), c.byref(rect)) != 0:
+        return None
+    return rect.left, rect.top, rect.right, rect.bottom
+
+
+def delete_icon(window, icon_id=1):
+    """Removes a window's icon from the taskbar, as an Explorer restart does."""
+    data = NotifyIconData(c.sizeof(NotifyIconData), window, icon_id)
+    return bool(shell32.Shell_NotifyIconW(2, c.byref(data)))  # NIM_DELETE
+
+
+def post(window, message, wparam=0, lparam=0):
+    user32.PostMessageW(window, message, wparam, lparam)
+
+
+def registered_message(name):
+    return user32.RegisterWindowMessageW(name)
+
+
+def menu_rows(menu_window):
+    """(label, state) of each item of an open popup menu window (#32768)."""
+    menu = w.HMENU(user32.SendMessageW(menu_window, MN_GETHMENU, 0, 0))
+    rows = []
+    for index in range(user32.GetMenuItemCount(menu)):
+        buffer = c.create_unicode_buffer(256)
+        user32.GetMenuStringW(menu, index, buffer, 256, MF_BYPOSITION)
+        rows.append((buffer.value, user32.GetMenuState(menu, index, MF_BYPOSITION)))
+    return rows

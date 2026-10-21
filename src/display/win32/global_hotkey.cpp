@@ -12,6 +12,12 @@ constexpr wchar_t daemon_class[] = L"GlyphShiftDaemon";
 constexpr wchar_t mutex_name[] = L"Local\\GlyphShiftDaemon";
 constexpr int hotkey_id = 1;
 
+// Posted by a second launch to the running daemon's window.
+UINT reminder_message() {
+    static const UINT message = RegisterWindowMessageW(L"GlyphShiftDaemonReminder");
+    return message;
+}
+
 std::string lower(std::string_view text) {
     std::string result(text);
     std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
@@ -185,6 +191,15 @@ void GlobalHotkey::grab() {
     if (!RegisterHotKey(window_, hotkey_id, modifiers_ | MOD_NOREPEAT, key_))
         throw std::runtime_error("the hotkey is already registered by another application");
     grabbed_ = true;
+}
+
+bool GlobalHotkey::remind_running() const {
+    const HWND other = FindWindowW(daemon_class, nullptr);
+    return other && PostMessageW(other, reminder_message(), 0, 0);
+}
+
+bool GlobalHotkey::reminder(const MSG& message) const noexcept {
+    return window_ && message.hwnd == window_ && message.message == reminder_message();
 }
 
 bool GlobalHotkey::pressed(const MSG& message) {

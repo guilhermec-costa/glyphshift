@@ -13,6 +13,7 @@ import pathlib
 import subprocess
 import sys
 import time
+import winreg
 
 import win32
 
@@ -20,7 +21,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=pathlib.Path, required=True)
 parser.add_argument('--output', type=pathlib.Path)
 parser.add_argument('--only', help='Comma-separated phases: fixture, overlay, tracking, editor, '
-                    'daemon, oracles')
+                    'daemon, tray, oracles')
 args = parser.parse_args()
 build = args.build.resolve()
 if sys.platform != 'win32':
@@ -37,6 +38,7 @@ env.update(APPDATA=str(output / 'config'), GLYPHSHIFT_FIXTURE_NO_FOCUS='1',
            VK_LOADER_LAYERS_DISABLE='VK_LAYER_OBS_HOOK,VK_LAYER_RTSS,'
                                     'VK_LAYER_VALVE_steam_overlay,VK_LAYER_VALVE_steam_fossilize')
 sequence = 0
+RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
 
 @contextlib.contextmanager
@@ -491,6 +493,136 @@ def single_instance_phase():
           'of two started together one stays; a new daemon runs after the first exits')
 
 
+def tray_phase():
+    """The daemon's notification-area icon (overlay_tray.py), with posted
+    messages only: the icon is present and comes back after an Explorer
+    restart (TaskbarCreated); a second launch without a terminal makes the
+    running daemon remind of its hotkey; the menu opens through the icon's
+    callback and is driven with keyboard messages: the style for new games,
+    start at login on and off (a test-only Run value), Escape, and Quit with
+    status 0. The daemon does not take the foreground for the menu
+    (GLYPHSHIFT_OVERLAY_NO_FOCUS) and shows no notifications."""
+    run_value = 'GlyphShiftSmokeTest'
+    tray_env = dict(env, GLYPHSHIFT_OVERLAY_NO_FOCUS='1', GLYPHSHIFT_NO_NOTIFICATIONS='1',
+                    GLYPHSHIFT_AUTOSTART_VALUE=run_value)
+    log = output / 'daemon-tray.log'
+
+    def text():
+        return log.read_text(errors='replace')
+
+    def run_entry():
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+                return winreg.QueryValueEx(key, run_value)[0]
+        except FileNotFoundError:
+            return None
+
+    with log.open('w') as stream:
+        daemon = subprocess.Popen([str(build / 'glyphshift-overlay'), '--hotkey',
+                                   'ctrl+alt+shift+F12', '--log'], env=tray_env, stdout=stream,
+                                  stderr=subprocess.STDOUT)
+    try:
+        eventually(lambda: 'running;' in text() or 'already running' in text(),
+                   'daemon did not start: ' + text())
+        if 'already running' in text():
+            print('Tray: SKIPPED, another GlyphShift daemon runs in this session')
+            return
+        tray = win32.window_of('GlyphShiftTray', daemon.pid)
+        assert tray, 'no notification-area window'
+        rect = win32.icon_rect(tray)
+        assert rect, 'the icon is not in the notification area'
+        # Explorer restarting: its taskbar loses the icon, then broadcasts
+        # TaskbarCreated.
+        assert win32.delete_icon(tray)
+        assert not win32.icon_rect(tray)
+        win32.post(tray, win32.registered_message('TaskbarCreated'))
+        eventually(lambda: win32.icon_rect(tray), 'the icon was not added again')
+        rect = win32.icon_rect(tray)
+        print('Tray: the icon is in the notification area and is added again after '
+              'TaskbarCreated')
+        # A second launch without a terminal (stderr is a file here).
+        second_log = output / 'daemon-tray-second.log'
+        with second_log.open('w') as stream:
+            second = subprocess.Popen([str(build / 'glyphshift-overlay')], env=tray_env,
+                                      stdout=stream, stderr=subprocess.STDOUT)
+        assert second.wait(timeout=10) == 0, second_log.read_text(errors='replace')
+        eventually(lambda: 'reminding of the hotkey' in text(), 'no reminder: ' + text())
+        print('Tray: a second launch without a terminal makes the running daemon remind of '
+              'its hotkey')
+
+        anchor = ((rect[1] + rect[3]) // 2 << 16) | ((rect[0] + rect[2]) // 2 & 0xffff)
+
+        def open_menu():
+            win32.post(tray, win32.WM_APP + 1, anchor, win32.WM_CONTEXTMENU | 1 << 16)
+            found = []
+            eventually(lambda: found.append(win32.window_of('#32768', daemon.pid, True)) or
+                       found[-1], 'the menu did not open')
+            time.sleep(.1)
+            return found[-1]
+
+        def closed(menu):
+            eventually(lambda: not win32.visible(menu), 'the menu did not close')
+
+        def rows(menu):
+            return {label: state for label, state in win32.menu_rows(menu) if label}
+
+        def choose(menu, label):
+            # Down until the row is highlighted, then Return.
+            for _ in range(30):
+                if any(name == label and state & win32.MF_HILITE
+                       for name, state in win32.menu_rows(menu)):
+                    break
+                win32.key(tray, win32.VK_DOWN)
+            else:
+                raise AssertionError(f'{label} was never highlighted: {win32.menu_rows(menu)}')
+            win32.key(tray, win32.VK_RETURN)
+            closed(menu)
+
+        menu = open_menu()
+        listed = rows(menu)
+        for label in ['GlyphShift: press Ctrl+Alt+Shift+F12 in a game', 'No game attached',
+                      'Style for newly attached games']:
+            assert listed.get(label, 0) & win32.MF_GRAYED, (label, listed)
+        assert listed["Each game's saved style"] & win32.MF_CHECKED, listed
+        assert not listed['Start at login'] & win32.MF_CHECKED, listed
+        assert {'Comic', 'Quit GlyphShift'} <= listed.keys(), listed
+        choose(menu, 'Comic')
+        eventually(lambda: 'newly attached games use art-comic' in text(),
+                   'choosing a style had no effect: ' + text())
+        menu = open_menu()
+        listed = rows(menu)
+        assert listed['Comic'] & win32.MF_CHECKED, listed
+        assert not listed["Each game's saved style"] & win32.MF_CHECKED, listed
+        choose(menu, 'Start at login')
+        eventually(run_entry, 'Start at login wrote no Run value: ' + text())
+        assert run_entry().endswith('--hotkey ctrl+alt+shift+F12 --preset art-comic'), run_entry()
+        program = run_entry().rsplit(' --hotkey', 1)[0].strip('"')
+        assert program == str(build / 'glyphshift-overlay.exe'), run_entry()
+        menu = open_menu()
+        win32.key(tray, win32.VK_ESCAPE)
+        closed(menu)
+        assert daemon.poll() is None and text().count('start at login') == 1, text()
+        menu = open_menu()
+        assert rows(menu)['Start at login'] & win32.MF_CHECKED
+        choose(menu, 'Start at login')
+        eventually(lambda: run_entry() is None, 'Start at login did not remove the Run value')
+        print('Tray: the menu lists the hotkey, no game, the styles and start at login; '
+              'choosing a style and start at login on/off apply; Escape closes it')
+        menu = open_menu()
+        choose(menu, 'Quit GlyphShift')
+        assert daemon.wait(timeout=10) == 0, text()
+        assert not win32.exists(tray)
+        print('Tray: Quit ends the daemon with status 0 and removes its icon window')
+    finally:
+        if daemon.poll() is None:
+            win32.request_stop(daemon.pid)
+            daemon.wait(timeout=10)
+        if run_entry() is not None:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, run_value)
+
+
 def oracles():
     """The GPU image oracles through the Vulkan preview, with validation."""
     oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
@@ -501,6 +633,7 @@ def oracles():
 
 
 phases = {'fixture': fixture_phase, 'overlay': overlay_phase, 'tracking': tracking_phase,
-          'editor': editor_phase, 'daemon': single_instance_phase, 'oracles': oracles}
+          'editor': editor_phase, 'daemon': single_instance_phase, 'tray': tray_phase,
+          'oracles': oracles}
 for name in (args.only.split(',') if args.only else phases):
     phases[name]()

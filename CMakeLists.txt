@@ -243,12 +243,14 @@ else()
         add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
     endif()
     # Window-system layer, Win32 (M7): Windows.Graphics.Capture of the target,
-    # the input-transparent overlay window, target tracking and editor input.
+    # the input-transparent overlay window, target tracking, editor input, the
+    # daemon's hotkey and its notification-area icon.
     add_library(glyphshift_win32_overlay STATIC src/display/win32/capture.cpp
         src/display/win32/editor_input.cpp src/display/win32/global_hotkey.cpp
-        src/display/win32/overlay_window.cpp src/display/win32/tracker.cpp)
+        src/display/win32/overlay_window.cpp src/display/win32/tracker.cpp
+        src/display/win32/tray.cpp)
     target_link_libraries(glyphshift_win32_overlay PUBLIC user32 glyphshift_editor PRIVATE d3d11
-        dxgi dwmapi windowsapp)
+        dxgi dwmapi windowsapp shell32 gdi32)
     # The capture overlay: the Win32 window system, the Windows platform layer
     # and the Vulkan renderer.
     add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/daemon_win32.cpp

@@ -5,7 +5,8 @@
 
 // Desktop integration of the background overlay: start-on-login and user
 // notifications. Platform layer: implemented per operating system (Linux:
-// XDG autostart and freedesktop notifications through notify-send).
+// XDG autostart and freedesktop notifications through notify-send; Windows:
+// the Run key, and no notifications, which the daemon's icon shows instead).
 namespace glyphshift::platform {
 // Quotes one argument for a desktop entry's Exec key (Desktop Entry
 // Specification: reserved characters quoted, then string escaping).

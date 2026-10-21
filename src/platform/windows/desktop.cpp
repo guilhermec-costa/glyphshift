@@ -11,8 +11,9 @@
 // Desktop integration, Windows: start-on-login through the user's Run key
 // (HKCU\Software\Microsoft\Windows\CurrentVersion\Run), which Windows starts
 // at sign-in. GLYPHSHIFT_AUTOSTART_VALUE (tests) names another value than
-// "GlyphShift". Notifications come with the notification-area icon; until
-// then they are only written to stderr by the caller.
+// "GlyphShift". Windows shows notifications only from a notification-area
+// icon, which belongs to the window-system layer: the daemon's icon
+// (display::win32::Tray) shows them, and notify() does nothing here.
 namespace glyphshift::platform {
 namespace {
 constexpr wchar_t run_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
