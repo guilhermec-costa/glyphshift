@@ -233,11 +233,12 @@ else()
         add_test(NAME vulkan-help COMMAND glyphshift-vulkan-fixture --help)
     endif()
     # Window-system layer, Win32 (M7): Windows.Graphics.Capture of the target,
-    # the input-transparent overlay window and target tracking.
+    # the input-transparent overlay window, target tracking and editor input.
     add_library(glyphshift_win32_overlay STATIC src/display/win32/capture.cpp
-        src/display/win32/overlay_window.cpp src/display/win32/tracker.cpp)
-    target_link_libraries(glyphshift_win32_overlay PUBLIC user32 PRIVATE d3d11 dxgi dwmapi
-        windowsapp)
+        src/display/win32/editor_input.cpp src/display/win32/overlay_window.cpp
+        src/display/win32/tracker.cpp)
+    target_link_libraries(glyphshift_win32_overlay PUBLIC user32 glyphshift_editor PRIVATE d3d11
+        dxgi dwmapi windowsapp)
     # The capture overlay: the Win32 window system, the Windows platform layer
     # and the Vulkan renderer.
     add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/options.cpp)
@@ -396,6 +397,9 @@ if(BUILD_TESTING)
         target_link_libraries(glyphshift-platform-windows-tests PRIVATE glyphshift_platform shell32
             ole32)
         add_test(NAME platform-windows COMMAND glyphshift-platform-windows-tests)
+        add_executable(glyphshift-win32-keys-tests tests/unit/win32_keys_test.cpp)
+        target_link_libraries(glyphshift-win32-keys-tests PRIVATE glyphshift_editor)
+        add_test(NAME win32-keys COMMAND glyphshift-win32-keys-tests)
         target_link_libraries(glyphshift-presets-tests PRIVATE advapi32 shell32 ole32)
         # MSVC Debug gives each character atlas these tests build (about
         # 570 KB) its own stack slot in main.

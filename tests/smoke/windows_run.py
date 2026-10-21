@@ -19,6 +19,7 @@ import win32
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=pathlib.Path, required=True)
 parser.add_argument('--output', type=pathlib.Path)
+parser.add_argument('--only', help='Comma-separated phases: fixture, overlay, tracking, editor, oracles')
 args = parser.parse_args()
 build = args.build.resolve()
 if sys.platform != 'win32':
@@ -261,6 +262,171 @@ def tracking_phase():
           'exits with the target')
 
 
+INSERT_HOTKEY, F10_HOTKEY = 1, 2
+VK_CONTROL = 0x11
+
+
+@contextlib.contextmanager
+def overlay_on(window, label, extra=None):
+    """Attaches the overlay to `window` in the no-focus test mode; yields (process, layer, log)."""
+    log = output / f'{label}.log'
+    with log.open('w') as stream:
+        process = subprocess.Popen([str(build / 'glyphshift-overlay'), '--window', str(window)],
+                                   env=dict(env, GLYPHSHIFT_VULKAN_VALIDATION='1',
+                                            GLYPHSHIFT_OVERLAY_NO_FOCUS='1', **(extra or {})),
+                                   stdout=stream, stderr=subprocess.STDOUT)
+    try:
+        yield process, win32.wait_window('GlyphShift overlay', process, log), log
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+
+
+def screen_over(window, label):
+    """What the user sees over the target's client area."""
+    time.sleep(max(.3, settle))
+    x, y = win32.client_origin(window)
+    width, height = win32.client_size(window)
+    picture = win32.screen(x, y, width, height)
+    win32.save(output / f'{label}.ppm', picture)
+    return picture
+
+
+def hotkey(layer, identifier):
+    win32.user32.PostMessageW(layer, 0x0312, identifier, 0)  # WM_HOTKEY
+
+
+def type_text(layer, text):
+    for character in text:
+        virtual = win32.user32.VkKeyScanW(character) & 0xff
+        win32.key(layer, virtual, character)
+
+
+def with_control(layer, action):
+    win32.user32.PostMessageW(layer, win32.WM_KEYDOWN, VK_CONTROL, win32._key_parameter(VK_CONTROL, False))
+    time.sleep(.06)
+    action()
+    time.sleep(.06)
+    win32.user32.PostMessageW(layer, win32.WM_KEYUP, VK_CONTROL, win32._key_parameter(VK_CONTROL, True))
+    time.sleep(.12)
+
+
+def editor_phase():
+    """The editor through the overlay, as run.py drives it on Linux: F10, Insert,
+    Escape, strength 0/1/0.37 by numeric entry, the binary set, a named preset
+    surviving a restart, and the editor across six resizes."""
+    profile = f'smoke-windows-{os.getpid()}'
+    extra = {'GLYPHSHIFT_PROFILE': profile}
+    with fixture('editor-fixture') as (process, window, log):
+        win32.move(window, 40, 40)
+        assert win32.resize(window, 800, 600)
+        original = image(window, 'editor-original')
+        with overlay_on(window, 'editor-overlay', extra) as (overlay, layer, overlay_log):
+            eventually(lambda: win32.visible(layer), 'overlay not shown', 20)
+            time.sleep(1)
+            glyph = screen_over(window, 'editor-glyph')
+            assert glyph[2] != original[2], 'effect did not transform the image'
+            hotkey(layer, F10_HOTKEY)
+            assert screen_over(window, 'editor-off')[2] == original[2], 'F10 did not show the original'
+            hotkey(layer, INSERT_HOTKEY)
+            assert screen_over(window, 'editor-open')[2] != original[2], 'editor not drawn'
+            # The open editor takes the pointer; closed, input passes through again.
+            x, y = win32.client_origin(window)
+            assert not win32.extended_style(layer) & win32.WS_EX_TRANSPARENT and \
+                win32.window_at(x + 100, y + 200) == layer, 'open editor does not take input'
+            win32.key(layer, win32.VK_ESCAPE)
+            assert screen_over(window, 'editor-closed')[2] == original[2], \
+                'Escape did not close only the editor'
+            hotkey(layer, F10_HOTKEY)
+            eventually(lambda: win32.extended_style(layer) & win32.WS_EX_TRANSPARENT and
+                       win32.window_at(x + 100, y + 200) == window,
+                       'closed editor still takes input')
+            hotkey(layer, F10_HOTKEY)
+            hotkey(layer, F10_HOTKEY)
+
+            def strength(value):
+                hotkey(layer, INSERT_HOTKEY)
+                time.sleep(.2)
+                with_control(layer, lambda: win32.click(layer, 100, 301))
+                with_control(layer, lambda: win32.key(layer, ord('A'), 'a'))
+                type_text(layer, value)
+                win32.key(layer, win32.VK_RETURN)
+                win32.key(layer, win32.VK_ESCAPE)
+
+            strength('0')
+            assert screen_over(window, 'editor-strength-zero')[2] == original[2], \
+                'zero strength did not retain source pixels'
+            strength('1')
+            pure = screen_over(window, 'editor-strength-one')
+            assert pure[2] != original[2]
+            strength('0.37')
+            glyph = screen_over(window, 'editor-strength-fraction')
+            assert glyph[2] not in (original[2], pure[2]), 'fractional strength did not change'
+            # Binary through the real editor, applied.
+            hotkey(layer, INSERT_HOTKEY)
+            time.sleep(.2)
+            for y in (330, 359, 456, 524, 330):
+                win32.click(layer, 100, y)
+                time.sleep(.15)
+            win32.key(layer, win32.VK_ESCAPE)
+            selected = screen_over(window, 'editor-binary')
+            assert selected[2] != glyph[2], 'character selector did not change the output'
+            # Save the disabled effect as "night" through the UI.
+            hotkey(layer, F10_HOTKEY)
+            hotkey(layer, INSERT_HOTKEY)
+            time.sleep(.2)
+            win32.click(layer, 90, 122)
+            with_control(layer, lambda: win32.key(layer, ord('A'), 'a'))
+            type_text(layer, 'night')
+            win32.key(layer, win32.VK_RETURN)
+            time.sleep(.1)
+            win32.click(layer, 288, 122)
+            screen_over(window, 'editor-saved')
+            directory = output / 'config' / 'glyphshift' / 'profiles' / profile
+            saved = directory / 'night.conf'
+            eventually(saved.is_file, 'Save preset did not create the file')
+            text = saved.read_text(encoding='utf-8')
+            assert 'enabled=false' in text and 'glyph_strength=0.37\n' in text and \
+                'character_set=binary\n' in text, text
+            assert (directory / 'active').read_text(encoding='utf-8') == 'night\n'
+            win32.key(layer, win32.VK_ESCAPE)
+            time.sleep(.3)
+            win32.close(window)
+            finish(process, log)
+            assert overlay.wait(timeout=15) == 0, overlay_log.read_text(errors='replace')
+            assert 'Vulkan validation:' not in overlay_log.read_text(errors='replace')
+    # A restarted overlay restores the saved selection and settings.
+    with fixture('editor-restart') as (process, window, log):
+        win32.move(window, 40, 40)
+        assert win32.resize(window, 800, 600)
+        with overlay_on(window, 'editor-restart-overlay', extra) as (overlay, layer, overlay_log):
+            time.sleep(2)
+            assert screen_over(window, 'editor-restarted')[2] == original[2], \
+                'preset not retained across restart'
+            hotkey(layer, F10_HOTKEY)
+            eventually(lambda: win32.visible(layer), 'F10 did not show the effect', 10)
+            assert screen_over(window, 'editor-re-enabled')[2] == selected[2], \
+                'restored settings render differently'
+            for index, (w, h) in enumerate([(320, 240), (1024, 768), (640, 480), (1000, 300),
+                                            (300, 800), (800, 600)]):
+                assert win32.resize(window, w, h)
+                eventually(lambda: win32.window_rect(layer)[2:] == (w, h),
+                           f'overlay did not follow {w}x{h}')
+                before = screen_over(window, f'editor-resize-{index}-before')
+                hotkey(layer, INSERT_HOTKEY)
+                assert screen_over(window, f'editor-resize-{index}-open')[2] != before[2]
+                win32.key(layer, win32.VK_ESCAPE)
+                assert screen_over(window, f'editor-resize-{index}-after')[2] == before[2], \
+                    f'closing the editor changed the image at {w}x{h}'
+            win32.close(window)
+            finish(process, log)
+            assert overlay.wait(timeout=15) == 0, overlay_log.read_text(errors='replace')
+            assert 'Vulkan validation:' not in overlay_log.read_text(errors='replace')
+    print('Editor through the overlay: F10/Insert/Escape, strength 0/1/fraction, binary set, '
+          'named preset across a restart, editor over 6 resizes, no validation message')
+
+
 def oracles():
     """The GPU image oracles through the Vulkan preview, with validation."""
     oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
@@ -270,7 +436,7 @@ def oracles():
                         '--output', str(output / name)], env=oracle_env, check=True)
 
 
-fixture_phase()
-overlay_phase()
-tracking_phase()
-oracles()
+phases = {'fixture': fixture_phase, 'overlay': overlay_phase, 'tracking': tracking_phase,
+          'editor': editor_phase, 'oracles': oracles}
+for name in (args.only.split(',') if args.only else phases):
+    phases[name]()

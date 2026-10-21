@@ -4399,7 +4399,80 @@ Verification: both Windows presets built without warnings; `windows_run.py`
 passed twice in each (fixture, overlay, tracking, oracles). Not verified:
 virtual-desktop switching (cloaking is handled but untested), a topmost
 target, multiple monitors and DPI changes, and the editor, hotkeys, daemon and
-tray, which follow.
+tray, which follow. After the user pushed parts 2 and 3 (`1f24687`,
+`925de38`), the CI's Linux `build` job passed (seen by the user), covering the
+shared overlay options, `platform::set_environment` and `glyphshift_vk_owned`
+on Linux.
+
+**Step 7, part 4: editor input (2026-10-20).** The counterpart of the X11
+editor input surface, `display::win32::editor_input(overlay, target)`
+(`src/display/win32/editor_input.{hpp,cpp}`), given to the overlay's
+`editor::Frame` like the X11 source:
+
+- Insert and F10 are hotkeys of the overlay window (`RegisterHotKey`,
+  `MOD_NOREPEAT`), registered only while the target, or the overlay with the
+  editor open, is the foreground window and released otherwise, so other
+  applications keep those keys; like the X11 passive grab, the target does
+  not receive them meanwhile. A registration refused because another
+  application holds the key is reported once on stderr and in the panel. A
+  hotkey delivers its press only, so the source adds the release.
+- While the editor is open the overlay stops being input-transparent and
+  activatable-only-by-us (`WS_EX_TRANSPARENT | WS_EX_NOACTIVATE` removed) and
+  takes the foreground (a process that received the hotkey may); keys
+  (virtual key, scan code as the physical key, text from `ToUnicode` in the
+  current layout without disturbing dead-key state) and pointer events (the
+  overlay's client coordinates are the target's) go to the editor model; the
+  pointer is captured while a button is held. Closing restores the styles and
+  returns the foreground to the target once the editor's keys and buttons are
+  released, never taking it from another application. Losing the foreground
+  while open closes the editor (`focus_lost`), as on X11.
+- `src/display/win32/keys.hpp` translates virtual keys (with the text passed
+  in) to `editor::Key`; the new CTest `win32-keys` is the counterpart of
+  `x11-keys`.
+- `GLYPHSHIFT_OVERLAY_NO_FOCUS=1` (tests, the counterpart of
+  `GLYPHSHIFT_FIXTURE_NO_FOCUS`): no hotkeys are registered and the
+  foreground is never taken; tests post `WM_HOTKEY` (identifiers 1 Insert,
+  2 F10), keys and clicks to the overlay window.
+- The overlay now also renders when the frame's settings change: the capture
+  delivers frames only when the target's content changes, so with a paused
+  game a style chosen in the editor, a saved preset or a live config edit
+  would otherwise wait for the next game frame.
+
+Smoke (`windows_run.py`, editor phase, the counterpart of `run.py`'s editor
+checks, on the overlay attached to the fixture in the no-focus mode, at the
+same panel coordinates): the effect transforms the image; F10 shows the
+original; Insert opens the editor over it, the open overlay is not
+input-transparent and a hit test finds it; Escape closes only the editor and
+input passes through again; strength 0 (by Ctrl-click numeric entry) gives
+exactly the original pixels, 1 and 0.37 differ from it and from each other;
+the binary set chosen and applied through the editor changes the image; the
+disabled effect saved as `night` through the UI writes `night.conf`
+(`enabled=false`, `glyph_strength=0.37`, `character_set=binary`) and
+`active`; a restarted overlay on a new fixture shows the original (the saved
+disabled effect) and, after F10, exactly the image of the binary set; six
+resizes with the editor opened and closed each keep the image; no validation
+message. `--only PHASE[,PHASE]` runs selected phases.
+
+The first runs failed at strength 0 although the panel, opened in a scratch
+probe, accepted the same entry: the test posted the typed digit, Enter and
+Escape at once, and the editor model treats Escape as a hotkey that closes the
+editor and drops input its ImGui frame has not consumed yet, as it would on
+X11 with the same timing. The X11 driver paces keys (0.05 s pressed, 0.12 s
+after) and clicks (0.06 s, 0.18 s); `win32.key` and `win32.click` now do the
+same. The panel was first seen running on Windows in those probe captures.
+
+Verification: both Windows presets built without warnings; `windows_run.py`
+passed twice in each (fixture, overlay, tracking, editor, oracles; about
+55 s). CTest passed 10 of 11 in both presets: `illustration` failed its two
+font-dependent shape checks ("a centered bright column matches |", then the
+`_` case). During this part the JetBrains Mono family, including a real Bold,
+was installed for the user (22:55); discovery now selects
+`JetBrainsMono-Bold.ttf` (preferred over Consolas), and a probe of the two
+checks gave no match for either glyph with JetBrains Mono Bold or ExtraBold
+and both matches with Consolas Bold. The code these checks exercise did not
+change in this part. Not verified: the hotkeys and the foreground hand-over
+with real input (they take the keyboard and need the user's permission; the
+focused drivers come with the daemon part), IME and dead keys.
 
 ## Definition of MVP done
 

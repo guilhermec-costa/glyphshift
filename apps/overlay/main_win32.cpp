@@ -17,6 +17,7 @@
 #include <string>
 
 #include "../../src/display/win32/capture.hpp"
+#include "../../src/display/win32/editor_input.hpp"
 #include "../../src/display/win32/overlay_window.hpp"
 #include "../../src/display/win32/tracker.hpp"
 #include "../../src/render/vulkan/owned.hpp"
@@ -135,6 +136,8 @@ private:
     unsigned frames_ = 0;
     std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
     double render_ms_ = 0;
+    // The settings of the last rendered frame.
+    glyphshift::Settings rendered_{};
 
     // The editor session's key for this overlay (the target's display has no
     // handle on Windows; any stable non-null pointer serves).
@@ -173,15 +176,22 @@ private:
             width(),
             height(),
             "Overlay (Vulkan)",
-            renderer_->version());
+            renderer_->version(),
+            win32::editor_input(window_.handle(), target_));
         const bool open = frame.draw_data != nullptr;
         if (frame.settings.enabled != enabled_ || open != editor_open_) {
             enabled_ = frame.settings.enabled;
             editor_open_ = open;
             update();
         }
-        if (window_.shown() && (dirty_ || open) && render(frame.settings, frame.draw_data))
+        // The capture delivers frames only when the target's content changes:
+        // a paused game still shows a new style or preset at once.
+        if (!(frame.settings == rendered_))
+            dirty_ = true;
+        if (window_.shown() && (dirty_ || open) && render(frame.settings, frame.draw_data)) {
             dirty_ = false;
+            rendered_ = frame.settings;
+        }
         frame.complete(
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count());

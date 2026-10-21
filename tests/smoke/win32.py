@@ -36,6 +36,7 @@ _signatures = {
     'MapVirtualKeyW': (w.UINT, [w.UINT, w.UINT]),
     'GetForegroundWindow': (w.HWND, []),
     'GetWindowThreadProcessId': (w.DWORD, [w.HWND, c.POINTER(w.DWORD)]),
+    'VkKeyScanW': (c.c_short, [w.WCHAR]),
 }
 for _name, (_result, _args) in _signatures.items():
     _function = getattr(user32, _name)
@@ -207,18 +208,24 @@ def _key_parameter(virtual, release):
 
 
 def key(window, virtual, character=None):
-    """Posts a key press and release (and its character) to the window's queue."""
+    """Posts a key press and release (and its character) to the window's queue,
+    paced like the X11 driver, so each lands in its own frame."""
     user32.PostMessageW(window, WM_KEYDOWN, virtual, _key_parameter(virtual, False))
     if character:
         user32.PostMessageW(window, WM_CHAR, ord(character), _key_parameter(virtual, False))
+    time.sleep(.05)
     user32.PostMessageW(window, WM_KEYUP, virtual, _key_parameter(virtual, True))
+    time.sleep(.12)
 
 
 def click(window, x, y):
+    """Posts a left click at client coordinates, paced like the X11 driver."""
     position = (y << 16) | (x & 0xffff)
     user32.PostMessageW(window, WM_MOUSEMOVE, 0, position)
     user32.PostMessageW(window, WM_LBUTTONDOWN, 1, position)
+    time.sleep(.06)
     user32.PostMessageW(window, WM_LBUTTONUP, 0, position)
+    time.sleep(.18)
 
 
 def close(window):
