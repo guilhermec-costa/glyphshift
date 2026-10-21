@@ -4737,6 +4737,46 @@ was on top of the z-order when probed); recorded as an open intermittent
 failure of the screen comparisons. Not verified: dead keys and IME in the
 editor, and keyboard layouts other than this one.
 
+**Step 7, part 9: a real game, SuperTux for Windows (2026-10-21).** The
+first real game under the Windows overlay, with the user's permission; the
+counterpart of `overlay_game.py` on native SuperTux.
+
+- `test_env.py` gained its Windows part: the environment lives in
+  `%LOCALAPPDATA%\glyphshift-test`; `setup` downloads the pinned
+  `SuperTux-v0.7.0-win64-portable.zip` (the archive and checksum the Proton
+  test uses), extracts it, copies `welcome_antarctica.stl` as the test level,
+  and writes the test profile (`supertux-windows-user`: networking, release
+  check, Discord, sound and pausing on focus loss off, windowed 800×600);
+  `supertux_windows()` builds the command line. `--offline` is refused on
+  Windows (no network namespace); the profile is the offline guarantee, as
+  the test plan says. No firewall rule was added.
+- `tests/smoke/overlay_game_win32.py`: the daemon (default Ctrl+Alt+G,
+  monochrome live config) and SuperTux started on its own on the level,
+  driven with `SendInput`. Unattached, 0.62% of the screen over the game (the
+  level's title card) was neither black nor white; Ctrl+Alt+G attached one
+  overlay and the screen over the game became 0.000% such pixels (glyphs
+  only); after the introduction, holding Right for 2.5 s changed 45% of the
+  game's own image (idle: 0%) while the screen stayed glyphs only; Insert
+  opened the editor over the game and Escape closed it, the foreground going
+  back to the game; resized to 640×480, the overlay window matched the game's
+  client area; Ctrl+Alt+G detached (the original image returned) and attached
+  again; closing the game (status 0) ended its overlay, the daemon kept
+  running and stopped with status 0 on request. Captures of the glyph image
+  over the level and of the editor over the game were inspected.
+- Two driver defects found on the way: `SendInput` arrows without
+  `KEYEVENTF_EXTENDEDKEY` reached SDL as numeric-keypad keys (the scan code
+  without its extended prefix), so Tux did not walk; `real_input_win32.py`
+  now marks the extended keys (arrows, Insert, Delete, Home, End, Page
+  Up/Down, right Control and Alt, Windows keys). And the daemon ignores a
+  hotkey press within 400 ms of the previous one, which a quick detach then
+  attach hit; both hotkey drivers now wait 0.5 s before each press.
+
+Verification: `overlay_game_win32.py` passed twice on the Release build;
+`overlay_daemon_win32.py` and `editor_apps_win32.py` passed again with the
+changed input module. Not verified: an offline Steam game (next), SuperTux
+in borderless fullscreen, and latency and GPU cost (the overlay on Windows
+has no GPU timing yet).
+
 ## Definition of MVP done
 
 The target workflow is:

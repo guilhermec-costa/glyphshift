@@ -50,7 +50,7 @@ for _name, (_result, _args) in {
     _function.restype, _function.argtypes = _result, _args
 
 INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
-KEYEVENTF_KEYUP = 0x2
+KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP = 0x1, 0x2
 MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x1, 0x2, 0x4
 VK_LCONTROL, VK_LMENU, VK_LSHIFT = 0xA2, 0xA4, 0xA0
 # Keys and buttons that must not be held when the test starts.
@@ -63,10 +63,17 @@ def _send(*events):
         raise RuntimeError(f'SendInput was blocked (error {c.get_last_error()})')
 
 
+# Keys whose scan codes need the extended prefix; without it the arrows,
+# for example, arrive as the numeric keypad's keys in applications that read
+# scan codes (SDL games).
+_EXTENDED = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0xA3, 0xA5, 0x5B, 0x5C}
+
+
 def _key_event(virtual, release):
     event = Input(INPUT_KEYBOARD)
-    event.union.ki = KeyboardInput(virtual, user32.MapVirtualKeyW(virtual, 0),
-                                   KEYEVENTF_KEYUP if release else 0, 0, 0)
+    flags = (KEYEVENTF_KEYUP if release else 0) | \
+        (KEYEVENTF_EXTENDEDKEY if virtual in _EXTENDED else 0)
+    event.union.ki = KeyboardInput(virtual, user32.MapVirtualKeyW(virtual, 0), flags, 0, 0)
     return event
 
 
@@ -145,6 +152,14 @@ class RealInput:
     def key_up(self, virtual):
         _send(_key_event(virtual, True))
         time.sleep(.06)
+
+    def hold(self, virtual, seconds):
+        """Holds a key down for a while, as a player walking."""
+        self.key_down(virtual)
+        try:
+            time.sleep(seconds)
+        finally:
+            self.key_up(virtual)
 
     def text(self, text):
         """Types characters through their keys in the current layout."""

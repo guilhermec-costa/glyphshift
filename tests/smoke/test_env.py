@@ -13,6 +13,12 @@ and Steam is not used.
 `run` adds the validation layer to VK_LAYER_PATH. `--offline` runs COMMAND in
 a new user and network namespace with no network interfaces (X11 still works
 through its Unix socket); Proton games are only run that way.
+
+On Windows (M7) the environment is glyphshift-test under %LOCALAPPDATA% and
+holds only SuperTux 0.7.0 for Windows, run natively, and its test profile; the
+validation layer comes from the Vulkan SDK. Windows has no unprivileged network
+namespace, so `--offline` is refused there: the test profile turns the game's
+networking, release check and Discord integration off.
 """
 import argparse
 import errno
@@ -27,8 +33,12 @@ import sys
 import urllib.request
 import zipfile
 
-ROOT = Path(os.environ.get('GLYPHSHIFT_TEST_ENV') or
-            Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'glyphshift-test')
+WINDOWS = sys.platform == 'win32'
+if WINDOWS:
+    _DATA = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData/Local')
+else:
+    _DATA = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+ROOT = Path(os.environ.get('GLYPHSHIFT_TEST_ENV') or _DATA / 'glyphshift-test')
 DOWNLOADS = {
     'GE-Proton11-9-x86_64.tar.gz': (
         'https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-9/'
@@ -64,6 +74,7 @@ VKCUBE = APPS / 'usr/bin/vkcube'
 # focus loss off. Separate from the user's own SuperTux profile.
 NATIVE_USER = ROOT / 'supertux-native-user'
 PROTON_USER = ROOT / 'supertux-proton-user'
+WINDOWS_USER = ROOT / 'supertux-windows-user'
 # The Windows build rejects converted paths with separators, so it loads an
 # unmodified copy of a shipped level by bare file name from its data directory.
 LEVEL = 'glyphshift-test.stl'
@@ -131,12 +142,7 @@ def mark(path):
     (path / '.glyphshift-complete').write_text('')
 
 
-def setup():
-    ROOT.mkdir(parents=True, exist_ok=True)
-    if not marked(PROTON):
-        shutil.rmtree(PROTON, ignore_errors=True)
-        subprocess.run(['tar', '-xzf', fetch('GE-Proton11-9-x86_64.tar.gz'), '-C', ROOT], check=True)
-        mark(PROTON)
+def setup_game():
     game = SUPERTUX_EXE.parents[1]
     if not marked(game):
         shutil.rmtree(game, ignore_errors=True)
@@ -144,6 +150,21 @@ def setup():
             archive.extractall(ROOT)
         shutil.copyfile(game / 'data/levels/world1/welcome_antarctica.stl', game / 'data' / LEVEL)
         mark(game)
+
+
+def setup():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    if WINDOWS:
+        setup_game()
+        WINDOWS_USER.mkdir(exist_ok=True)
+        (WINDOWS_USER / 'config').write_text(SUPERTUX_CONFIG)
+        status()
+        return
+    if not marked(PROTON):
+        shutil.rmtree(PROTON, ignore_errors=True)
+        subprocess.run(['tar', '-xzf', fetch('GE-Proton11-9-x86_64.tar.gz'), '-C', ROOT], check=True)
+        mark(PROTON)
+    setup_game()
     if not marked(VALIDATION):
         shutil.rmtree(VALIDATION, ignore_errors=True)
         VALIDATION.mkdir()
@@ -172,6 +193,12 @@ def setup():
 
 def status():
     print(f'test environment: {ROOT}')
+    if WINDOWS:
+        rows = [('SuperTux 0.7.0 Windows', SUPERTUX_EXE, marked(SUPERTUX_EXE.parents[1])),
+                ('SuperTux test profile', WINDOWS_USER, (WINDOWS_USER / 'config').exists())]
+        for label, path, ready in rows:
+            print(f'  {"ok     " if ready else "missing"} {label}: {path}')
+        return
     for label, path, ready in [
             ('GE-Proton11-9', PROTON / 'proton', marked(PROTON)),
             ('SuperTux 0.7.0 Windows', SUPERTUX_EXE, marked(SUPERTUX_EXE.parents[1])),
@@ -218,6 +245,12 @@ def supertux_proton(*arguments):
             *arguments]
 
 
+def supertux_windows(*arguments):
+    """SuperTux for Windows run natively with the test profile (Windows only)."""
+    return [str(SUPERTUX_EXE), '--userdir', str(WINDOWS_USER), '--window', '--disable-sound',
+            '--disable-music', *arguments]
+
+
 def supertux_native(*arguments):
     return ['/usr/bin/supertux2', '--userdir', str(NATIVE_USER), '--window', '--disable-sound',
             '--disable-music', *arguments]
@@ -240,6 +273,12 @@ def main():
         command = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
         if not command:
             parser.error('run needs a command')
+        if WINDOWS:
+            if args.offline:
+                raise SystemExit('--offline needs a network namespace, which Windows lacks')
+            if not marked(SUPERTUX_EXE.parents[1]):
+                raise SystemExit('the test environment is incomplete; run: test_env.py setup')
+            raise SystemExit(subprocess.run(command).returncode)
         if not marked(VALIDATION):
             raise SystemExit('the test environment is incomplete; run: test_env.py setup')
         if args.offline:

@@ -68,6 +68,8 @@ def changed():
 
 
 def hotkey():
+    # The daemon ignores presses within 400 ms of the previous one.
+    time.sleep(.5)
     control.key(ord('G'), (VK_LCONTROL, VK_LMENU))
 
 

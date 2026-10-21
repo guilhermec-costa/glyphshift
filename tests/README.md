@@ -491,6 +491,18 @@ the same sections. It takes the keyboard and pointer for about half a minute
 python tests/smoke/editor_apps_win32.py --build build/windows-release [--illustrated] [--presets]
 ```
 
+`overlay_game_win32.py` is the counterpart of `overlay_game.py` on SuperTux
+0.7.0 for Windows, run natively from the test environment
+(`%LOCALAPPDATA%\glyphshift-test`, prepared once with `test_env.py setup`,
+which downloads the pinned, checksummed portable archive; the test profile
+turns networking, release checks and Discord off). Stop your own daemon
+first.
+
+```powershell
+python tests/smoke/test_env.py setup
+python tests/smoke/overlay_game_win32.py --build build/windows-release
+```
+
 `overlay_game.py` does the same on a real game started on its own: SuperTux on
 a level, natively or through Proton, with a monochrome config. It presses
 Ctrl+Alt+G to attach, holds Right to check that the game still receives input
