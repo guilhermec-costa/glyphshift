@@ -336,7 +336,10 @@ The Windows graphics smoke runs the Win32 Vulkan fixture with validation
 to it (its pixels must equal the preview of the captured frame, input must
 pass through, and it must end with the fixture), checks that the overlay
 tracks a second fixture (moves, resizes, another window raised over it,
-raising, minimizing, hiding, closing), and then runs those oracles,
+raising, minimizing, hiding, closing), drives the editor through it (input
+posted to the overlay in the `GLYPHSHIFT_OVERLAY_NO_FOCUS=1` test mode),
+checks that only one background daemon runs per session, and then runs those
+oracles (`--only` selects phases),
 without taking the keyboard, pointer or focus:
 
 ```powershell

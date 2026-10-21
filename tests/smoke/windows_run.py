@@ -19,7 +19,8 @@ import win32
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=pathlib.Path, required=True)
 parser.add_argument('--output', type=pathlib.Path)
-parser.add_argument('--only', help='Comma-separated phases: fixture, overlay, tracking, editor, oracles')
+parser.add_argument('--only', help='Comma-separated phases: fixture, overlay, tracking, editor, '
+                    'daemon, oracles')
 args = parser.parse_args()
 build = args.build.resolve()
 if sys.platform != 'win32':
@@ -419,12 +420,75 @@ def editor_phase():
                 win32.key(layer, win32.VK_ESCAPE)
                 assert screen_over(window, f'editor-resize-{index}-after')[2] == before[2], \
                     f'closing the editor changed the image at {w}x{h}'
+            # A stop request (the daemon's detach) ends the overlay cleanly,
+            # and the game keeps running with its own image.
+            assert win32.request_stop(overlay.pid), 'overlay does not listen for stop requests'
+            assert overlay.wait(timeout=15) == 0, overlay_log.read_text(errors='replace')
+            assert process.poll() is None and not win32.exists(layer)
+            assert screen_over(window, 'editor-detached')[2] == image(window, 'editor-own')[2], \
+                'the screen does not show the game after detaching'
+            assert 'Vulkan validation:' not in overlay_log.read_text(errors='replace')
             win32.close(window)
             finish(process, log)
-            assert overlay.wait(timeout=15) == 0, overlay_log.read_text(errors='replace')
-            assert 'Vulkan validation:' not in overlay_log.read_text(errors='replace')
     print('Editor through the overlay: F10/Insert/Escape, strength 0/1/fraction, binary set, '
-          'named preset across a restart, editor over 6 resizes, no validation message')
+          'named preset across a restart, editor over 6 resizes, detach by stop request, '
+          'no validation message')
+
+
+def single_instance_phase():
+    """One daemon per session, without keyboard input (overlay.py's single
+    instance): a second daemon names the first one's hotkey and exits 0; of two
+    started together one stays; a new daemon runs after the first exits. Uncommon
+    hotkeys avoid other applications' registrations."""
+    def start(name, hotkey):
+        log = output / f'daemon-{name}.log'
+        with log.open('w') as stream:
+            process = subprocess.Popen([str(build / 'glyphshift-overlay'), '--hotkey', hotkey],
+                                       env=env, stdout=stream, stderr=subprocess.STDOUT)
+        return process, log
+
+    def running(log):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            text = log.read_text(errors='replace')
+            if 'running;' in text or 'already running' in text:
+                return 'running;' in text
+            time.sleep(.05)
+        raise RuntimeError('daemon did not report: ' + log.read_text(errors='replace'))
+
+    def stop(process, log):
+        deadline = time.monotonic() + 10
+        while not win32.request_stop(process.pid):
+            assert time.monotonic() < deadline, 'daemon does not listen: ' + log.read_text()
+            time.sleep(.05)
+        assert process.wait(timeout=10) == 0, log.read_text(errors='replace')
+
+    first, first_log = start('first', 'ctrl+alt+shift+F12')
+    if not running(first_log):
+        first.wait(timeout=10)
+        print('Single instance: SKIPPED, another GlyphShift daemon runs in this session')
+        return
+    second, second_log = start('second', 'ctrl+alt+g')
+    assert second.wait(timeout=10) == 0, second_log.read_text(errors='replace')
+    text = second_log.read_text(errors='replace')
+    assert 'already running' in text and 'Ctrl+Alt+Shift+F12' in text, text
+    stop(first, first_log)
+    # Started together, exactly one daemon stays; the other leaves cleanly.
+    pair = [start('pair-a', 'ctrl+alt+shift+F11'), start('pair-b', 'ctrl+alt+shift+F12')]
+    states = [running(log) for _, log in pair]
+    assert sorted(states) == [False, True], [log.read_text() for _, log in pair]
+    for (process, log), state in zip(pair, states):
+        if state:
+            time.sleep(.5)
+            assert process.poll() is None, log.read_text(errors='replace')
+            stop(process, log)
+        assert process.wait(timeout=10) == 0, log.read_text(errors='replace')
+    # The claim is released when a daemon exits.
+    again, again_log = start('again', 'ctrl+alt+shift+F12')
+    assert running(again_log), again_log.read_text(errors='replace')
+    stop(again, again_log)
+    print("Single instance: a second daemon reports the running one's hotkey and exits 0; "
+          'of two started together one stays; a new daemon runs after the first exits')
 
 
 def oracles():
@@ -437,6 +501,6 @@ def oracles():
 
 
 phases = {'fixture': fixture_phase, 'overlay': overlay_phase, 'tracking': tracking_phase,
-          'editor': editor_phase, 'oracles': oracles}
+          'editor': editor_phase, 'daemon': single_instance_phase, 'oracles': oracles}
 for name in (args.only.split(',') if args.only else phases):
     phases[name]()

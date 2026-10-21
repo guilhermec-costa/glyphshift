@@ -98,11 +98,12 @@ if(GLYPHSHIFT_LINUX)
         src/platform/linux/files.cpp)
     target_link_libraries(glyphshift_platform PRIVATE PkgConfig::FONTCONFIG)
 else()
-    # Platform layer, Windows: the configuration folder, the executable's
-    # path, font discovery (DirectWrite) and file access.
+    # Platform layer, Windows: the configuration folder, processes (job object,
+    # stop events), start at sign-in (the Run key), font discovery (DirectWrite)
+    # and file access.
     add_library(glyphshift_platform STATIC src/platform/windows/paths.cpp
         src/platform/windows/process.cpp src/platform/windows/fonts.cpp
-        src/platform/windows/files.cpp)
+        src/platform/windows/files.cpp src/platform/windows/desktop.cpp)
     target_link_libraries(glyphshift_platform PRIVATE dwrite shell32 ole32 advapi32)
 endif()
 set_target_properties(glyphshift_platform PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -199,6 +200,9 @@ if(GLYPHSHIFT_LINK_COMPILE_COMMANDS)
     set(database_target "${CMAKE_BINARY_DIR}/compile_commands.json")
     if(IS_SYMLINK "${database_link}")
         file(READ_SYMLINK "${database_link}" existing_database)
+        # Windows reports the target as an NT path (\??\C:\...).
+        file(TO_CMAKE_PATH "${existing_database}" existing_database)
+        string(REGEX REPLACE "^/\\?\\?/" "" existing_database "${existing_database}")
         if(NOT existing_database STREQUAL database_target)
             message(WARNING "Preserving existing compilation database link: ${database_link}")
         endif()
@@ -241,13 +245,14 @@ else()
     # Window-system layer, Win32 (M7): Windows.Graphics.Capture of the target,
     # the input-transparent overlay window, target tracking and editor input.
     add_library(glyphshift_win32_overlay STATIC src/display/win32/capture.cpp
-        src/display/win32/editor_input.cpp src/display/win32/overlay_window.cpp
-        src/display/win32/tracker.cpp)
+        src/display/win32/editor_input.cpp src/display/win32/global_hotkey.cpp
+        src/display/win32/overlay_window.cpp src/display/win32/tracker.cpp)
     target_link_libraries(glyphshift_win32_overlay PUBLIC user32 glyphshift_editor PRIVATE d3d11
         dxgi dwmapi windowsapp)
     # The capture overlay: the Win32 window system, the Windows platform layer
     # and the Vulkan renderer.
-    add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/options.cpp)
+    add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/daemon_win32.cpp
+        apps/overlay/options.cpp)
     target_link_libraries(glyphshift-overlay PRIVATE glyphshift_vk_owned glyphshift_platform
         glyphshift_win32_overlay)
 endif()
@@ -401,7 +406,7 @@ if(BUILD_TESTING)
         target_link_libraries(glyphshift-platform-files-tests PRIVATE advapi32)
         add_executable(glyphshift-platform-windows-tests tests/unit/platform_windows_test.cpp)
         target_link_libraries(glyphshift-platform-windows-tests PRIVATE glyphshift_platform shell32
-            ole32)
+            ole32 advapi32)
         add_test(NAME platform-windows COMMAND glyphshift-platform-windows-tests)
         add_executable(glyphshift-win32-keys-tests tests/unit/win32_keys_test.cpp)
         target_link_libraries(glyphshift-win32-keys-tests PRIVATE glyphshift_editor)

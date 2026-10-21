@@ -12,6 +12,17 @@ const char* const usage =
     "       glyphshift-overlay --window ID [--preset NAME] [--log]\n"
     "       glyphshift-overlay --autostart on|off [--hotkey KEYS] [--preset NAME]\n";
 
+std::string hotkey_name(const std::string& hotkey) {
+    std::string result;
+    bool start = true;
+    for (const char c : hotkey) {
+        const auto ch = static_cast<unsigned char>(c);
+        result += start ? static_cast<char>(std::toupper(ch)) : c;
+        start = c == '+';
+    }
+    return result;
+}
+
 Options parse(int argc, char** argv) {
     Options options;
     for (int i = 1; i < argc; ++i) {

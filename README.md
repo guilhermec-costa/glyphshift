@@ -107,9 +107,11 @@ cmake --build --preset windows-dev
 ctest --preset windows-dev
 ```
 
-The Windows overlay can already be attached to one window by its handle:
-`build\windows-dev\glyphshift-overlay --window HANDLE --preset art-comic`.
-The hotkey, editor input, background mode and tray icon are not there yet.
+The Windows overlay works like the Linux one: run
+`build\windows-dev\glyphshift-overlay` (optionally `--preset art-comic`), switch
+to the game and press **Ctrl+Alt+G** to attach or detach; Insert opens the
+editor and F10 toggles the effect. `--autostart on` starts it at sign-in.
+The notification-area icon is not there yet.
 
 To install for your user, with a menu entry and icon:
 

@@ -10,18 +10,22 @@
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/config/settings.hpp>
 #include <glyphshift/editor/editor.hpp>
+#include <glyphshift/platform/desktop.hpp>
 #include <glyphshift/platform/process.hpp>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "../../src/display/win32/capture.hpp"
 #include "../../src/display/win32/editor_input.hpp"
+#include "../../src/display/win32/global_hotkey.hpp"
 #include "../../src/display/win32/overlay_window.hpp"
 #include "../../src/display/win32/tracker.hpp"
 #include "../../src/render/vulkan/owned.hpp"
 #include "../../src/render/vulkan/win32_import.hpp"
+#include "daemon.hpp"
 #include "options.hpp"
 
 // Standalone capture overlay on Windows (M7). Never touches the target
@@ -225,6 +229,32 @@ private:
         return true;
     }
 };
+
+// Start-on-login for the background mode, with the same hotkey and style.
+int autostart(const Options& options) {
+    if (options.autostart == "off") {
+        const bool removed = glyphshift::platform::disable_autostart();
+        std::cout << (removed ? "GlyphShift will no longer start at login\n"
+                              : "GlyphShift was not set to start at login\n");
+        return 0;
+    }
+    const auto path = glyphshift::platform::executable_path().u8string();
+    std::vector<std::string> command{std::string(path.begin(), path.end())};
+    if (!options.hotkey.empty()) {
+        win32::GlobalHotkey::check(options.hotkey);
+        command.insert(command.end(), {"--hotkey", options.hotkey});
+    }
+    if (!options.preset.empty()) {
+        if (!glyphshift::builtin_preset(options.preset))
+            throw std::invalid_argument("unknown included style: " + options.preset);
+        command.insert(command.end(), {"--preset", options.preset});
+    }
+    glyphshift::platform::enable_autostart(command);
+    const auto entry = glyphshift::platform::autostart_entry().u8string();
+    std::cout << "GlyphShift will start in the background at login ("
+              << std::string(entry.begin(), entry.end()) << ")\n";
+    return 0;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -241,10 +271,22 @@ int main(int argc, char** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     try {
         const auto options = glyphshift::overlay::parse(argc, argv);
-        if (!options.autostart.empty() || !options.target)
-            throw std::runtime_error(
-                "the background mode and --autostart are not available on Windows yet; use "
-                "--window HANDLE");
+        if (!options.autostart.empty())
+            return autostart(options);
+        // Without a window, run in the background and attach with the hotkey.
+        if (!options.target) {
+            // Started from the menu or at sign-in, the console was made for
+            // this process alone: release it rather than keep a console window.
+            DWORD processes[2];
+            if (GetConsoleProcessList(processes, 2) == 1)
+                FreeConsole();
+            glyphshift::overlay::DaemonOptions daemon;
+            if (!options.hotkey.empty())
+                daemon.hotkey = options.hotkey;
+            daemon.preset = options.preset;
+            daemon.log = options.log;
+            return glyphshift::overlay::run_daemon(daemon);
+        }
         glyphshift::platform::catch_stop_requests();
         Overlay overlay(options);
         overlay.run();

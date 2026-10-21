@@ -4505,6 +4505,83 @@ first version of that check, without the top and bottom rows, let a narrow
 CTest tests with JetBrains Mono Bold discovered. Not verified: the Linux run
 with DejaVu (CI).
 
+**Step 7, part 5: the background daemon (2026-10-20).** The counterpart of M6
+step 4 and of step 5's single instance and start at login (the tray follows
+in part 6). `glyphshift-overlay [--hotkey KEYS] [--preset NAME] [--log]`
+without `--window` runs in the background (`apps/overlay/daemon_win32.cpp`,
+same `run_daemon` interface and messages as Linux): Ctrl+Alt+G by default
+attaches a `glyphshift-overlay --window HANDLE` process to the foreground
+window, or detaches it; overlays that end are reaped; on a stop request the
+daemon stops its overlays, waits for them and exits 0.
+
+- `display::win32::GlobalHotkey` (`src/display/win32/global_hotkey.{hpp,cpp}`):
+  the same hotkey syntax (`ctrl`, `shift`, `alt`, `super`/`win` and a letter,
+  digit, F1–F24 or one of the X11-style key names listed in the header),
+  `RegisterHotKey` on a hidden daemon window, presses within 400 ms ignored.
+  One daemon per session: a named mutex (`Local\GlyphShiftDaemon`); the
+  daemon window's title publishes its hotkey, so a second launch reports
+  "GlyphShift is already running. Press Ctrl+Alt+G in a game..." and exits 0.
+  A hotkey held by another application ends the daemon with status 1 and the
+  `--hotkey` hint. `focused_window` is the foreground top-level window unless
+  it is the desktop, the taskbar or a GlyphShift window; `window_title` names
+  it for messages.
+- `platform::Process` on Windows: `spawn_child` (`CreateProcessW` with
+  arguments quoted for the Microsoft C runtime,
+  `src/platform/windows/command_line.hpp`), each child in a job object with
+  kill-on-close, so overlays end with the daemon even when it is killed (the
+  counterpart of `PR_SET_PDEATHSIG`), created suspended until assigned;
+  `stop_child` signals the child's named stop event (`Local\GlyphShiftStop-PID`,
+  the counterpart of SIGTERM), or ends it when it does not listen;
+  `catch_stop_requests` creates that event for the current process and
+  watches it besides the console's Ctrl+C, Ctrl+Break and close;
+  `wait_child`, `ended_children`. Children share the daemon's console, or get
+  none (`CREATE_NO_WINDOW`).
+- Start at sign-in: `glyphshift-overlay --autostart on|off [--hotkey]
+  [--preset]` writes or removes the value `GlyphShift` under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` with the absolute
+  program and options (`src/platform/windows/desktop.cpp`);
+  `GLYPHSHIFT_AUTOSTART_VALUE` names another value (tests).
+  `platform::notify` does nothing on Windows yet; the notification-area icon
+  of part 6 will show those messages.
+- Launched from the menu or at sign-in, Windows gives the console program its
+  own console window; the daemon releases a console that only it uses
+  (`GetConsoleProcessList` = 1, `FreeConsole`), so it may flash briefly.
+  Started from a terminal it keeps writing there.
+- The hotkey's display name ("Ctrl+Alt+G") moved to the shared
+  `apps/overlay/options.cpp`, and the Linux daemon uses it.
+- CMake: the compilation-database link check compared Windows's NT-style link
+  target (`\??\C:\...`) with a forward-slash path and warned on every
+  configuration; it now normalizes the target first (no effect on Linux).
+
+Tests:
+
+- `platform-windows` gained the process and start-at-sign-in parts of the
+  Linux `platform` test, with helper modes of its own executable as children:
+  nine arguments (spaces, quotes, trailing backslashes, empty, tab, non-ASCII)
+  quoted by `command_line` and parsed back unchanged by `CommandLineToArgvW`;
+  the Run value written with the program quoted, replaced, a relative program
+  rejected, removed once (under a test-only value name; no `GlyphShift` value
+  was left); a child listening for stop requests exits 0 after `stop_child`;
+  a child that does not listen is ended and reported by `ended_children`; a
+  program that cannot start and an empty command are refused with -1 (Linux
+  reports a failed exec as a child that ends); a child's own child ends when
+  that child is killed; the process's own stop event becomes a stop request;
+  the terminal check.
+- `windows_run.py` gained the daemon phase (overlay.py's single instance,
+  without keyboard input, hotkeys `ctrl+alt+shift+F11`/`F12`): a second daemon
+  exits 0 naming the first one's hotkey; of two started together exactly one
+  stays; a new daemon runs after the first exits; each stops with status 0
+  through its stop event. The editor phase now ends by stopping the overlay
+  through its stop event (the daemon's detach): it exits 0, its window is
+  gone, the target keeps running and the screen shows its own image.
+
+Verification: both Windows presets built without warnings and passed 11/11
+CTest tests; `windows_run.py` passed twice in each (fixture, overlay,
+tracking, editor, daemon, oracles; about 60 s). Not verified: attaching and
+detaching with the real Ctrl+Alt+G on a focused game (it takes the keyboard;
+the focused driver needs the user's permission), sign-in start by Windows
+itself, and the Linux build of the shared hotkey name (CI).
+
 ## Definition of MVP done
 
 The target workflow is:

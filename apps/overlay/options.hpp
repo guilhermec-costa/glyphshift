@@ -20,6 +20,9 @@ Options parse(int argc, char** argv);
 
 extern const char* const usage;
 
+// "ctrl+alt+g" as "Ctrl+Alt+G" for messages.
+std::string hotkey_name(const std::string& hotkey);
+
 // Presets are kept per game: profile "overlay-NAME" from the target's
 // application name (X11: its class; Windows: its executable), unless the user
 // chose GLYPHSHIFT_PROFILE.

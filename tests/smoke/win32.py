@@ -289,6 +289,23 @@ def visible(window):
     return bool(user32.IsWindowVisible(window)) and not user32.IsIconic(window)
 
 
+kernel32 = c.WinDLL('kernel32', use_last_error=True)
+kernel32.OpenEventW.restype, kernel32.OpenEventW.argtypes = w.HANDLE, [w.DWORD, w.BOOL, w.LPCWSTR]
+kernel32.SetEvent.argtypes = [w.HANDLE]
+kernel32.CloseHandle.argtypes = [w.HANDLE]
+
+
+def request_stop(pid):
+    """Asks a GlyphShift process to stop (its named stop event, the counterpart
+    of SIGTERM); False when it does not listen."""
+    event = kernel32.OpenEventW(0x0002, False, f'Local\\GlyphShiftStop-{pid}')  # EVENT_MODIFY_STATE
+    if not event:
+        return False
+    kernel32.SetEvent(event)
+    kernel32.CloseHandle(event)
+    return True
+
+
 def difference(a, b):
     """Largest channel difference and the share of equal pixels."""
     worst = max(abs(x - y) for x, y in zip(a, b))

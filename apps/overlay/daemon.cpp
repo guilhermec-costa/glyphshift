@@ -3,7 +3,6 @@
 #include <X11/Xlib.h>
 #include <sys/select.h>
 
-#include <cctype>
 #include <cstdio>
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/platform/desktop.hpp>
@@ -16,6 +15,7 @@
 
 #include "../../src/display/x11/global_hotkey.hpp"
 #include "../../src/display/x11/tray.hpp"
+#include "options.hpp"
 
 // Background mode: one global hotkey attaches a capture overlay to the focused
 // game window, or detaches it. Each attachment is a separate
@@ -24,18 +24,6 @@
 namespace glyphshift::overlay {
 namespace {
 namespace x11 = display::x11;
-
-// "ctrl+alt+g" as "Ctrl+Alt+G" for messages.
-std::string display_name(const std::string& hotkey) {
-    std::string result;
-    bool start = true;
-    for (const char c : hotkey) {
-        const auto ch = static_cast<unsigned char>(c);
-        result += start ? static_cast<char>(std::toupper(ch)) : c;
-        start = c == '+';
-    }
-    return result;
-}
 
 // Background launches (menu, autostart) have no terminal: tell the user
 // through a desktop notification instead.
@@ -92,7 +80,7 @@ int run_daemon(const DaemonOptions& options) {
         XCloseDisplay(display);
         tell("GlyphShift is already running",
             other.empty() ? "Press its hotkey in a game to attach or detach."
-                          : "Press " + display_name(other) + " in a game to attach or detach.");
+                          : "Press " + hotkey_name(other) + " in a game to attach or detach.");
         return 0;
     }
     try {
@@ -102,7 +90,7 @@ int run_daemon(const DaemonOptions& options) {
         XCloseDisplay(display);
         if (!platform::stderr_is_terminal())
             platform::notify("GlyphShift could not start",
-                "The hotkey " + display_name(options.hotkey) +
+                "The hotkey " + hotkey_name(options.hotkey) +
                     " is taken by another application; choose another with --hotkey.");
         throw std::runtime_error("the hotkey " + options.hotkey +
                                  " is already taken by another application; choose --hotkey");
@@ -113,7 +101,7 @@ int run_daemon(const DaemonOptions& options) {
         options.hotkey.c_str());
     if (!platform::stderr_is_terminal())
         platform::notify("GlyphShift is running",
-            "Press " + display_name(options.hotkey) + " in a game to attach or detach.");
+            "Press " + hotkey_name(options.hotkey) + " in a game to attach or detach.");
     auto current = options;
     std::map<Window, Attached> attached;
     const auto toggle = [&](Window game) {
@@ -131,7 +119,7 @@ int run_daemon(const DaemonOptions& options) {
     const auto menu = [&] {
         const x11::MenuItem separator{"", -1, false, false, true};
         std::vector<x11::MenuItem> rows;
-        rows.push_back({"GlyphShift: press " + display_name(current.hotkey) + " in a game"});
+        rows.push_back({"GlyphShift: press " + hotkey_name(current.hotkey) + " in a game"});
         rows.push_back(separator);
         listed.clear();
         for (const auto& [window, game] : attached) {
