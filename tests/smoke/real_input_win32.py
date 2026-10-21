@@ -38,6 +38,13 @@ for _name, (_result, _args) in {
         'GetForegroundWindow': (w.HWND, []),
         'AllowSetForegroundWindow': (w.BOOL, [w.DWORD]),
         'MapVirtualKeyW': (w.UINT, [w.UINT, w.UINT]),
+        'VkKeyScanW': (c.c_short, [w.WCHAR]),
+        'CreateWindowExW': (w.HWND, [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, c.c_int, c.c_int,
+                                     c.c_int, c.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]),
+        'DestroyWindow': (w.BOOL, [w.HWND]),
+        'PeekMessageW': (w.BOOL, [c.POINTER(w.MSG), w.HWND, w.UINT, w.UINT, w.UINT]),
+        'TranslateMessage': (w.BOOL, [c.POINTER(w.MSG)]),
+        'DispatchMessageW': (c.c_ssize_t, [c.POINTER(w.MSG)]),
 }.items():
     _function = getattr(user32, _name)
     _function.restype, _function.argtypes = _result, _args
@@ -77,6 +84,7 @@ class RealInput:
     def __init__(self, window):
         self.window = window
         self.allowed = {window}
+        self._sentinel = None
         self.previous = foreground()
         point = w.POINT()
         user32.GetCursorPos(c.byref(point))
@@ -129,6 +137,43 @@ class RealInput:
                 _send(_key_event(modifier, True))
         time.sleep(.12)
 
+    def key_down(self, virtual):
+        self.guard()
+        _send(_key_event(virtual, False))
+        time.sleep(.06)
+
+    def key_up(self, virtual):
+        _send(_key_event(virtual, True))
+        time.sleep(.06)
+
+    def text(self, text):
+        """Types characters through their keys in the current layout."""
+        for character in text:
+            scan = user32.VkKeyScanW(character)
+            if scan == -1:
+                raise ValueError(f'no key types {character!r} in this layout')
+            self.key(scan & 0xff, (VK_LSHIFT,) if scan & 0x100 else ())
+
+    def sentinel(self):
+        """A tiny test-owned window to move the foreground to, instead of
+        another application; the caller pumps its messages with pump()."""
+        if not self._sentinel:
+            self._sentinel = user32.CreateWindowExW(0x80, 'STATIC', 'GlyphShift test sentinel',
+                                                    0x90000000, 0, 0, 1, 1, None, None, None,
+                                                    None)  # WS_EX_TOOLWINDOW, WS_POPUP|VISIBLE
+            self.allowed.add(self._sentinel)
+        return self._sentinel
+
+    @staticmethod
+    def pump(seconds=.3):
+        message = w.MSG()
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            while user32.PeekMessageW(c.byref(message), None, 0, 0, 1):  # PM_REMOVE
+                user32.TranslateMessage(c.byref(message))
+                user32.DispatchMessageW(c.byref(message))
+            time.sleep(.02)
+
     def click(self, x, y):
         """A left click at screen coordinates, which must hit a test window."""
         self.guard()
@@ -152,3 +197,6 @@ class RealInput:
             _send(_mouse_event(MOUSEEVENTF_MOVE))
             user32.SetForegroundWindow(self.previous)
         user32.SetCursorPos(*self.pointer)
+        if self._sentinel:
+            user32.DestroyWindow(self._sentinel)
+            self._sentinel = None

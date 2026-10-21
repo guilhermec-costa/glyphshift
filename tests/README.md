@@ -481,6 +481,16 @@ first.
 python tests/smoke/overlay_daemon_win32.py --build build/windows-release
 ```
 
+`editor_apps_win32.py` is the Windows counterpart of
+`editor_apps.py --application overlay-fixture`, with `SendInput` on the Win32
+Vulkan fixture and the overlay attached; `--illustrated` and `--presets` add
+the same sections. It takes the keyboard and pointer for about half a minute
+(longer with `--presets`).
+
+```powershell
+python tests/smoke/editor_apps_win32.py --build build/windows-release [--illustrated] [--presets]
+```
+
 `overlay_game.py` does the same on a real game started on its own: SuperTux on
 a level, natively or through Proton, with a monochrome config. It presses
 Ctrl+Alt+G to attach, holds Right to check that the game still receives input

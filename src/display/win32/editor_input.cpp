@@ -105,7 +105,18 @@ struct Session {
         std::array<BYTE, 256> state{};
         GetKeyboardState(state.data());
         std::array<wchar_t, 4> text{};
-        const int count = ToUnicode(virtual_key, scan, state.data(), text.data(), 4, 4);
+        int count = ToUnicode(virtual_key, scan, state.data(), text.data(), 4, 4);
+        // With Control held a letter yields a control code (Ctrl+A: U+0001);
+        // the editor names shortcut keys by their text, as X11 keysyms do, so
+        // take the key's text without Control. AltGr (Control+Alt) text is
+        // not a control code and stays as it is.
+        if (count == 1 && text[0] < 0x20 && (state[VK_CONTROL] & 0x80)) {
+            state[VK_CONTROL] = state[VK_LCONTROL] = state[VK_RCONTROL] = 0;
+            std::array<wchar_t, 4> plain{};
+            if (ToUnicode(virtual_key, scan, state.data(), plain.data(), 4, 4) == 1 &&
+                plain[0] >= 0x20)
+                text = plain;
+        }
         char32_t character = 0;
         if (count == 1)
             character = text[0];

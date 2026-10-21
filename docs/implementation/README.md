@@ -4692,6 +4692,51 @@ real click on the icon itself (on this machine it sits in the taskbar's
 overflow area, so the menu was opened with the callback message Explorer
 sends), and the hotkey on a real game (the `overlay_game` counterpart).
 
+**Step 7, part 8: the focused editor driver with real input (2026-10-21).**
+`tests/smoke/editor_apps_win32.py`, the counterpart of
+`editor_apps.py --application overlay-fixture` (with `--illustrated` and
+`--presets`), run with the user's permission: the Win32 Vulkan fixture with
+validation and the overlay attached (live config `color_mode=mono`,
+`glyph_strength=1`; Vulkan validation in the overlay), driven with
+`SendInput` at the same panel coordinates as on Linux: Insert opens the
+editor and it takes the foreground; a Ctrl-click numeric edit sets cell width
+21; the binary set is chosen and applied in the characters section; Ctrl+A
+and typing name the preset `app-editor`, saved with `cell_width=21` and
+`character_set=binary`; Escape closes the editor and returns the foreground
+to the fixture; F10 shows the original and back; with the editor open the
+fixture is resized three times; moving the foreground to a test-owned window
+closes the editor; the panel's close button closes it; then a real `A` and a
+click are exactly the fixture's only input events (nothing typed or clicked in
+the panel and no hotkey reached it), Escape ends the fixture with status 0
+and the overlay with it, without a validation or editor-input message.
+`real_input_win32.py` gained key down/up, text typed through the layout
+(`VkKeyScanW`), and the test-owned sentinel window.
+
+It found a defect the posted-message smoke could not: with Control really
+held, `ToUnicode` returns a control code for a letter (Ctrl+A gives U+0001),
+and the editor names shortcut keys by their text, so Ctrl+A (and Ctrl+C, V,
+X, Z) did nothing in text fields; the preset name became `defaultapp-editor`
+and no file was saved (reproduced twice). The Win32 editor input now asks for
+the key's text again without Control when the first answer is a control code
+(as X11 keysyms ignore Control); AltGr text, which is not a control code, is
+unchanged. The smoke's posted keys carry their text, which is why it passed.
+
+Verification: on the Release build the driver passed twice without options
+(once with temporary extra captures), once with `--illustrated` and once with `--presets` (nine included
+styles with distinct scene images, copies of the first and last saved and
+matching their files, the saved copy selected); the foreground went back to
+the user's window and no GlyphShift process was left. Both Windows presets
+then built without warnings and passed 12/12 CTest tests and every smoke
+phase; the format check passed. Before that, with the user's browser playing
+a live video in the foreground, the Release editor smoke phase failed
+intermittently (6 of 8 runs in one loop) at different screen comparisons (F10
+original, zero strength, the open editor under the point, the restarted
+overlay's image), none of which involves Control; afterwards it passed 7 runs
+in a row and in the full runs. The cause was not established (the fixture
+was on top of the z-order when probed); recorded as an open intermittent
+failure of the screen comparisons. Not verified: dead keys and IME in the
+editor, and keyboard layouts other than this one.
+
 ## Definition of MVP done
 
 The target workflow is:
