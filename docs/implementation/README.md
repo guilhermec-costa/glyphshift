@@ -1606,6 +1606,16 @@ Both files are ignored by Git. Release configuration leaves that Debug link
 alone. Existing user-owned database files or different symlinks are preserved
 with a warning. To opt out in a custom build, leave
 `GLYPHSHIFT_LINK_COMPILE_COMMANDS=OFF` (the default outside the dev preset).
+On Windows, `cmake --preset windows-dev` links `build/windows-dev`'s database
+the same way (added on 2026-10-20, when the user's clangd found no database:
+it searches the source's parent folders and their `build/` child, not
+`build/windows-dev`). Windows creates the symbolic link only in Developer Mode
+or with the privilege; without it, configuration warns and continues, and
+clangd can be pointed at the build directory with `--compile-commands-dir`.
+With the link, `clangd --check` on Windows sources (MSVC commands, Windows SDK,
+C++/WinRT, Vulkan SDK and vcpkg headers) reported no diagnostic; Linux-only
+sources, which are not in the Windows database, still lack their X11 headers
+there.
 
 Warnings are enabled for all C++ targets: `-Wall -Wextra -Wpedantic
 -Wconversion -Wshadow`. CTest runs pure option/timing tests, both fixtures'

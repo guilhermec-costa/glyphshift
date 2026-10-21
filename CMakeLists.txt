@@ -206,7 +206,13 @@ if(GLYPHSHIFT_LINK_COMPILE_COMMANDS)
         message(WARNING "Preserving existing compilation database: ${database_link}")
     else()
         file(CREATE_LINK "${database_target}" "${database_link}" SYMBOLIC RESULT database_result)
-        if(NOT database_result STREQUAL "0")
+        if(NOT database_result STREQUAL "0" AND GLYPHSHIFT_WINDOWS)
+            # Windows creates symbolic links only in Developer Mode or with the
+            # privilege; the build itself does not need the link.
+            message(WARNING "Cannot link the compilation database at the source root "
+                "(${database_result}); turn on Developer Mode, or point clangd at "
+                "${CMAKE_BINARY_DIR} with --compile-commands-dir")
+        elseif(NOT database_result STREQUAL "0")
             message(FATAL_ERROR "Cannot link compilation database: ${database_result}")
         endif()
     endif()

@@ -22,6 +22,7 @@
       "binaryDir": "${sourceDir}/build/windows-dev",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug", "BUILD_TESTING": "ON", "CMAKE_CXX_COMPILER": "cl",
+        "GLYPHSHIFT_LINK_COMPILE_COMMANDS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows"
       }
