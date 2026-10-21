@@ -1,8 +1,11 @@
 #include <windows.h>
+// After windows.h:
+#include <crtdbg.h>
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <glyphshift/config/presets.hpp>
 #include <glyphshift/config/settings.hpp>
@@ -151,7 +154,7 @@ private:
             window_.hide();
             return;
         }
-        if (window_.show(area))
+        if (window_.show(area, target_))
             dirty_ = true;
     }
 
@@ -215,6 +218,15 @@ private:
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _DEBUG
+    // A failed debug check reports on stderr and ends the process instead of a
+    // modal dialog that would freeze the overlay over the game.
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
     // Physical pixels: the capture, the target's geometry and the overlay agree.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     try {

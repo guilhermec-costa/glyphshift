@@ -230,6 +230,40 @@ def above(window):
     return user32.GetWindow(window, GW_HWNDPREV) or None
 
 
+def visible_above(window):
+    """The nearest visible window above in the z-order, or None."""
+    current = user32.GetWindow(window, GW_HWNDPREV)
+    while current and not user32.IsWindowVisible(current):
+        current = user32.GetWindow(current, GW_HWNDPREV)
+    return current or None
+
+
+def z_order():
+    """Visible top-level windows, topmost first."""
+    order = []
+
+    def visit(window, _):
+        if user32.IsWindowVisible(window):
+            order.append(window)
+        return True
+    user32.EnumWindows(WNDENUMPROC(visit), 0)
+    return order
+
+
+def raise_window(window):
+    """Brings a window to the top of its band without activating it."""
+    user32.SetWindowPos(window, w.HWND(0), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+
+
+SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWMINNOACTIVE, SW_SHOWNA = 0, 4, 7, 8
+
+
+def show(window, command):
+    """ShowWindow with one of the SW_ commands above (none activates the window)."""
+    user32.ShowWindow.argtypes = [w.HWND, c.c_int]
+    user32.ShowWindow(window, command)
+
+
 def extended_style(window):
     return user32.GetWindowLongPtrW(window, GWL_EXSTYLE) & 0xffffffff
 

@@ -4350,6 +4350,57 @@ occluding windows, virtual desktops) and the editor, hotkeys, daemon and tray
 on Windows, which are the next parts; the Linux build of the shared options
 and `glyphshift_vk_owned` (CI).
 
+**Step 7, part 3: window tracking (2026-10-20).** The counterpart of M6 step
+2. The overlay is no longer topmost: `OverlayWindow::show(area, target)` puts
+it in the target's band (topmost only when the target is) directly above the
+target, by inserting it after the window that is above the target, so windows
+above the target stay above the overlay; when the window above the target
+belongs to the other band (the taskbar, topmost, over the top normal window),
+the overlay goes to the top of the target's band instead. Every loop iteration
+checks that the nearest visible window above the target is the overlay and
+restacks otherwise; visibility follows the window's real state
+(`IsWindowVisible`), so a placement that did not apply is retried.
+`display::win32::Tracker` installs out-of-context window-event hooks (nothing
+is loaded into the target): the target process's destroy, show, hide and
+location changes, its minimizing, and foreground changes of any window. They
+only wake the overlay's message wait; the loop then queries the state (and
+polls every 50 ms in any case).
+
+Smoke (`windows_run.py`, tracking phase, the counterpart of `overlay.py`'s
+tracking): two fixtures, the target and an occluder (separate processes with
+their own message loops, moved and raised without activation). The overlay
+must cover the target and stay directly above it, follow a move and a resize,
+stay below the occluder raised over the target while the target moves, follow
+the target when it is raised over the occluder, hide while the target is
+minimized and while it is hidden and return directly above it when restored or
+shown, and exit 0 when the target is destroyed. Replacing the placement with
+"always topmost" made it fail ("overlay did not cover the target").
+
+Three defects found on the way, all fixed:
+
+- The first runs of the tracking phase hung: in Debug, the crop of the client
+  area called `std::clamp` with its lower bound above its upper bound while
+  the target was minimized (the frame's texture is smaller than its content
+  size right after a size change), and the CRT's modal assertion dialog froze
+  the overlay (the user saw the dialog). The crop now clamps to what both the
+  texture and the content hold. In Debug, the overlay and the fixture now
+  report CRT assertions and errors on stderr and end instead of showing a
+  dialog.
+- In Release, the overlay stayed hidden after the target was restored from
+  being minimized: the restored target led the normal band, the window above
+  it was the taskbar (`Shell_TrayWnd`, topmost), the placement after it did
+  not show the overlay, and the overlay's own record said it was shown, so it
+  never asked again. The band rule and the real-visibility check above fixed
+  both.
+- The scratch probes that found these left two overlay processes waiting on
+  the assertion dialog; they were ended.
+
+Verification: both Windows presets built without warnings; `windows_run.py`
+passed twice in each (fixture, overlay, tracking, oracles). Not verified:
+virtual-desktop switching (cloaking is handled but untested), a topmost
+target, multiple monitors and DPI changes, and the editor, hotkeys, daemon and
+tray, which follow.
+
 ## Definition of MVP done
 
 The target workflow is:

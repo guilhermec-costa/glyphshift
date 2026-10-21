@@ -334,7 +334,9 @@ preview is built as `glyphshift-vulkan-preview`.
 The Windows graphics smoke runs the Win32 Vulkan fixture with validation
 (gradient, resizes, posted input, clean exits), attaches the capture overlay
 to it (its pixels must equal the preview of the captured frame, input must
-pass through, and it must end with the fixture), and then runs those oracles,
+pass through, and it must end with the fixture), checks that the overlay
+tracks a second fixture (moves, resizes, another window raised over it,
+raising, minimizing, hiding, closing), and then runs those oracles,
 without taking the keyboard, pointer or focus:
 
 ```powershell

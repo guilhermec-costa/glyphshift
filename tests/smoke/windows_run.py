@@ -187,6 +187,80 @@ def overlay_phase():
           f'screen still original in {100 * still_original:.2f}%)')
 
 
+def eventually(condition, message, seconds=10):
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        time.sleep(.05)
+
+
+def tracking_phase():
+    """Follow, stay directly above the target under later windows, rise with it,
+    hide and return with it (minimize, hide), end with it."""
+    with fixture('tracking-target') as (process, target, log), \
+            fixture('tracking-occluder') as (occluder_process, occluder, occluder_log):
+        win32.move(occluder, 1000, 500)
+        win32.move(target, 60, 80)
+        assert win32.resize(target, 320, 200)
+        overlay_log = output / 'tracking-overlay.log'
+        with overlay_log.open('w') as stream:
+            overlay = subprocess.Popen([str(build / 'glyphshift-overlay'), '--window',
+                                        str(target), '--preset', 'art-newsprint'],
+                                       env=env, stdout=stream, stderr=subprocess.STDOUT)
+        try:
+            layer = win32.wait_window('GlyphShift overlay', overlay, overlay_log)
+
+            def follows():
+                x, y = win32.client_origin(target)
+                width, height = win32.client_size(target)
+                return win32.visible(layer) and win32.window_rect(layer) == (x, y, width,
+                                                                               height)
+
+            def directly_above(window):
+                return win32.visible_above(window) == layer
+
+            def order(window):
+                return win32.z_order().index(window)
+
+            eventually(lambda: follows() and directly_above(target),
+                       'overlay did not cover the target')
+            win32.move(target, 140, 120)
+            assert win32.resize(target, 360, 240)
+            eventually(follows, 'overlay did not follow move/resize')
+            # A window raised above the target stays above the overlay too.
+            win32.move(occluder, 100, 100)
+            win32.raise_window(occluder)
+            win32.move(target, 150, 130)
+            eventually(lambda: follows() and directly_above(target),
+                       'overlay left its place directly above the target')
+            assert order(occluder) < order(layer), 'overlay covered a window above'
+            # Raising the target brings the overlay with it.
+            win32.raise_window(target)
+            eventually(lambda: directly_above(target) and order(layer) < order(occluder),
+                       'overlay did not follow the raised target')
+            # Hidden while minimized or hidden, back when restored or shown.
+            for hide, restore, name in ((win32.SW_SHOWMINNOACTIVE, win32.SW_SHOWNOACTIVATE,
+                                         'minimized'), (win32.SW_HIDE, win32.SW_SHOWNA, 'hidden')):
+                win32.show(target, hide)
+                eventually(lambda: not win32.visible(layer), f'overlay stayed over a {name} target')
+                win32.show(target, restore)
+                eventually(lambda: follows() and directly_above(target),
+                           f'overlay did not return with the {name} target')
+            win32.close(target)
+            finish(process, log)
+            assert overlay.wait(timeout=10) == 0, overlay_log.read_text(errors='replace')
+            win32.close(occluder)
+            finish(occluder_process, occluder_log)
+        finally:
+            if overlay.poll() is None:
+                overlay.terminate()
+                overlay.wait(timeout=10)
+    print('Overlay tracking: follows move/resize, stays directly above the target under '
+          'other windows, rises with it, hides and returns with it (minimized, hidden), '
+          'exits with the target')
+
+
 def oracles():
     """The GPU image oracles through the Vulkan preview, with validation."""
     oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
@@ -198,4 +272,5 @@ def oracles():
 
 fixture_phase()
 overlay_phase()
+tracking_phase()
 oracles()

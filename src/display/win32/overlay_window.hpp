@@ -3,8 +3,9 @@
 
 // display::Overlay for Win32: a layered, input-transparent popup
 // (WS_EX_LAYERED | WS_EX_TRANSPARENT: hit tests and input fall through to the
-// window below), never activated and absent from the taskbar, kept above the
-// target. The renderer presents into it through its own Vulkan surface.
+// window below), never activated and absent from the taskbar, kept directly
+// above the target in the z-order, so windows above the target stay above it.
+// The renderer presents into it through its own Vulkan surface.
 namespace glyphshift::display::win32 {
 class OverlayWindow {
 public:
@@ -21,9 +22,13 @@ public:
         return shown_;
     }
 
-    // Shows the window over `area` (screen pixels). Returns true when it was
-    // hidden before.
-    bool show(const RECT& area);
+    // Shows the window over `area` (screen pixels), directly above `target`
+    // (restacked when another window came between them). Returns true when it
+    // was hidden before.
+    bool show(const RECT& area, HWND target);
+
+    // Whether the nearest visible window above `target` is the overlay.
+    bool directly_above(HWND target) const;
     void hide();
 
 private:

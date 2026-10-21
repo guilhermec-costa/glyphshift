@@ -244,11 +244,14 @@ bool Capture::copy() {
     D3D11_TEXTURE2D_DESC desc{};
     texture->GetDesc(&desc);
     RECT area = client_area(s.target);
-    area.left = std::clamp<LONG>(area.left, 0, content.Width);
-    area.top = std::clamp<LONG>(area.top, 0, content.Height);
-    area.right = std::clamp<LONG>(area.right, area.left, std::min<LONG>(content.Width, desc.Width));
-    area.bottom =
-        std::clamp<LONG>(area.bottom, area.top, std::min<LONG>(content.Height, desc.Height));
+    // Right after a resize (or while minimized) the frame's texture can be
+    // smaller than its content size: crop to what both hold.
+    const LONG limit_x = std::min<LONG>(content.Width, static_cast<LONG>(desc.Width));
+    const LONG limit_y = std::min<LONG>(content.Height, static_cast<LONG>(desc.Height));
+    area.left = std::clamp<LONG>(area.left, 0, limit_x);
+    area.top = std::clamp<LONG>(area.top, 0, limit_y);
+    area.right = std::clamp<LONG>(area.right, area.left, limit_x);
+    area.bottom = std::clamp<LONG>(area.bottom, area.top, limit_y);
     const auto w = static_cast<unsigned>(area.right - area.left);
     const auto h = static_cast<unsigned>(area.bottom - area.top);
     if (!w || !h) {

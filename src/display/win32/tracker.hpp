@@ -4,7 +4,10 @@
 #include <string>
 
 // display::Tracker for Win32: the target window's state, read without
-// affecting it.
+// affecting it. Out-of-context window-event hooks (nothing is loaded into the
+// target) post the target's moves, resizes, minimizing, showing, hiding and
+// destruction, and foreground changes, to this thread's message queue, so a
+// message wait wakes as they happen; query() then reads the new state.
 namespace glyphshift::display::win32 {
 class Tracker {
 public:
@@ -16,7 +19,10 @@ public:
         RECT client{};
     };
 
-    explicit Tracker(HWND target) : target_(target) {}
+    explicit Tracker(HWND target);
+    ~Tracker();
+    Tracker(const Tracker&) = delete;
+    Tracker& operator=(const Tracker&) = delete;
 
     State query() const;
 
@@ -26,5 +32,6 @@ public:
 
 private:
     HWND target_;
+    HWINEVENTHOOK hooks_[3]{};
 };
 }  // namespace glyphshift::display::win32

@@ -1,3 +1,4 @@
+#include <crtdbg.h>
 #include <dwmapi.h>
 
 #include <cstdlib>
@@ -32,6 +33,15 @@ std::wstring wide(const std::string& text) {
 }  // namespace
 
 Window::Window() {
+#ifdef _DEBUG
+    // Failed debug checks report on stderr and end the fixture, rather than a
+    // modal dialog that would leave an automated test waiting.
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
     // Physical pixels everywhere: sizes and captures match the swapchain.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSEXW window_class{sizeof window_class};
