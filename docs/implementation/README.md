@@ -4472,7 +4472,28 @@ checks gave no match for either glyph with JetBrains Mono Bold or ExtraBold
 and both matches with Consolas Bold. The code these checks exercise did not
 change in this part. Not verified: the hotkeys and the foreground hand-over
 with real input (they take the keyboard and need the user's permission; the
-focused drivers come with the daemon part), IME and dead keys.
+focused drivers come with the daemon part), IME and dead keys. After the user
+pushed `bcdacec`, the CI's Linux `build` job passed (seen by the user).
+
+**The illustration test's font-dependent checks (2026-10-20).** At the user's
+choice, the two shape checks no longer compare the discovered font's `|` and
+`_` with an ideal centered column and bottom row, which held for DejaVu, Hack
+and Consolas but not for JetBrains Mono, Courier New or Cascadia Mono's
+default instance. They take the glyphs' own measured 4×4 descriptors, require
+a font-independent shape (`|`: at least twice the ink in the two central
+columns as in the outer ones, and ink in the top and bottom rows; `_`: at least
+twice the ink in the bottom row as in the top one) and require each descriptor
+to match back to its glyph. The placement of `_`, `.` and `'` in the cell
+stays covered by the `characters` test. A scratch probe applied the new checks
+to Hack Bold (the Linux machine's font, from the scratch download of step 6),
+Consolas Bold, Courier New Bold, Lucida Console, JetBrains Mono Bold and
+ExtraBold and Cascadia Mono: all passed. Two temporary mutations failed the
+test as intended: shape matching that never matches, and the two glyphs'
+descriptors swapped (caught by "| is a central column spanning the cell"; a
+first version of that check, without the top and bottom rows, let a narrow
+`_` pass as a column and was strengthened). Both Windows presets passed 11/11
+CTest tests with JetBrains Mono Bold discovered. Not verified: the Linux run
+with DejaVu (CI).
 
 ## Definition of MVP done
 

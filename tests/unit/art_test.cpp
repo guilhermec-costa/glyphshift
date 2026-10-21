@@ -240,14 +240,33 @@ int main() {
             for (unsigned bin = 0; bin < 256; ++bin)
                 check(row == 2 || outlines.ramp[256 * row + bin] < 8,
                     "tonal lookups never use shape-only glyphs");
+        // The font's own | and _ (slots 8 and 9): their measured 4x4 descriptors
+        // (region r is row r / 4, column r % 4) must have the expected shape in
+        // any sturdy font, and match back to their glyph. Comparing with an
+        // ideal bar or floor instead depended on the discovered font's design.
         std::array<float, 16> bar{}, floor{}, checker{};
         for (unsigned r = 0; r < 16; ++r) {
-            bar[r] = (r % 4 == 1 || r % 4 == 2) ? 1.0F : 0.0F;
-            floor[r] = r >= 12 ? 1.0F : 0.0F;
+            bar[r] = static_cast<float>(outlines.ramp[256 * (descriptor_row + r) + 8]) / 255;
+            floor[r] = static_cast<float>(outlines.ramp[256 * (descriptor_row + r) + 9]) / 255;
             checker[r] = (r + r / 4) % 2 ? 1.0F : 0.0F;
         }
-        check(shape_glyph(outlines, bar, false) == 8, "a centered bright column matches |");
-        check(shape_glyph(outlines, floor, false) == 9, "a bright bottom row matches _");
+        float centre = 0, sides = 0, bottom = 0, top = 0, bar_top = 0, bar_bottom = 0;
+        for (unsigned r = 0; r < 16; ++r) {
+            (r % 4 == 1 || r % 4 == 2 ? centre : sides) += bar[r];
+            if (r < 4)
+                bar_top += bar[r];
+            if (r >= 12)
+                bar_bottom += bar[r];
+            if (r >= 12)
+                bottom += floor[r];
+            if (r < 4)
+                top += floor[r];
+        }
+        check(centre > 2 * sides && bar_top > 0 && bar_bottom > 0,
+            "| is a central column spanning the cell");
+        check(bottom > 2 * top, "_ lies on the cell floor");
+        check(shape_glyph(outlines, bar, false) == 8, "a | silhouette matches |");
+        check(shape_glyph(outlines, floor, false) == 9, "a _ silhouette matches _");
         check(shape_glyph(outlines, checker, false) == -1,
             "texture that no glyph resembles keeps tonal fill");
         auto crowded = CharacterSelection{};
