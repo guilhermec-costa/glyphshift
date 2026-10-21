@@ -407,3 +407,30 @@ def menu_rows(menu_window):
         user32.GetMenuStringW(menu, index, buffer, 256, MF_BYPOSITION)
         rows.append((buffer.value, user32.GetMenuState(menu, index, MF_BYPOSITION)))
     return rows
+
+
+class ProcessEntry(c.Structure):
+    _fields_ = [('dwSize', w.DWORD), ('cntUsage', w.DWORD), ('th32ProcessID', w.DWORD),
+                ('th32DefaultHeapID', c.c_size_t), ('th32ModuleID', w.DWORD),
+                ('cntThreads', w.DWORD), ('th32ParentProcessID', w.DWORD),
+                ('pcPriClassBase', w.LONG), ('dwFlags', w.DWORD), ('szExeFile', w.WCHAR * 260)]
+
+
+kernel32.CreateToolhelp32Snapshot.restype = w.HANDLE
+kernel32.CreateToolhelp32Snapshot.argtypes = [w.DWORD, w.DWORD]
+kernel32.Process32FirstW.argtypes = [w.HANDLE, c.POINTER(ProcessEntry)]
+kernel32.Process32NextW.argtypes = [w.HANDLE, c.POINTER(ProcessEntry)]
+
+
+def children(pid):
+    """Ids of the running processes whose parent is `pid`."""
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    found = []
+    entry = ProcessEntry(c.sizeof(ProcessEntry))
+    more = kernel32.Process32FirstW(snapshot, c.byref(entry))
+    while more:
+        if entry.th32ParentProcessID == pid:
+            found.append(entry.th32ProcessID)
+        more = kernel32.Process32NextW(snapshot, c.byref(entry))
+    kernel32.CloseHandle(snapshot)
+    return found

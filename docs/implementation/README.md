@@ -4648,7 +4648,49 @@ notification was hidden. Here a new icon goes to the taskbar's overflow area;
 with a real click and closing it by clicking elsewhere (the user's pointer),
 "Detach from" (it needs an attachment by the real hotkey, so it belongs to
 the `overlay_daemon` counterpart), a real Explorer restart, the icon at
-other DPIs, and notifications under Do Not Disturb.
+other DPIs, and notifications under Do Not Disturb. After the user pushed
+`6aaddd5`, the CI's Linux `build` job passed (seen by the user).
+
+**Step 7, part 7: the focused daemon driver with real input (2026-10-21).**
+The first `SendInput` driver of the test plan, the counterpart of
+`overlay_daemon.py`, run with the user's permission while they did not use
+the keyboard and pointer.
+
+- `tests/smoke/real_input_win32.py`, the counterpart of `real_input.py`:
+  refuses to start while a modifier or mouse button is held; brings the test
+  window to the foreground (a no-op relative mouse move first, so this
+  process sent the latest input and Windows lets it set the foreground);
+  checks before every key and click that the foreground is a test window, and
+  that a click lands on a test window or the input-transparent overlay; keys
+  go with their scan codes, modifiers pressed in order and released in
+  reverse; at the end it gives the foreground back to the window that had it
+  (unless the user has switched elsewhere) and moves the pointer back.
+- `tests/smoke/overlay_daemon_win32.py`: the daemon (default Ctrl+Alt+G,
+  `--preset art-comic`, notifications off) and the Win32 Vulkan fixture with
+  validation, started on its own and focused. Unattached, 0.000% of the
+  fixture's client area differed on screen from its own pixels; the real
+  Ctrl+Alt+G started one overlay process (a child of the daemon, found
+  through a process snapshot) and 59.9% then differed; with the overlay
+  attached a real `A` and a left click reached the fixture in order (its
+  input log) while it kept the foreground; Ctrl+Alt+G detached (the screen
+  matched the fixture again, under 1%) and attached again. The icon's menu,
+  opened through its callback message as Explorer does after a click (the
+  test allows the daemon to take the foreground), took the foreground and
+  listed "Detach from GlyphShift Vulkan fixture …"; a real click on the game
+  closed it without detaching; opened again, real Down presses to that row
+  and Return detached the game and the screen returned. The hotkey then
+  attached once more, closing the fixture (status 0, no validation message)
+  ended its overlay while the daemon kept running, and the daemon's stop
+  event ended it with status 0.
+- `win32.py` gained `children(pid)` (process snapshot).
+
+Verification: the driver passed twice in a row on the Release build (about 20
+s each); afterwards the foreground was the user's editor again and no
+GlyphShift process was left. The Debug smoke's daemon and tray phases passed
+again with the extended `win32.py`; the format check passed. Not verified: a
+real click on the icon itself (on this machine it sits in the taskbar's
+overflow area, so the menu was opened with the callback message Explorer
+sends), and the hotkey on a real game (the `overlay_game` counterpart).
 
 ## Definition of MVP done
 

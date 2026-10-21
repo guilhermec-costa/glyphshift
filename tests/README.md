@@ -338,7 +338,8 @@ pass through, and it must end with the fixture), checks that the overlay
 tracks a second fixture (moves, resizes, another window raised over it,
 raising, minimizing, hiding, closing), drives the editor through it (input
 posted to the overlay in the `GLYPHSHIFT_OVERLAY_NO_FOCUS=1` test mode),
-checks that only one background daemon runs per session, and then runs those
+checks that only one background daemon runs per session, drives the daemon's
+notification-area icon and menu with posted messages, and then runs those
 oracles (`--only` selects phases),
 without taking the keyboard, pointer or focus:
 
@@ -464,6 +465,20 @@ python3 tests/smoke/editor_apps.py --build build/dev \
   --application overlay-fixture --output /tmp/glyphshift-overlay-editor
 python3 tests/smoke/overlay_daemon.py --build build/dev \
   --output /tmp/glyphshift-overlay-daemon
+```
+
+On Windows, `overlay_daemon_win32.py` is its counterpart with `SendInput`
+(`real_input_win32.py`): the real Ctrl+Alt+G attaches the overlay to the
+focused Win32 Vulkan fixture, a key and a click reach the fixture through it,
+the hotkey detaches and attaches again, the icon's menu (opened through the
+icon's callback message) closes on a click on the game and detaches it
+through "Detach from"; closing the fixture ends its overlay and the daemon
+stops with status 0. It takes the keyboard and pointer for about twenty
+seconds and gives the foreground and pointer back. Stop your own daemon
+first.
+
+```powershell
+python tests/smoke/overlay_daemon_win32.py --build build/windows-release
 ```
 
 `overlay_game.py` does the same on a real game started on its own: SuperTux on
