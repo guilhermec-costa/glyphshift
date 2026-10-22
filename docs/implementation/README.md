@@ -151,6 +151,62 @@ its neighborhood's mean and spread, blended with the global tone by a new
 setting, so a fogged region keeps its internal structure while near regions
 keep their look.
 
+**Step 1, local contrast (2026-10-22).** A new live setting, `local_contrast`
+(0..1, default 0; editor **Illustration → Local contrast**, right after Auto
+exposure, below every control the focused tests click), persisted in presets
+and validated like the other unit-range controls, in shader slot 23
+(`art_local_contrast`). Illustrated rendering only, like automatic exposure.
+For each cell, analysis takes 7×7 small-box luminance samples over a window of
+1/12 of the image height centered on the cell, and:
+
+- blends the cell's tone (after exposure, contrast and gamma) toward its rank
+  among the samples by the setting: local equalization, so the darkest cell of
+  a neighborhood takes the dark end of the ramp and the lightest the light end
+  whatever the exposure;
+- divides the contour thresholds (DoG band and lattice) and the shape-matching
+  contrast by a gain of 0.12 / the samples' deviation, between 1 and 4,
+  scaled toward 1 by the setting, so faint outlines in fog can still vote.
+
+`local_rank` and `local_contrast_gain` in the core mirror the shader and are
+unit-tested (`art` test), with the window and limits as shared constants.
+
+How it was reached, on the reference frame with the user's style (cell
+measures of the 6×6 green channel; correlation of the output cells with the
+source luminance cells):
+
+| Variant | Far: saturated cells, correlation | Near: correlation |
+| --- | --- | --- |
+| Off | 37%, 0.32 | 0.83 |
+| Spread around the local mean (×0.12/deviation), window 1/6 of the height | 26%, 0.45 | 0.79 |
+| The same, window 1/12 (far gain 2.6, near 1.3) | 28%, 0.45 | 0.80 |
+| Local rank, strength 0.5 (window 1/12) | 21%, 0.59 | 0.79 |
+| Local rank, strength 1 | 6%, 0.54 | 0.51 |
+
+Spreading around the mean improved the tone but not the picture: the style's
+exposure of 4 keeps a fogged region's mean at the top of the ramp, whose last
+two glyphs (`0`, `1`) have nearly the same density, so the temple's arches and
+facade still drew as one field (a tone map computed outside the shader showed
+the structure was present before the ramp). The rank equalizes regardless of
+exposure: at strength 0.5 the arches, columns and facade of the far temple
+are drawn, and near detail keeps its correlation; at 1 near lighting flattens.
+Glow was ruled out separately (the same flat field with `glow=0`).
+
+New oracle `tests/smoke/local_contrast.py` (Windows oracle phase and the GLX
+smoke): bright bands 12 levels apart (fog) and the same bands from black to
+white, 6×6 cells; `local_contrast=0` is byte-identical to the default; at 0.5
+the fogged bands are 18.2 levels of mean cell brightness apart instead of 2.7,
+and the contrasty bands keep theirs (36.2 → 41.7). With the shader's
+equalization removed, the oracle failed as intended.
+
+Verification: Release built without warnings, 12/12 CTest tests (the smoke
+excluded), format check passed, and the new oracle passed. The smoke's other
+phases were not rerun: the change is confined to analysis behind a setting
+that is off by default, which the oracle shows byte-identical. Not verified:
+the setting live in a game (the user's own check), GPU cost (49 extra
+small-box samples per cell when on; the Windows overlay has no GPU timing),
+temporal behavior in motion, the classic renderer (not affected), and the
+Linux GLX run of the oracle (CI does not run the smoke).
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

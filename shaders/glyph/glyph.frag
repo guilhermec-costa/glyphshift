@@ -210,6 +210,9 @@ void main() {
 // texture does not, so it keeps the calm tonal ramp instead of turning into
 // scattered punctuation.
 const float shape_fit = .06;
+// Mirror glyphshift::local_contrast_target, _max_gain and _span.
+const float local_contrast_target = .12, local_contrast_max_gain = 4.0;
+const float local_contrast_span = 1.0 / 12.0;
 // Mean of the 2x2 texels starting at p: a small low-pass that keeps a
 // boundary on the cell grid owned by exactly one side.
 vec3 box(vec2 p) {
@@ -230,7 +233,7 @@ const int dog_patch = dog_samples + 2 + 2*dog_radius, dog_band = dog_samples + 2
 // Two separable Gaussians (sigma, 1.6 sigma) are subtracted and thresholded
 // into a binary edge band; Sobel on that band gives each sample's direction,
 // counted into votes. Smooth gradients produce no band, and thin outlines do.
-void dog_votes(vec2 origin, inout int votes[4], out int samples) {
+void dog_votes(vec2 origin, float gain, inout int votes[4], out int samples) {
     ivec2 count = ivec2(min(CELL, vec2(dog_samples)));
     vec2 stride = CELL / vec2(count);
     samples = count.x * count.y;
@@ -266,7 +269,7 @@ void dog_votes(vec2 origin, inout int votes[4], out int samples) {
             a += row_narrow[(y+k)*dog_band+x] * narrow[k];
             b += row_wide[(y+k)*dog_band+x] * wide[k];
         }
-        band[y*dog_band+x] = a/narrow_sum - b/wide_sum >= ART[5].y ? 1.0 : 0.0;
+        band[y*dog_band+x] = (a/narrow_sum - b/wide_sum) * gain >= ART[5].y ? 1.0 : 0.0;
     }
     for (int y=1;y<=count.y;++y) for (int x=1;x<=count.x;++x) {
         float v[9];
@@ -331,6 +334,28 @@ void main() {
         dark = min(dark,levels[r]);
         light = max(light,levels[r]);
     }
+    // Local contrast: 7x7 small-box samples over a window of
+    // local_contrast_span of the image height centered on the cell. The cell's
+    // rank among them (glyphshift::local_rank) later equalizes its tone; the
+    // spread's gain (glyphshift::local_contrast_gain) lowers the contour and
+    // shape thresholds in low-contrast neighborhoods such as fog.
+    float level = luma(average), gain = 1.0, rank = 0.0;
+    if (ART[5].w > 0.0) {
+        vec2 center = origin + CELL * .5;
+        float spacing = SIZE.y * local_contrast_span / 6.0;
+        float sum = 0.0, squares = 0.0, below = 0.0;
+        for (int j=-3;j<=3;++j) for (int i=-3;i<=3;++i) {
+            float v = luma(box(clamp(floor(center + vec2(i,j) * spacing), vec2(0), SIZE - 2.0)));
+            sum += v;
+            squares += v * v;
+            below += v < level ? 1.0 : v == level ? .5 : 0.0;
+        }
+        float mean = sum / 49.0;
+        float deviation = sqrt(max(squares / 49.0 - mean * mean, 0.0));
+        gain = 1.0 + (clamp(local_contrast_target / max(deviation, 1e-4), 1.0,
+                             local_contrast_max_gain) - 1.0) * ART[5].w;
+        rank = below / 49.0;
+    }
     // Contours vote on a 5x5 lattice spanning the cell and the first pixels of
     // its right/lower neighbors. Each interior point classifies its own 3x3
     // neighborhood; incoherent texture splits its votes and is rejected.
@@ -340,7 +365,7 @@ void main() {
     int needed = 3, keep = 2;
     if ((int(ART[4].z + .5) & 4) != 0) {
         int samples;
-        if (ART[1].y > 0.0) dog_votes(origin, votes, samples);
+        if (ART[1].y > 0.0) dog_votes(origin, gain, votes, samples);
         else samples = 1;
         needed = max(2, int(ceil(ART[5].z * float(samples))));
         keep = max(1, (2*needed + 2) / 3);
@@ -352,7 +377,7 @@ void main() {
             float v[9];
             // Doubling quarter-cell differences keeps edge_threshold in the
             // half-cell units of the original 3x3 cell-scale contour test.
-            for (int k=0;k<9;++k) v[k] = 2.0 * lattice[(y+k/3-1)*5 + x+k%3-1];
+            for (int k=0;k<9;++k) v[k] = 2.0 * gain * lattice[(y+k/3-1)*5 + x+k%3-1];
             int axis = contour(v);
             if (axis >= 0) votes[axis] += 1;
         }
@@ -376,8 +401,12 @@ void main() {
     if (ART[6].x > 0.0)
         exposure *= clamp(pow(.4 / max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0),
                               ART[6].x), .5, 4.0);
-    float tone = clamp((luma(average)*exposure-.5)*ART[0].y+.5,0.0,1.0);
+    float tone = clamp((level*exposure-.5)*ART[0].y+.5,0.0,1.0);
     tone = pow(tone,1.0/ART[0].z);
+    // Local equalization: whatever the exposure, the darkest cell of a
+    // neighborhood takes the dark end of the ramp and the lightest the light
+    // end, so fog or a strong exposure no longer flatten a region.
+    tone = mix(tone, rank, ART[5].w);
     int ramp_row = ART[2].w >= 0.0 ? 3 : 1;
     uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ramp_row),0).r;
     float decided_tone = tone;
@@ -410,7 +439,7 @@ void main() {
     bool shape = false;
     // A silhouette that was matched last frame needs less contrast to stay.
     float shape_contrast = max(ART[2].w,.0001) * (previous_shape ? 1.0 - .5*stability : 1.0);
-    if (ART[2].w >= 0.0 && ART[1].w > .5 && light-dark > shape_contrast) {
+    if (ART[2].w >= 0.0 && ART[1].w > .5 && (light-dark) * gain > shape_contrast) {
         // Split the regions into a light and a dark group, then pick the
         // matchable glyph whose ink layout best fits the light group. Palette
         // entries are constant per cell, never a blend with per-pixel detail.

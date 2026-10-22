@@ -503,6 +503,16 @@ void controls(State& state,
                 ImGui::SetTooltip(
                     "Follows the scene's brightness: dark games are brightened toward a "
                     "mid tone, bright ones toned down slightly. Exposure still applies.");
+            ImGui::SliderFloat("Local contrast",
+                &art.local_contrast,
+                0,
+                1,
+                "%.2f",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Tone relative to each area's surroundings: fogged distant scenery "
+                    "keeps its shapes instead of becoming one flat glyph.");
             ImGui::Checkbox("World-anchored grid", &art.anchor_grid);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip(

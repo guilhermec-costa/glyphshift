@@ -241,6 +241,7 @@ try:
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('atlas_filter.py')),'--build',str(build),'--output',str(output/'atlas-filter')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('temporal.py')),'--build',str(build),'--output',str(output/'temporal')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('exposure.py')),'--build',str(build),'--output',str(output/'exposure')],check=True)
+        subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('local_contrast.py')),'--build',str(build),'--output',str(output/'local_contrast')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('anchor.py')),'--build',str(build),'--output',str(output/'anchor')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay.py')),'--build',str(build),'--output',str(output/'overlay')],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('overlay_tray.py')),'--build',str(build),'--output',str(output/'overlay-tray')],check=True)

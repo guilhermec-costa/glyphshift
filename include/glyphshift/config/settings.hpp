@@ -30,6 +30,9 @@ struct ArtSettings {
     float stability = 0.0F;
     // Exposure follows the scene's metered brightness (0 off .. 1 fully).
     float auto_exposure = 0.0F;
+    // Tone relative to each cell's neighborhood (0 off .. 1 fully), so fogged
+    // distant regions keep their internal structure (glyphshift::local_contrast).
+    float local_contrast = 0.0F;
     // Illustrated cells follow the camera's motion, estimated on the GPU, so
     // scrolling scenes keep their glyphs instead of crawling across the grid.
     bool anchor_grid = false;
@@ -55,7 +58,7 @@ struct Settings {
 // them). Renderers zero the stability entry whenever no valid previous frame
 // exists. Entries after the last used one are zero.
 inline constexpr std::size_t art_vectors = 8;
-inline constexpr std::size_t art_stability = 19;
+inline constexpr std::size_t art_stability = 19, art_local_contrast = 23;
 // Renderers set the metering's adaptation rate for the frame (1: start fresh)
 // and whether the anchored grid's camera state continues the previous frame.
 inline constexpr std::size_t art_auto_exposure = 24, art_adaptation = 25;
@@ -88,7 +91,7 @@ inline ArtParameters art_parameters(const Settings& s) {
         a.dog_sigma,
         a.dog_threshold,
         a.edge_votes,
-        0,
+        a.local_contrast,
         a.auto_exposure,
         1,
         a.anchor_grid ? 1.0F : 0.0F,

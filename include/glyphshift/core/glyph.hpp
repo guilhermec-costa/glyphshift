@@ -45,6 +45,18 @@ float auto_exposure_factor(float mean, float strength) noexcept;
 float exposure_adaptation(float seconds) noexcept;
 // Adapts in the logarithmic domain, as brightness is perceived.
 float adapt_luminance(float previous, float measured, float rate) noexcept;
+// Local contrast, mirrored by the analysis shader, over 7x7 luminance samples
+// of a cell's neighborhood (local_contrast_span of the image height around
+// it). The cell's tone is blended by strength (0..1) toward its rank among the
+// samples (local equalization: fog or a strong exposure no longer flatten a
+// region onto one glyph). The contour and shape thresholds are divided by a
+// gain of local_contrast_target / the samples' deviation, at least 1 and at
+// most local_contrast_max_gain, scaled toward 1 by strength.
+inline constexpr float local_contrast_target = .12F, local_contrast_max_gain = 4.0F;
+inline constexpr float local_contrast_span = 1.0F / 12;
+float local_contrast_gain(float deviation, float strength) noexcept;
+// Share of the samples below `value`, ties counting half: 0..1.
+float local_rank(float value, std::span<const float> samples) noexcept;
 // Row-major 3x3 luminance neighborhood. -1 means fill, 0..3 are | - / \\.
 int contour_glyph(std::span<const float, 9> levels, float strength, float threshold) noexcept;
 // Row-major 5x5 luminance lattice at quarter-cell steps, spanning the cell and

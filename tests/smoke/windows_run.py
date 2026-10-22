@@ -628,7 +628,7 @@ def oracles():
     """The GPU image oracles through the Vulkan preview, with validation."""
     oracle_env = dict(env, GLYPHSHIFT_PREVIEW_VALIDATION='1')
     here = pathlib.Path(__file__).resolve().parent
-    for name in ['atlas_filter', 'temporal', 'exposure', 'anchor']:
+    for name in ['atlas_filter', 'temporal', 'exposure', 'local_contrast', 'anchor']:
         subprocess.run([sys.executable, str(here / f'{name}.py'), '--build', str(build),
                         '--output', str(output / name)], env=oracle_env, check=True)
 

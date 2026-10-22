@@ -21,6 +21,22 @@ float adapt_luminance(float previous, float measured, float rate) noexcept {
     return std::exp(a + (b - a) * std::clamp(rate, 0.0F, 1.0F));
 }
 
+float local_contrast_gain(float deviation, float strength) noexcept {
+    const float full = std::clamp(local_contrast_target / std::max(deviation, 1e-4F),
+        1.0F,
+        local_contrast_max_gain);
+    return 1 + (full - 1) * std::clamp(strength, 0.0F, 1.0F);
+}
+
+float local_rank(float value, std::span<const float> samples) noexcept {
+    if (samples.empty())
+        return .5F;
+    float below = 0;
+    for (const float sample : samples)
+        below += sample < value ? 1.0F : sample == value ? .5F : 0.0F;
+    return below / static_cast<float>(samples.size());
+}
+
 int contour_glyph(std::span<const float, 9> v, float strength, float threshold) noexcept {
     const float gx = (-v[0] + v[2] - 2 * v[3] + 2 * v[5] - v[6] + v[8]) / 4;
     const float gy = (-v[0] - 2 * v[1] - v[2] + v[6] + 2 * v[7] + v[8]) / 4;

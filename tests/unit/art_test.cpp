@@ -61,6 +61,23 @@ int main() {
             "adaptation is geometric (log domain)");
         check(std::abs(adapt_luminance(.1F, .4F, 1) - .4F) < .00001F,
             "full adaptation reaches the measurement");
+        // Local contrast: a fogged neighborhood (deviation 0.04) gets a gain of
+        // 0.12 / 0.04 = 3, a contrasty one 1; the gain is limited, and
+        // strength scales it toward 1. The rank is the share of samples below,
+        // ties counting half.
+        check(std::abs(local_contrast_gain(.04F, 1) - 3) < .0001F, "fog gets a gain");
+        check(local_contrast_gain(.2F, 1) == 1, "a contrasty neighborhood keeps its thresholds");
+        check(local_contrast_gain(0, 1) == local_contrast_max_gain, "the gain is limited");
+        check(std::abs(local_contrast_gain(.04F, .5F) - 2) < .0001F, "strength scales the gain");
+        check(local_contrast_gain(.04F, 0) == 1, "strength zero is neutral");
+        {
+            const std::array<float, 4> samples{.30F, .31F, .32F, .33F};
+            check(local_rank(.29F, samples) == 0 && local_rank(.34F, samples) == 1,
+                "the darkest and lightest cells take the ends");
+            check(local_rank(.315F, samples) == .5F && local_rank(.31F, samples) == .375F,
+                "a narrow band spans the range; ties count half");
+            check(local_rank(.5F, std::span<const float>{}) == .5F, "no samples: the middle");
+        }
         const auto parsed = parse_settings(
             "render_style=illustrated\nfill_enabled=false\ncontour_overlay="
             "false\ntone_exposure=1.4\ntone_"
@@ -69,14 +86,15 @@ int main() {
             "shape_matching=true\nshape_threshold=0.17\nscene_paper=0.65\n"
             "saturation=1.6\nglow=0.3\npaper_wash=true\nstability=0.7\ncrisp_glyphs=true\n"
             "edge_detector=dog\ndog_sigma=1.4\ndog_threshold=0.03\nedge_votes=0.25\n"
-            "auto_exposure=0.6\nanchor_grid=true\n");
+            "auto_exposure=0.6\nanchor_grid=true\nlocal_contrast=0.45\n");
         check(!parsed.warnings && parsed.value.art.illustrated && !parsed.value.art.fill &&
                   !parsed.value.art.contour_overlay && parsed.value.art.saturation == 1.6F &&
                   parsed.value.art.glow == .3F && parsed.value.art.paper_wash &&
                   parsed.value.art.stability == .7F && parsed.value.art.crisp &&
                   parsed.value.art.dog_edges && parsed.value.art.dog_sigma == 1.4F &&
                   parsed.value.art.dog_threshold == .03F && parsed.value.art.edge_votes == .25F &&
-                  parsed.value.art.auto_exposure == .6F && parsed.value.art.anchor_grid,
+                  parsed.value.art.auto_exposure == .6F && parsed.value.art.anchor_grid &&
+                  parsed.value.art.local_contrast == .45F,
             "illustration config");
         check(art_parameters(parsed.value)[16] == 1.6F && art_parameters(parsed.value)[17] == .3F &&
                   art_parameters(parsed.value)[18] == 7 &&
@@ -86,19 +104,24 @@ int main() {
                   art_parameters(parsed.value)[art_stability] == .7F,
             "saturation, glow and paper wash reach the shared shader parameters");
         {
-            // Eight vec4s: slot 24 auto exposure, 25 the renderer's adaptation
-            // rate (1 until it sets one), 26 the anchored grid, 27 its camera
-            // history (0 until the renderer sets it); 23 and 28 onward zero.
+            // Eight vec4s: slot 23 local contrast, 24 auto exposure, 25 the
+            // renderer's adaptation rate (1 until it sets one), 26 the anchored
+            // grid, 27 its camera history (0 until the renderer sets it); 28
+            // onward zero.
             const auto values = art_parameters(parsed.value);
             check(values.size() == 4 * art_vectors && art_vectors == 8,
                 "art parameters fill eight vec4s");
+            check(values[art_local_contrast] == .45F,
+                "local contrast reaches the shader parameters");
+            check(art_parameters(Settings{})[art_local_contrast] == 0,
+                "local contrast is off by default");
             check(values[art_auto_exposure] == .6F && values[art_adaptation] == 1,
                 "auto exposure reaches the shader parameters");
             check(values[art_anchor] == 1 && values[art_anchor_history] == 0,
                 "the anchored grid reaches the shader parameters");
             check(art_parameters(Settings{})[art_anchor] == 0,
                 "the grid is screen-fixed by default");
-            bool zero = values[23] == 0;
+            bool zero = true;
             for (std::size_t i = 28; i < values.size(); ++i)
                 zero &= values[i] == 0;
             check(zero, "unused art parameter slots are zero");
@@ -123,6 +146,9 @@ int main() {
                  "auto_exposure=1.5",
                  "auto_exposure=-0.1",
                  "auto_exposure=nan",
+                 "local_contrast=1.5",
+                 "local_contrast=-0.1",
+                 "local_contrast=nan",
                  "anchor_grid=maybe",
                  "glow=-0.1",
                  "paper_wash=bad",
