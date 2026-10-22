@@ -25,6 +25,7 @@
 #include "../../src/display/win32/tracker.hpp"
 #include "../../src/render/vulkan/owned.hpp"
 #include "../../src/render/vulkan/win32_import.hpp"
+#include "background_win32.hpp"
 #include "daemon.hpp"
 #include "options.hpp"
 
@@ -239,7 +240,8 @@ int autostart(const Options& options) {
         return 0;
     }
     const auto path = glyphshift::platform::executable_path().u8string();
-    std::vector<std::string> command{std::string(path.begin(), path.end())};
+    std::vector<std::string> command{
+        glyphshift::overlay::background_program(std::string(path.begin(), path.end()))};
     if (!options.hotkey.empty()) {
         win32::GlobalHotkey::check(options.hotkey);
         command.insert(command.end(), {"--hotkey", options.hotkey});

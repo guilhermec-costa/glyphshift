@@ -1,0 +1,27 @@
+# Writes the Start menu shortcut at install time, to the installed
+# GlyphShift.exe (`cmake --install --prefix` can differ from the configured
+# prefix), in the user's Start menu. GLYPHSHIFT_SHORTCUT_DIR (environment)
+# names another directory (tests); "none" skips the shortcut.
+set(directory "$ENV{GLYPHSHIFT_SHORTCUT_DIR}")
+if(directory STREQUAL "none")
+    return()
+endif()
+if(NOT directory)
+    set(directory "$ENV{APPDATA}/Microsoft/Windows/Start Menu/Programs")
+endif()
+file(MAKE_DIRECTORY "${directory}")
+file(TO_NATIVE_PATH "${CMAKE_INSTALL_PREFIX}/GlyphShift.exe" program)
+file(TO_NATIVE_PATH "${CMAKE_INSTALL_PREFIX}" folder)
+file(TO_NATIVE_PATH "${directory}/GlyphShift.lnk" link)
+# PowerShell single-quoted strings: a quote is written twice.
+foreach(name program folder link)
+    string(REPLACE "'" "''" ${name} "${${name}}")
+endforeach()
+execute_process(COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command
+    "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut('${link}'); $shortcut.TargetPath = '${program}'; $shortcut.WorkingDirectory = '${folder}'; $shortcut.Description = 'Turn games into live glyph art'; $shortcut.Save()"
+    RESULT_VARIABLE result)
+if(result EQUAL 0)
+    message(STATUS "Installing: ${link}")
+else()
+    message(WARNING "Could not write the Start menu shortcut ${link}")
+endif()

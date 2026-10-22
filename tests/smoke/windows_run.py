@@ -597,7 +597,8 @@ def tray_phase():
         eventually(run_entry, 'Start at login wrote no Run value: ' + text())
         assert run_entry().endswith('--hotkey ctrl+alt+shift+F12 --preset art-comic'), run_entry()
         program = run_entry().rsplit(' --hotkey', 1)[0].strip('"')
-        assert program == str(build / 'glyphshift-overlay.exe'), run_entry()
+        # The launcher, so no console window opens at sign-in.
+        assert program == str(build / 'GlyphShift.exe'), run_entry()
         menu = open_menu()
         win32.key(tray, win32.VK_ESCAPE)
         closed(menu)

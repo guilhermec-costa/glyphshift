@@ -15,6 +15,7 @@
 
 #include "../../src/display/win32/global_hotkey.hpp"
 #include "../../src/display/win32/tray.hpp"
+#include "background_win32.hpp"
 #include "daemon.hpp"
 #include "options.hpp"
 
@@ -163,7 +164,8 @@ int run_daemon(const DaemonOptions& options) {
                 if (platform::autostart_enabled()) {
                     platform::disable_autostart();
                 } else {
-                    std::vector<std::string> command{program};
+                    // The launcher, so no console window opens at sign-in.
+                    std::vector<std::string> command{background_program(program)};
                     if (current.hotkey != DaemonOptions{}.hotkey)
                         command.insert(command.end(), {"--hotkey", current.hotkey});
                     if (!current.preset.empty())

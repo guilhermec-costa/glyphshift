@@ -156,6 +156,19 @@ detaches games, picks the style for the next attachment, turns start at
 sign-in on or off and quits; `--autostart on` does the same from the command
 line.
 
+To use it as an application, install it for your user (no administrator
+rights needed):
+
+```powershell
+cmake --install build/windows-release --prefix "$env:LOCALAPPDATA\Programs\GlyphShift"
+```
+
+This adds **GlyphShift** to the Start menu. It starts in the background
+without a console window, says so in a notification and shows its icon in the
+notification area (it may be under the **^** arrow of the taskbar); start at
+sign-in uses the same program. To remove it, quit GlyphShift, turn start at
+sign-in off, and delete that folder and the Start menu shortcut.
+
 To install for your user, with a menu entry and icon:
 
 ```bash

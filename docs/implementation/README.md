@@ -4827,6 +4827,60 @@ passed. Not verified: the focused drivers with real input after the fix
 noted that distant detail is lost in 3D scenes; recorded as a candidate goal
 after M7, not started.
 
+**Step 7, part 11: GlyphShift as a Windows application (2026-10-22).** At the
+user's request ("open it as an app, not from the terminal"), the counterpart
+of M6 step 5's packaging:
+
+- `GlyphShift.exe` (`apps/overlay/launcher_win32.cpp`, GUI subsystem): starts
+  `glyphshift-overlay.exe` from its own directory with the same arguments and
+  `CREATE_NO_WINDOW`, then exits; a failure to start it is shown in a message
+  box. Windows gives a console program launched from Explorer or the Start
+  menu a console window (with Windows Terminal as the default terminal, a
+  terminal window); the launcher avoids it. `glyphshift-overlay.exe` is
+  unchanged for terminal use.
+- Start at sign-in (the icon's menu and `--autostart on`) now writes the
+  `Run` value for `GlyphShift.exe` when it sits next to the overlay
+  (`apps/overlay/background_win32.hpp`), else for the overlay as before.
+- Resources (`apps/overlay/glyphshift.rc.in`, both programs): the application
+  icon and version information, whose description "GlyphShift" names the
+  application in notifications (before: "glyphshift-overlay.exe"). The icon,
+  `data/glyphshift.ico`, is written by `tools/windows_icon.py` from
+  `data/glyphshift.svg` (its rounded rectangles, solid fills and per-shape
+  diagonal gradient rasterized with 4×4 supersampling; PNG images of 16–256
+  px in the ICO); the notification-area icon now loads it, and falls back to
+  the drawn one. The MSVC warning and conformance options are now C++-only,
+  since the resource compiler takes none of them.
+- Installation (`cmake --install`, Windows): both programs, the DLLs vcpkg
+  copies next to them, the license notices under `licenses/`, and a Start
+  menu shortcut `GlyphShift.lnk` to the installed launcher, written by
+  `cmake/install_shortcut.cmake.in` through PowerShell's `WScript.Shell`
+  (`GLYPHSHIFT_SHORTCUT_DIR` names another directory, `none` skips it). For
+  one user: `--prefix "$env:LOCALAPPDATA\Programs\GlyphShift"`. There is no
+  uninstall step; the README says what to delete.
+
+Tests: the new CTest `install` on Windows (`tests/unit/install_windows_test.py`,
+the counterpart of the Linux `install` test) installs into a temporary prefix
+with a space, with the shortcut in a temporary directory, and checks the two
+programs, FreeType's DLL (`freetyped.dll` in Debug), both license notices, an
+icon resource and the "GlyphShift" description in both programs, the
+shortcut's target; that the installed overlay loads and rejects bad arguments
+with usage; that `--autostart on` writes a test-only `Run` value naming the
+installed `GlyphShift.exe` and `off` removes it; and that the installed
+launcher returns at once, starts the background overlay (its daemon window
+found by hotkey), opens no console or terminal window, and that the daemon
+stops with its stop event. The smoke's tray phase now expects `GlyphShift.exe`
+in the `Run` value.
+
+Verification: both Windows presets built without warnings and passed 13/13
+CTest tests and every smoke phase; the format check passed. Two earlier full
+runs in this step failed: the Debug `install` test on the DLL name (fixed),
+and screen and z-order checks of the tracking and editor phases while the
+user was using the desktop (a video playing in a browser, windows changing);
+those phases passed when rerun alone and in the final full run. The user's
+own build was installed with that command; the Start menu shortcut was
+created. Not verified: starting from the Start menu by a click, and start at
+sign-in by Windows itself.
+
 ## Definition of MVP done
 
 The target workflow is:

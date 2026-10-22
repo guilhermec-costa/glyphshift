@@ -101,7 +101,17 @@ struct Tray::State {
     void add() {
         if (icon)
             DestroyIcon(icon);
-        icon = make_icon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(window)));
+        // The program's application icon (resource 1) at this size, else the
+        // same design drawn here.
+        const int size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(window));
+        icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
+            MAKEINTRESOURCEW(1),
+            IMAGE_ICON,
+            size,
+            size,
+            LR_DEFAULTCOLOR));
+        if (!icon)
+            icon = make_icon(size);
         auto icon_data = data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
         icon_data.uCallbackMessage = callback;
         icon_data.hIcon = icon;

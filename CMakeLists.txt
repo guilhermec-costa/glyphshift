@@ -22,8 +22,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_definitions(IMGUI_USE_WCHAR32)
 set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 if(MSVC)
-    # Sources are UTF-8; the Windows API is used in its UTF-16 form.
-    add_compile_options(/W4 /utf-8 /permissive- /Zc:__cplusplus)
+    # Sources are UTF-8; the Windows API is used in its UTF-16 form. C++ only:
+    # the resource compiler takes none of these.
+    foreach(option /W4 /utf-8 /permissive- /Zc:__cplusplus)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:${option}>)
+    endforeach()
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
     # The 8 MB main-thread stack Linux gives: a character atlas (about 570 KB)
     # is built on the stack, beyond Windows's default 1 MB with its callers.
@@ -251,12 +254,22 @@ else()
         src/display/win32/tray.cpp)
     target_link_libraries(glyphshift_win32_overlay PUBLIC user32 glyphshift_editor PRIVATE d3d11
         dxgi dwmapi windowsapp shell32 gdi32)
+    # The programs' resources: the application icon (data/glyphshift.ico,
+    # written by tools/windows_icon.py) and version information.
+    enable_language(RC)
+    configure_file(apps/overlay/glyphshift.rc.in "${CMAKE_CURRENT_BINARY_DIR}/glyphshift.rc" @ONLY)
     # The capture overlay: the Win32 window system, the Windows platform layer
     # and the Vulkan renderer.
     add_executable(glyphshift-overlay apps/overlay/main_win32.cpp apps/overlay/daemon_win32.cpp
-        apps/overlay/options.cpp)
+        apps/overlay/options.cpp "${CMAKE_CURRENT_BINARY_DIR}/glyphshift.rc")
     target_link_libraries(glyphshift-overlay PRIVATE glyphshift_vk_owned glyphshift_platform
         glyphshift_win32_overlay)
+    # GlyphShift.exe, what the Start menu and start at sign-in run: starts the
+    # overlay's background mode without a console window.
+    add_executable(GlyphShift WIN32 apps/overlay/launcher_win32.cpp
+        "${CMAKE_CURRENT_BINARY_DIR}/glyphshift.rc")
+    target_link_libraries(GlyphShift PRIVATE user32)
+    add_dependencies(glyphshift-overlay GlyphShift)
 endif()
 
 # Compile the very same gradient source for the two APIs. Files are read at
@@ -413,6 +426,11 @@ if(BUILD_TESTING)
         add_executable(glyphshift-win32-keys-tests tests/unit/win32_keys_test.cpp)
         target_link_libraries(glyphshift-win32-keys-tests PRIVATE glyphshift_editor)
         add_test(NAME win32-keys COMMAND glyphshift-win32-keys-tests)
+        # Installs into a temporary prefix and starts the installed launcher.
+        add_test(NAME install COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/install_windows_test.py"
+            "${CMAKE_COMMAND}" "${CMAKE_BINARY_DIR}")
+        set_tests_properties(install PROPERTIES RUN_SERIAL TRUE)
         target_link_libraries(glyphshift-presets-tests PRIVATE advapi32 shell32 ole32)
         # MSVC Debug gives each character atlas these tests build (about
         # 570 KB) its own stack slot in main.
@@ -494,6 +512,22 @@ install(FILES third_party/imgui/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR
     RENAME LICENSE.imgui.txt)
 
 endif()  # GLYPHSHIFT_LINUX
+
+if(GLYPHSHIFT_WINDOWS)
+# Installation, Windows: GlyphShift.exe and glyphshift-overlay.exe with the
+# DLLs vcpkg copied next to them, the license notices, and a Start menu
+# shortcut to GlyphShift.exe. For one user, without administrator rights:
+# cmake --install build/windows-release --prefix "$env:LOCALAPPDATA/Programs/GlyphShift"
+install(TARGETS GlyphShift glyphshift-overlay RUNTIME DESTINATION .)
+install(CODE "
+    file(GLOB dlls \"${CMAKE_BINARY_DIR}/*.dll\")
+    file(INSTALL \${dlls} DESTINATION \"\${CMAKE_INSTALL_PREFIX}\")")
+install(FILES LICENSE DESTINATION licenses)
+install(FILES third_party/imgui/LICENSE.txt DESTINATION licenses RENAME LICENSE.imgui.txt)
+configure_file(cmake/install_shortcut.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/install_shortcut.cmake"
+    @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_shortcut.cmake")
+endif()  # GLYPHSHIFT_WINDOWS
 
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
