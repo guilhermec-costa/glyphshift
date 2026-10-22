@@ -4777,6 +4777,56 @@ changed input module. Not verified: an offline Steam game (next), SuperTux
 in borderless fullscreen, and latency and GPU cost (the overlay on Windows
 has no GPU timing yet).
 
+**Step 7, part 10: ELDEN RING, and the overlay topmost while the game is in
+front (2026-10-21).** For the second real game the test plan proposed an
+offline Steam game without anti-cheat. The user chose ELDEN RING, which ships
+with Easy Anti-Cheat, reasoning that the capture overlay never enters the game
+process (Windows.Graphics.Capture and a separate window; no injection, no
+hooks), unlike the Linux launcher. Decided by the user on 2026-10-21 for the
+capture overlay only, played offline; the exclusions of the injected mode and
+of online play are unchanged.
+
+- `overlay_game_win32.py` gained `--running EXE`: it attaches to a game the
+  user started and left in front (windowed or borderless), and neither
+  resizes nor closes it; it detaches at the end and the game keeps running.
+  `--hold-key` names the input that must reach the game: a letter, Right, or
+  `Mouse`, a relative pointer motion that turns a 3D camera
+  (`RealInput.turn`). The game's reaction is now measured on a 32×18 grid of
+  mean brightness (more than 6 levels counts as changed), since counting
+  pixels that change by more than 40 levels missed a camera turn in a dark
+  scene full of embers; it must exceed 30% and three times the idle change.
+  On a failed editor check the driver saves the screen and prints the
+  foreground window, the overlay window's state and the top of the z-order.
+  `win32.py` gained `processes(exe)`, `main_window(pid)` and `window_title`.
+- Runs on ELDEN RING (Direct3D 12, borderless 1920×1080, offline): Ctrl+Alt+G
+  attached and the whole screen became glyphs only (0.000% neither black nor
+  white, from about 94–99% unattached). Holding L (the camera key on default
+  bindings) did not turn the camera (9% against 18% idle); the pointer motion
+  did, by 55–83% against 12–20% idle, with the compass moving from N to E/S.
+  Insert opened the editor over the game and the overlay took the foreground.
+  Escape closed the editor (the game's menu did not open), but the screen
+  then showed the game unchanged for 15 s: the dump showed the overlay alive
+  and visible but below ELDEN RING, the foreground, in the z-order.
+- The fix (`overlay_window.cpp`): while the target or the open editor is the
+  foreground window, the overlay is placed in the topmost band, as the M7
+  description asks ("a topmost, click-through window"); otherwise it stays
+  directly above the target in the target's band, as part 3 did, so another
+  application in front still covers both. The likely cause is that the game
+  raises its own window when it gets the foreground back, beating the
+  overlay's restacking at its level; that cause was inferred, not traced.
+- With the fix, the user ran the overlay on ELDEN RING by hand: the effect
+  stayed on top after opening and closing the editor, and Ctrl+Alt+G
+  detached and attached again ("funcionou perfeito"). A capture the user
+  shared showed the scene in green glyphs.
+
+Verification: both Windows presets built without warnings and passed 12/12
+CTest tests and every smoke phase (tracking included); the format check
+passed. Not verified: the focused drivers with real input after the fix
+(`overlay_game_win32.py` on SuperTux and on ELDEN RING, `overlay_daemon_win32.py`,
+`editor_apps_win32.py`); they were not rerun before this commit. The user
+noted that distant detail is lost in 3D scenes; recorded as a candidate goal
+after M7, not started.
+
 ## Definition of MVP done
 
 The target workflow is:

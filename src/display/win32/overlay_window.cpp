@@ -52,6 +52,13 @@ OverlayWindow::~OverlayWindow() {
         DestroyWindow(window_);
 }
 
+bool OverlayWindow::above(HWND target) const {
+    for (HWND above = GetWindow(target, GW_HWNDPREV); above; above = GetWindow(above, GW_HWNDPREV))
+        if (above == window_)
+            return true;
+    return false;
+}
+
 bool OverlayWindow::directly_above(HWND target) const {
     // The nearest visible window above the target must be the overlay.
     for (HWND above = GetWindow(target, GW_HWNDPREV); above; above = GetWindow(above, GW_HWNDPREV))
@@ -65,11 +72,33 @@ bool OverlayWindow::show(const RECT& area, HWND target) {
     const bool was_hidden = !IsWindowVisible(window_);
     const bool moved = area.left != area_.left || area.top != area_.top ||
                        area.right != area_.right || area.bottom != area_.bottom;
-    if (was_hidden || !directly_above(target)) {
+    const bool topmost_now = (GetWindowLongPtrW(window_, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    const HWND foreground = GetForegroundWindow();
+    if (foreground == target || foreground == window_) {
+        // The game (or the open editor) in front: the overlay joins the
+        // topmost band. Fullscreen games raise their own window when they get
+        // the foreground back and would cover an overlay of their band.
+        if (was_hidden || !topmost_now || !above(target))
+            SetWindowPos(window_,
+                HWND_TOPMOST,
+                area.left,
+                area.top,
+                area.right - area.left,
+                area.bottom - area.top,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        else if (moved)
+            SetWindowPos(window_,
+                nullptr,
+                area.left,
+                area.top,
+                area.right - area.left,
+                area.bottom - area.top,
+                SWP_NOACTIVATE | SWP_NOZORDER);
+    } else if (was_hidden || !directly_above(target)) {
         // Into the target's band (topmost or not), then directly above it:
         // windows above the target stay above the overlay.
         const bool topmost = GetWindowLongPtrW(target, GWL_EXSTYLE) & WS_EX_TOPMOST;
-        if (topmost != ((GetWindowLongPtrW(window_, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0))
+        if (topmost != topmost_now)
             SetWindowPos(window_,
                 topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
                 0,

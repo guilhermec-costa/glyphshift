@@ -161,6 +161,18 @@ class RealInput:
         finally:
             self.key_up(virtual)
 
+    def turn(self, dx, seconds):
+        """Relative mouse motion of `dx` per 20 ms for a while, as a player
+        turning the camera in a 3D game."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.guard()
+            event = _mouse_event(MOUSEEVENTF_MOVE)
+            event.union.mi.dx = dx
+            _send(event)
+            time.sleep(.02)
+        time.sleep(.12)
+
     def text(self, text):
         """Types characters through their keys in the current layout."""
         for character in text:

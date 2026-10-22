@@ -434,3 +434,39 @@ def children(pid):
         more = kernel32.Process32NextW(snapshot, c.byref(entry))
     kernel32.CloseHandle(snapshot)
     return found
+
+
+def processes(executable):
+    """Ids of running processes whose executable file name is `executable`
+    (case-insensitive)."""
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    found = []
+    entry = ProcessEntry(c.sizeof(ProcessEntry))
+    more = kernel32.Process32FirstW(snapshot, c.byref(entry))
+    while more:
+        if entry.szExeFile.lower() == executable.lower():
+            found.append(entry.th32ProcessID)
+        more = kernel32.Process32NextW(snapshot, c.byref(entry))
+    kernel32.CloseHandle(snapshot)
+    return found
+
+
+def main_window(pid):
+    """The largest visible, titled top-level window of a process, or None."""
+    found = []
+
+    def visit(window, _):
+        if process_of(window) == pid and user32.IsWindowVisible(window) and \
+                user32.GetWindowTextLengthW(window):
+            width, height = client_size(window)
+            found.append((width * height, window))
+        return True
+    user32.EnumWindows(WNDENUMPROC(visit), 0)
+    return max(found)[1] if found else None
+
+
+def window_title(window):
+    length = user32.GetWindowTextLengthW(window)
+    buffer = c.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(window, buffer, length + 1)
+    return buffer.value
