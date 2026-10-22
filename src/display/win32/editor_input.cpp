@@ -220,8 +220,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
             }
             break;
         case WM_ACTIVATE:
-            if (LOWORD(w) == WA_INACTIVE && session->interactive && !session->no_focus)
+            if (LOWORD(w) == WA_INACTIVE && session->interactive && !session->no_focus) {
                 session->deactivated = true;
+                // Releases now reach the window that took the foreground (the
+                // Alt of an Alt+Tab, for example): keys and buttons the editor
+                // still counts as held would keep the overlay taking input over
+                // the game.
+                session->keys.fill(false);
+                session->buttons = 0;
+            }
             break;
         default:
             break;
@@ -267,6 +274,9 @@ void sync(void* display, std::uint64_t window, bool& open) {
         if (!session.no_focus && GetForegroundWindow() != session.overlay) {
             open = false;
             editor::input(display, window, {Kind::focus_lost});
+            // Their releases go to the new foreground window.
+            session.keys.fill(false);
+            session.buttons = 0;
         }
     }
     // Keep input until the editor's own keys and buttons are released, so an

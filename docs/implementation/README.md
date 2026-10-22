@@ -5046,6 +5046,29 @@ own build was installed with that command; the Start menu shortcut was
 created. Not verified: starting from the Start menu by a click, and start at
 sign-in by Windows itself.
 
+**Step 7, part 12: Alt+Tab with the editor open (2026-10-22).** Found by the
+user on ELDEN RING: after opening the editor, switching to another
+application with Alt+Tab, coming back and closing the editor, the game no
+longer got the mouse; with the effect turned off (the overlay hidden) it did.
+The editor keeps the overlay taking input until the keys and buttons it saw
+pressed are released, so the Escape or click that closed it does not reach the
+game. The Alt of Alt+Tab was pressed while the overlay had the foreground, but
+its release went to the window that took the foreground, so the overlay
+counted Alt as held forever and stayed opaque to input over the game. Losing
+the foreground (`WM_ACTIVATE` inactive, and the per-frame foreground check)
+now forgets the held keys and buttons; their releases belong to the new
+foreground window.
+
+`editor_apps_win32.py` gained the case: with the editor open, Alt is pressed,
+the foreground moves to the test's sentinel window, Alt is released there, and
+back on the fixture the closed editor must be input-transparent with the
+fixture under the pointer; then the editor reopens. On the build before the
+fix it failed ("after Alt+Tab the closed editor still takes input over the
+game"); with the fix the whole driver passed (Release, with the user's
+permission). Both presets built, 12/12 CTest tests each, the format check and
+the smoke's editor phase passed. `overlay_daemon_win32.py` was not run (the
+user's own daemon was running; this change does not touch the daemon).
+
 ## Definition of MVP done
 
 The target workflow is:

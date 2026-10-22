@@ -19,7 +19,7 @@ import sys
 import time
 
 import win32
-from real_input_win32 import VK_LCONTROL, RealInput, foreground
+from real_input_win32 import VK_LCONTROL, VK_LMENU, RealInput, foreground
 
 VK_INSERT, VK_F10, VK_ESCAPE, VK_RETURN = 0x2D, 0x79, 0x1B, 0x0D
 
@@ -247,6 +247,23 @@ try:
     control.activate(window)
     control.key(VK_INSERT)
     capture('focus-restored-opened', True)
+    # Alt+Tab away from the open editor: the editor sees Alt pressed, but its
+    # release goes to the window that took the foreground. Back on the game,
+    # the closed editor must give the input back (input-transparent, the game
+    # under the pointer), not wait forever for that release.
+    control.key_down(VK_LMENU)
+    control.activate(control.sentinel())
+    control.key_up(VK_LMENU)
+    control.pump()
+    capture('alt-tab-closed', False)
+    control.activate(window)
+    center = win32.client_origin(window)
+    center = (center[0] + 400, center[1] + 300)
+    eventually(lambda: win32.extended_style(layer) & win32.WS_EX_TRANSPARENT and
+               win32.window_at(*center) == window,
+               'after Alt+Tab the closed editor still takes input over the game')
+    control.key(VK_INSERT)
+    capture('alt-tab-reopened', True)
     click(344, 18)  # The panel's close button.
     capture('title-close', False)
     eventually(lambda: foreground() == window, 'the close button did not return the foreground')
