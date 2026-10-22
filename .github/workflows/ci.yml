@@ -1,8 +1,16 @@
 name: CI
 
 on:
+  # Documentation-only changes (Markdown anywhere, docs/ with its images) do
+  # not build; a change that also touches anything else runs as usual.
   push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   # Run by hand (Actions → CI → Run workflow) to include the graphics job.
   workflow_dispatch:
 

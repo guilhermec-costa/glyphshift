@@ -4065,7 +4065,12 @@ Still to do, when the user decides: confirm the workflow passes on GitHub,
 make the repository public and tag `v0.1.0` with release notes. Publishing to
 the AUR (filling the PKGBUILD's checksum from the tag's tarball) is not a
 current goal. Since 2026-10-18 the CI's graphics job runs only when started by
-hand.
+hand. Since 2026-10-22, at the user's request, pushes and pull requests that
+change only documentation (Markdown files anywhere and `docs/`, its images
+included) do not start the CI (`paths-ignore`); a change touching any other
+file runs it as before. If the `build` check is ever made required by branch
+protection, a documentation-only pull request would wait on a check that
+never runs.
 
 ### Later — Broader Linux support
 
