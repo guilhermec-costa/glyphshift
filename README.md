@@ -2,16 +2,56 @@
 
 > Give your games a character of their own.
 
-GlyphShift turns offline games and graphics applications into live ASCII and
-glyph art on Linux. Mix characters, solid blocks and directional contours,
-choose your palette, and shape the result while the application is running.
-An in-game editor lets you experiment and save a different style for each game.
+GlyphShift redraws a running game, live, as art made of type. Every frame
+becomes characters, blocks and pen strokes, each chosen for the shape it has
+to draw, in ink and paper colors you direct from an editor on top of the game.
+Press one key over a game that is already running; nothing is installed into
+it, and each game keeps its own style.
 
 ![SuperTux's title screen, then GlyphShift attached on top of it, switching between the Comic, Newsprint and Blueprint styles](docs/demo.webp)
 
 *Native SuperTux running on its own; the capture overlay is attached to its
 window and switches styles live (Comic, Newsprint, Blueprint). Recorded with
 `tools/record_demo.py`.*
+
+## Why it is not another ASCII filter
+
+ASCII effects usually come in two kinds: post-processing shaders loaded into
+the game, such as the ASCII effect of shader collections for
+[ReShade](https://reshade.me/), and converters that turn images or video into
+text. GlyphShift takes neither route.
+
+| | ASCII shaders loaded into the game (ReShade and similar) | GlyphShift |
+| --- | --- | --- |
+| How it reaches the game | A DLL placed next to the game hooks its graphics API inside the game's process. | **Capture overlay:** reads the finished window like a screen recorder (Windows.Graphics.Capture, X Composite) and draws in its own click-through window. Nothing is loaded into the game. |
+| Graphics APIs | One hook per API, set up per game. | Independent of the game's API: whatever the desktop composes is captured the same way (tested so far with OpenGL, Vulkan, Direct3D 12, and DXVK under Proton). |
+| Attaching | Installed before the game starts. | A hotkey over a game that is already running; another press detaches it. |
+| Characters | A short built-in brightness ramp. | Real glyphs rasterized from any installed TTF/OTF font: ASCII, blocks, Braille or up to 256 Unicode characters of your choice, each kept at its typographic place. |
+| Which character goes where | By brightness. | By shape: each cell's 4×4 light/dark layout is matched against the font's glyphs, and real outlines become `/ \ \| _ -` strokes, so silhouettes survive. |
+| Color | Usually monochrome or the scene's color. | Art direction: scene-colored ink on dark or light paper, a watercolor wash, glow and ink bleed, nine ready styles. |
+| Motion | Glyphs flicker as noise and light change. | Temporal stability keeps a cell's glyph while it still fits; an optional grid anchored to the world travels with a scrolling camera. |
+| Editing | Configuration files or the injected menu. | An editor over the game (Insert), saved per game; F10 compares with the original. |
+
+Because the game never runs GlyphShift's code, it does not depend on the
+game's renderer, survives game updates, and leaves the game untouched when you
+detach. The cost of capturing is about one display refresh of latency
+(measured on Linux); on Linux, launching through `glyphshift` instead renders
+inside the game for the lowest latency.
+
+## Where it runs
+
+| Platform | Mode | Status |
+| --- | --- | --- |
+| Linux, X11 | Capture overlay with hotkey, tray icon and per-game styles | Working; tested on native SuperTux and on Windows SuperTux through Proton |
+| Linux, X11 | Launcher rendering inside OpenGL and Vulkan games (lowest latency) | Working; tested on native fixtures, glxgears, vkcube, SuperTux, and SuperTux through Proton/DXVK |
+| Windows 11 | Capture overlay with hotkey, notification-area icon and per-game styles | In progress, working: tested on SuperTux 0.7.0 and on ELDEN RING (Direct3D 12, offline) |
+| Linux, Wayland | Capture overlay | Planned |
+| macOS | Capture overlay | Possible later |
+
+Games must run windowed or borderless; exclusive fullscreen and HDR are not
+supported. GlyphShift is made for offline and single-player play: it does not
+modify games, and online play is outside what it is designed and tested for.
+Verified hardware so far is NVIDIA; see [Compatibility](#compatibility).
 
 ![SuperTux drawn as scene-colored ASCII ink on a paper wash](docs/shape-color.png)
 
@@ -94,8 +134,8 @@ For an optimized build, use `cmake --preset release` followed by
 `cmake --build --preset release`; executables will be in `build/release`.
 Builds use the vendored Dear ImGui sources and do not download dependencies.
 
-**Windows (in progress).** The Windows capture overlay is being built; for now
-the shared parts compile and their tests run. You need Visual Studio 2022 with
+**Windows (in progress).** The capture overlay works on Windows 11 and is
+still being validated; there is no installer yet. You need Visual Studio 2022 with
 C++ (MSVC and the Windows SDK), CMake 3.20+, Python 3, Git, the
 [Vulkan SDK](https://vulkan.lunarg.com/) and FreeType from
 [vcpkg](https://vcpkg.io/) (`vcpkg install freetype:x64-windows`, with
@@ -108,10 +148,13 @@ ctest --preset windows-dev
 ```
 
 The Windows overlay works like the Linux one: run
-`build\windows-dev\glyphshift-overlay` (optionally `--preset art-comic`), switch
-to the game and press **Ctrl+Alt+G** to attach or detach; Insert opens the
-editor and F10 toggles the effect. `--autostart on` starts it at sign-in.
-The notification-area icon is not there yet.
+`build\windows-release\glyphshift-overlay` (optionally `--preset art-comic`;
+use the `windows-release` preset for an optimized build), switch to the game,
+windowed or borderless, and press **Ctrl+Alt+G** to attach or detach; Insert
+opens the editor and F10 toggles the effect. Its notification-area icon
+detaches games, picks the style for the next attachment, turns start at
+sign-in on or off and quits; `--autostart on` does the same from the command
+line.
 
 To install for your user, with a menu entry and icon:
 
@@ -162,12 +205,13 @@ characters easier to recognize; 4×4 cells cannot preserve every letter's shape.
 Use **Characters and font** to change the fill set, then **Apply characters**.
 Use **Save preset** to retain your applied settings.
 
-## Overlay mode (preview)
+## Overlay mode
 
 Start the game normally, from Steam or anywhere, and put GlyphShift on top of
 its window instead of launching the game through it. The overlay reads the
 window's image on the GPU and draws the effect in its own click-through window;
-nothing is injected into the game. X11 only for now.
+nothing is injected into the game. This section describes Linux (X11); the
+Windows overlay works the same way, see [Build from source](#build-from-source).
 
 ```bash
 ./build/dev/glyphshift-overlay --preset art-comic
@@ -277,10 +321,14 @@ Mesa llvmpipe GLX was also tested. AMD/Intel hardware, Mesa Vulkan and arbitrary
 Proton games are not established by those results.
 
 Native Wayland input, EGL, Steam integration, exclusive fullscreen and HDR are
-not currently supported. A Windows version of the capture overlay is the next
-planned milestone, before Wayland; see the
+not currently supported. The Windows capture overlay is in progress (working
+on SuperTux and ELDEN RING, offline, on NVIDIA), before Wayland; see the
 [roadmap](docs/implementation/README.md#roadmap). The tool is intended for **offline games and local
-graphics applications**; online games and anti-cheat are outside its scope.
+graphics applications**. Online play is outside its scope, and GlyphShift
+never works around anti-cheat: the capture overlay does not touch the game
+process at all (ELDEN RING, which ships with anti-cheat, was tested offline
+that way), while the Linux launcher, which renders inside the game, is meant
+only for games without anti-cheat.
 The launcher refuses privileged processes and targets. Full glyph rendering
 can lose fine HUD/text detail. Temporal stability calms flicker from noise and
 lighting. The world-anchored grid follows one dominant camera translation:
@@ -288,14 +336,14 @@ parallax layers, a static HUD and 3D camera motion still change glyphs.
 
 ## Architecture: built to be multi-platform
 
-GlyphShift runs on Linux with X11 today, but it is designed to stay independent
-of the operating system, the window system and the GPU API. These are three
+GlyphShift runs on Linux with X11 and, in progress, on Windows, and it is
+designed to stay independent of the operating system, the window system and the GPU API. These are three
 separate layers, each with its own implementations:
 
 | Layer | Today | Planned |
 | --- | --- | --- |
-| Platform (operating system) | Linux | Windows, later macOS |
-| Window system (capture, overlay, input) | X11 | Wayland, Win32, Cocoa |
+| Platform (operating system) | Linux, Windows (in progress) | later macOS |
+| Window system (capture, overlay, input) | X11, Win32 (in progress) | Wayland, Cocoa |
 | Renderer (GPU API) | OpenGL, Vulkan | reused through interop where possible |
 
 The art itself (settings, presets, characters, the glyph pipeline design and
