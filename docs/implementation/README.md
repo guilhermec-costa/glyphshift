@@ -81,6 +81,94 @@ the user requests it.
 7. **Wayland**, after M7. First check the current overlay under XWayland with
    X11 games (cheap, unverified); then add a Wayland window-system adapter
    (portal/PipeWire capture).
+8. **Detail at depth** (requested by the user on 2026-10-22, worked on
+   alongside M7's remaining steps; see
+   [Detail at depth](#detail-at-depth-requested-2026-10-22)): 3D scenes lose
+   their distant detail under the glyph effect.
+9. **Windows distribution** (requested on 2026-10-22, not started; see
+   [Windows distribution](#windows-distribution-requested-2026-10-22)):
+   downloadable builds for users who do not compile.
+
+### Detail at depth (requested 2026-10-22)
+
+Seen by the user on ELDEN RING under the Windows overlay: near objects read
+well, but the farther away, the more detail is lost. Hypotheses, to be
+measured before choosing a remedy:
+
+- The cell grid is fixed: a distant object covers few cells, and its detail
+  falls inside one glyph.
+- Distance lowers contrast: atmospheric fog flattens distant brightness and
+  color, so neighboring cells map to the same ramp level and the same glyph.
+- Dark scenes: the tone and exposure settings of a style may leave the dark
+  far field below the first ramp level.
+
+The game's depth buffer is not available to the capture overlay.
+Windows.Graphics.Capture (and X Composite on Linux) delivers only the finished
+color image of the window; the depth buffer lives in the game's GPU memory and
+is reachable only from inside the game's process, by hooking its graphics API
+as ReShade does. That is injection: the overlay's design rule ("nothing is
+loaded into the game") and the anti-cheat exclusions rule it out, on Windows
+in particular. The Linux launcher does run inside OpenGL and Vulkan games and
+could in principle read a depth attachment, but only for games without
+anti-cheat, and identifying the right depth buffer per game is unreliable.
+So the work starts from the color image alone. Candidate directions:
+
+- local contrast normalization before the ramp, so fogged distant regions keep
+  their internal structure;
+- adaptive cell size: smaller cells where the image has fine detail;
+- stronger contour weight in low-contrast regions;
+- an estimated depth (fog and contrast as a proxy, or a learned monocular
+  depth estimate, which costs GPU time and latency), only if the above fall
+  short.
+
+Method: ELDEN RING, left open by the user, is the reference target. Its
+frames are read from its window (`PrintWindow`, no input, no foreground) and
+rendered with `glyphshift-preview`, which the Windows smoke checks to give the
+overlay's exact pixels; a frame is fed about 40 times so automatic exposure
+and temporal stability settle as they do live. Near and far regions of the
+same frame are compared before and after each change. Attaching a real
+overlay in the no-focus mode and reading its window was tried first: while
+other windows covered the game, the overlay's window read back black, so the
+preview is the measuring tool.
+
+First measurement (2026-10-22), one 1920×1080 frame at a temple seen from
+below, with the user's own style (a copy of Digital rain: 6×6 cells, exposure
+4, contrast 0.54, automatic exposure 0.08; the far field looked like a flat
+green block):
+
+| Region | Source luminance, 5th–95th percentile | Mean local deviation in 48 px blocks | Output cells within 10% of the brightest |
+| --- | --- | --- | --- |
+| Far (the temple, 720×380) | 47–109 | 13.9 | 37% |
+| Near (cape and roots, 480×380) | 10–132 | 22.1 | 4% |
+
+The temple spans hundreds of 6×6 cells, so the grid is not what loses it.
+Fog compresses the far field into a narrow, lifted band of luminance with
+low local contrast; the style's exposure pushes that band to the top of a
+ramp with five distinct levels, and a third of the far cells become the same
+brightest glyph. The far loss here is tonal. The first remedy to try is local
+contrast normalization in the analysis pass: each cell's luminance relative to
+its neighborhood's mean and spread, blended with the global tone by a new
+setting, so a fogged region keeps its internal structure while near regions
+keep their look.
+
+### Windows distribution (requested 2026-10-22)
+
+Today only people who build from source can use GlyphShift. The plan, waiting
+for the user's decisions (making the repository public, the first tag):
+
+- Binaries are not committed to the repository; each tagged version (`v*`)
+  publishes them as a GitHub Release, built by a new Windows job in CI
+  (Release build, the tests that need no desktop, `cmake --install` into a
+  staging directory).
+- Two downloads: an installer (Inno Setup: Start menu shortcut, uninstall
+  from Windows settings, optional start at sign-in) and a portable ZIP.
+- Runtime dependencies: Vulkan's loader comes with the GPU driver; FreeType
+  and its DLLs are installed with the programs; the Visual C++ runtime
+  (`MSVCP140.dll`, `VCRUNTIME140.dll`), which the programs link dynamically
+  today, is to be linked statically so no redistributable is needed.
+- The programs are not code-signed: SmartScreen warns on first start until a
+  certificate is bought; the download page says so. A `winget` manifest can
+  follow.
 
 ## Remaining TODOs
 
