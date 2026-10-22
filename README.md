@@ -173,7 +173,19 @@ notification area (it may be under the **^** arrow of the taskbar); start at
 sign-in uses the same program. To remove it, quit GlyphShift, turn start at
 sign-in off, and delete that folder and the Start menu shortcut.
 
-To install for your user, with a menu entry and icon:
+To update it after pulling changes, quit GlyphShift first (its icon → **Quit
+GlyphShift**), then build and install again:
+
+```powershell
+cmake --build --preset windows-release
+cmake --install build/windows-release --prefix "$env:LOCALAPPDATA\Programs\GlyphShift"
+```
+
+An install that stops with `file INSTALL cannot copy file` means GlyphShift is
+still running: quit it (or end `glyphshift-overlay.exe` in Task Manager) and
+run the install again.
+
+On Linux, to install for your user, with a menu entry and icon:
 
 ```bash
 cmake --install build/release --prefix ~/.local
