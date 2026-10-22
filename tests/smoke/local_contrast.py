@@ -1,5 +1,5 @@
 """GPU local-contrast oracle: a fogged region keeps its structure, a contrasty
-one keeps its look, and the setting off changes nothing."""
+one keeps its look, and the default is 0.5."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -66,19 +66,19 @@ plain = render('plain', '')
 off = render('off', 'local_contrast=0\n')
 half = render('half', 'local_contrast=0.5\n')
 measured = {
-    'fog bands, off': band_contrast(cells(plain, 0, SPLIT)),
+    'fog bands, off': band_contrast(cells(off, 0, SPLIT)),
     'fog bands, 0.5': band_contrast(cells(half, 0, SPLIT)),
-    'contrasty bands, off': band_contrast(cells(plain, SPLIT, W)),
+    'contrasty bands, off': band_contrast(cells(off, SPLIT, W)),
     'contrasty bands, 0.5': band_contrast(cells(half, SPLIT, W)),
 }
 if args.report:
     for key, value in measured.items():
         print(f'{key}: {value:.1f}')
     raise SystemExit
-assert off == plain, 'local_contrast=0 changed the image'
+assert half == plain, 'the default is not local_contrast=0.5'
 assert measured['fog bands, 0.5'] > 4 * max(measured['fog bands, off'], 1), measured
 assert measured['contrasty bands, 0.5'] > .6 * measured['contrasty bands, off'], measured
 print('Local contrast: fogged bands {:.1f} -> {:.1f} apart in brightness, contrasty bands '
-      '{:.1f} -> {:.1f}; off is byte-identical to the default'.format(
+      '{:.1f} -> {:.1f}; the default equals 0.5'.format(
           measured['fog bands, off'], measured['fog bands, 0.5'],
           measured['contrasty bands, off'], measured['contrasty bands, 0.5']))

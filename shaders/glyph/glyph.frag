@@ -119,6 +119,11 @@ ivec2 grid_last(vec2 offset) {
     return ivec2(floor((SIZE - 1.0 + offset) / CELL));
 }
 const int search = 16;
+// A luminance's tone on the ramp (glyphshift::tone_luminance): exposure,
+// contrast and gamma.
+float tone_of(float value, float exposure) {
+    return pow(clamp((value*exposure-.5)*ART[0].y+.5,0.0,1.0), 1.0/ART[0].z);
+}
 vec3 saturate_color(vec3 rgb) { return clamp(mix(vec3(luma(rgb)),rgb,ART[4].x),0.0,1.0); }
 // Cell palettes travel as 10-bit unorm RGB in one uint: an integer target is
 // never blended, whatever blend state the host application left enabled.
@@ -213,6 +218,11 @@ const float shape_fit = .06;
 // Mirror glyphshift::local_contrast_target, _max_gain and _span.
 const float local_contrast_target = .12, local_contrast_max_gain = 4.0;
 const float local_contrast_span = 1.0 / 12.0;
+// Mirror glyphshift::local_contrast_full, _flat_low and _flat_high.
+const float local_contrast_full = .04;
+const float local_contrast_flat_low = .004, local_contrast_flat_high = .012;
+// Mirror glyphshift::local_contrast_softness.
+const float local_contrast_softness = .04;
 // Mean of the 2x2 texels starting at p: a small low-pass that keeps a
 // boundary on the cell grid owned by exactly one side.
 vec3 box(vec2 p) {
@@ -334,27 +344,47 @@ void main() {
         dark = min(dark,levels[r]);
         light = max(light,levels[r]);
     }
+    // Automatic exposure (glyphshift::auto_exposure_factor): toward a mid key.
+    float exposure = ART[0].x;
+    if (ART[6].x > 0.0)
+        exposure *= clamp(pow(.4 / max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0),
+                              ART[6].x), .5, 4.0);
     // Local contrast: 7x7 small-box samples over a window of
-    // local_contrast_span of the image height centered on the cell. The cell's
-    // rank among them (glyphshift::local_rank) later equalizes its tone; the
+    // local_contrast_span of the image height centered on the cell. The
+    // cell's rank among their tones (glyphshift::local_rank) later equalizes
+    // its tone, weighted by how compressed their tones are
+    // (glyphshift::local_equalization): tones, after exposure, contrast and
+    // gamma, are what reaches the ramp, so a region the exposure pushes
+    // against the top counts as compressed, and a dark scene that automatic
+    // exposure brightens equalizes like the bright one. The luminance
     // spread's gain (glyphshift::local_contrast_gain) lowers the contour and
     // shape thresholds in low-contrast neighborhoods such as fog.
-    float level = luma(average), gain = 1.0, rank = 0.0;
+    float level = luma(average), gain = 1.0, rank = 0.0, equalize = 0.0;
+    float tone = tone_of(level, exposure);
     if (ART[5].w > 0.0) {
         vec2 center = origin + CELL * .5;
         float spacing = SIZE.y * local_contrast_span / 6.0;
-        float sum = 0.0, squares = 0.0, below = 0.0;
+        float sum = 0.0, squares = 0.0, tones = 0.0, tone_squares = 0.0, below = 0.0;
         for (int j=-3;j<=3;++j) for (int i=-3;i<=3;++i) {
             float v = luma(box(clamp(floor(center + vec2(i,j) * spacing), vec2(0), SIZE - 2.0)));
+            float t = tone_of(v, exposure);
             sum += v;
             squares += v * v;
-            below += v < level ? 1.0 : v == level ? .5 : 0.0;
+            tones += t;
+            tone_squares += t * t;
+            below += smoothstep(-local_contrast_softness, local_contrast_softness, tone - t);
         }
         float mean = sum / 49.0;
         float deviation = sqrt(max(squares / 49.0 - mean * mean, 0.0));
         gain = 1.0 + (clamp(local_contrast_target / max(deviation, 1e-4), 1.0,
                              local_contrast_max_gain) - 1.0) * ART[5].w;
         rank = below / 49.0;
+        float tone_mean = tones / 49.0;
+        float spread = sqrt(max(tone_squares / 49.0 - tone_mean * tone_mean, 0.0));
+        equalize = ART[5].w *
+                   clamp((local_contrast_target - spread) /
+                             (local_contrast_target - local_contrast_full), 0.0, 1.0) *
+                   smoothstep(local_contrast_flat_low, local_contrast_flat_high, spread);
     }
     // Contours vote on a 5x5 lattice spanning the cell and the first pixels of
     // its right/lower neighbors. Each interior point classifies its own 3x3
@@ -396,17 +426,10 @@ void main() {
             edge = true;
         }
     }
-    // Automatic exposure (glyphshift::auto_exposure_factor): toward a mid key.
-    float exposure = ART[0].x;
-    if (ART[6].x > 0.0)
-        exposure *= clamp(pow(.4 / max(texelFetch(METER_IMAGE, ivec2(0), 0).r, 1.0/255.0),
-                              ART[6].x), .5, 4.0);
-    float tone = clamp((level*exposure-.5)*ART[0].y+.5,0.0,1.0);
-    tone = pow(tone,1.0/ART[0].z);
     // Local equalization: whatever the exposure, the darkest cell of a
-    // neighborhood takes the dark end of the ramp and the lightest the light
-    // end, so fog or a strong exposure no longer flatten a region.
-    tone = mix(tone, rank, ART[5].w);
+    // compressed neighborhood takes the dark end of the ramp and the lightest
+    // the light end, so fog or a strong exposure no longer flatten a region.
+    tone = mix(tone, rank, equalize);
     int ramp_row = ART[2].w >= 0.0 ? 3 : 1;
     uint glyph = texelFetch(ramp_image,ivec2(int(round(tone*255.0)),ramp_row),0).r;
     float decided_tone = tone;

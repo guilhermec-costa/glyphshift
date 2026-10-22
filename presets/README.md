@@ -23,7 +23,8 @@ dark-paper styles.
 ![Nine styles rendered from the SuperTux frame](../docs/presets/overview.png)
 
 These are GPU previews of the same [captured frame](../docs/illustration-original.png),
-not live gameplay tests. Ink & Edges is shown on a [darkened version](../docs/presets/dark-scene.png)
+not live gameplay tests, rendered with **Local contrast** at its default of 0.5
+(set `local_contrast=0` for the earlier look). Ink & Edges is shown on a [darkened version](../docs/presets/dark-scene.png)
 of that frame (brightness, saturation and gamma reduced, plus a vignette), a
 synthetic stand-in for a dark game. Its **Auto exposure** lifts such scenes and
 tones bright ones down, so the same style works on both. Dark-paper styles (Chalk, Blueprint, Midnight, CRT,

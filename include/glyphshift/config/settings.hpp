@@ -31,8 +31,9 @@ struct ArtSettings {
     // Exposure follows the scene's metered brightness (0 off .. 1 fully).
     float auto_exposure = 0.0F;
     // Tone relative to each cell's neighborhood (0 off .. 1 fully), so fogged
-    // distant regions keep their internal structure (glyphshift::local_contrast).
-    float local_contrast = 0.0F;
+    // distant regions keep their internal structure (glyphshift::local_rank,
+    // local_equalization). On by default since 2026-10-22.
+    float local_contrast = 0.5F;
     // Illustrated cells follow the camera's motion, estimated on the GPU, so
     // scrolling scenes keep their glyphs instead of crawling across the grid.
     bool anchor_grid = false;

@@ -28,12 +28,31 @@ float local_contrast_gain(float deviation, float strength) noexcept {
     return 1 + (full - 1) * std::clamp(strength, 0.0F, 1.0F);
 }
 
+float local_equalization(float deviation, float strength) noexcept {
+    const float compressed = std::clamp(
+        (local_contrast_target - deviation) / (local_contrast_target - local_contrast_full),
+        0.0F,
+        1.0F);
+    const float t = std::clamp((deviation - local_contrast_flat_low) /
+                                   (local_contrast_flat_high - local_contrast_flat_low),
+        0.0F,
+        1.0F);
+    const float textured = t * t * (3 - 2 * t);  // GLSL smoothstep
+    return std::clamp(strength, 0.0F, 1.0F) * compressed * textured;
+}
+
 float local_rank(float value, std::span<const float> samples) noexcept {
     if (samples.empty())
         return .5F;
     float below = 0;
-    for (const float sample : samples)
-        below += sample < value ? 1.0F : sample == value ? .5F : 0.0F;
+    for (const float sample : samples) {
+        // GLSL smoothstep(-softness, softness, value - sample).
+        const float t =
+            std::clamp((value - sample + local_contrast_softness) / (2 * local_contrast_softness),
+                0.0F,
+                1.0F);
+        below += t * t * (3 - 2 * t);
+    }
     return below / static_cast<float>(samples.size());
 }
 

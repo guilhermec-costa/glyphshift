@@ -228,6 +228,59 @@ phase posted F10 to it (turning the user's effect off). `win32.wait_window_of`
 now finds the window of the class that the test's own process created;
 `windows_run.py` and `editor_apps_win32.py` use it.
 
+**Step 2, local contrast on by default (2026-10-22).** At the user's request
+(after trying it on ELDEN RING), `local_contrast` now defaults to 0.5, which
+also reaches presets saved without the key, the user's included. Making it a
+default first needed three changes, each found by a measurement:
+
+- On SuperTux (Comic, its captured level frame) the step-1 version dotted the
+  sky and the ice with `:`: a rank turns any small variation into glyph
+  variation. Equalization is now weighted by how compressed the
+  neighborhood's tones are (`glyphshift::local_equalization`): fully up to a
+  spread of 0.04, fading to none at 0.12 (texture, which already has
+  contrast), and none on flat areas (below 0.004–0.012, a smooth step). The
+  ice no longer changes (0.2% of pixels vs off, from most of them); cloudy sky
+  still changes in a few percent of pixels, where it is also a compressed
+  bright band.
+- The temporal oracle failed with the default on: churn under noise with full
+  stability 6.2% (0 before) and 2.6% stale cells after a real change (limit
+  2%). Each rank comparison is now a smooth step over ±0.04 of tone
+  (`local_contrast_softness`), so pixel noise moves a rank a little instead of
+  flipping comparisons: churn 1.0%, stale cells 1.6%.
+- The exposure oracle then failed: the half-brightness scene under automatic
+  exposure differed from the bright one in 31% of cells (limit 5%), because
+  ranks and weights used absolute luminance. They now use the samples' tones
+  (`tone_luminance`: after exposure, contrast and gamma, what reaches the
+  ramp), so a region pushed against the top of the ramp by a strong exposure
+  counts as compressed and a dark scene that exposure brightens equalizes like
+  the bright one: 0.5% of cells. The contour gain still uses luminance, where
+  contours are detected.
+
+Final measurements: ELDEN RING reference frame with the user's style, far
+temple correlation 0.32 → 0.50, near 0.83 → 0.81 (3% of near cells change);
+local-contrast oracle fogged bands 2.7 → 14.1, contrasty bands 36.2 → 36.2,
+default equal to 0.5; temporal churn 0.252 → 0.010 with stability, stale 1.6%;
+exposure 0.5%. Unit tests cover `local_equalization`, the soft `local_rank`
+and the new default.
+
+Gallery: the nine style images and the overview were re-rendered at the new
+default from the same source frames, with the Linux machine's font (Hack 3.003
+Bold from the project's release, the zip's SHA-256 `0c2604…f8290ac` matching
+the record above). Rendered with `local_contrast=0`, they first reproduced the
+committed images exactly as recorded earlier (Comic 3 pixels, Midnight 1,
+Digital rain 1,225, the others identical), validating the method. At the
+default, pixels change clearly (by more than 40 levels) in 1.0–2.1% of each
+font-based style and 3.6% of Ink & Edges on the dark scene, which gains
+structure in its darkest corners; Blueprint, which uses no fill, is unchanged
+and its file was kept. The overview's tiles were replaced in place (2×2 box
+reduction, matching the earlier tiles within about 1–5 levels) and its labels
+kept.
+
+Verification: both presets built, 12/12 CTest tests each, format check, and
+the smoke's overlay, editor and oracle phases passed on Release. Not verified:
+the default live in a game by the user, GPU cost, and Linux (GL renderer, GLX
+smoke; CI builds only).
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

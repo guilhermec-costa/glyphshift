@@ -70,12 +70,31 @@ int main() {
         check(local_contrast_gain(0, 1) == local_contrast_max_gain, "the gain is limited");
         check(std::abs(local_contrast_gain(.04F, .5F) - 2) < .0001F, "strength scales the gain");
         check(local_contrast_gain(.04F, 0) == 1, "strength zero is neutral");
+        // Equalization only where a region is compressed: full up to 0.04,
+        // half way at 0.08, none from 0.12 (texture) and none on flat areas.
+        check(local_equalization(.04F, 1) == 1 && local_equalization(.02F, .5F) == .5F,
+            "a compressed region is equalized by the strength");
+        check(std::abs(local_equalization(.08F, 1) - .5F) < .0001F, "the weight fades out");
+        check(local_equalization(.12F, 1) == 0 && local_equalization(.3F, 1) == 0,
+            "a contrasty region keeps its tone");
+        check(local_equalization(.002F, 1) == 0 &&
+                  std::abs(local_equalization(.008F, 1) - .5F) < .0001F,
+            "flat areas are left alone");
         {
-            const std::array<float, 4> samples{.30F, .31F, .32F, .33F};
-            check(local_rank(.29F, samples) == 0 && local_rank(.34F, samples) == 1,
+            // Samples 0.2 apart: each comparison is a smooth step over
+            // +/-local_contrast_softness (0.04), so ranks away from a sample
+            // count it fully and a tie counts half.
+            const std::array<float, 4> samples{.2F, .4F, .6F, .8F};
+            check(local_rank(.1F, samples) == 0 && local_rank(.9F, samples) == 1,
                 "the darkest and lightest cells take the ends");
-            check(local_rank(.315F, samples) == .5F && local_rank(.31F, samples) == .375F,
-                "a narrow band spans the range; ties count half");
+            check(local_rank(.5F, samples) == .5F && local_rank(.4F, samples) == .375F,
+                "a band spans the range; ties count half");
+            // Within the soft step the rank moves gradually: pixel noise
+            // nudges it instead of flipping a whole comparison.
+            const std::array<float, 1> one{.4F};
+            check(std::abs(local_rank(.41F, one) - .68359375F) < .0001F &&
+                      local_rank(.39F, one) < local_rank(.4F, one),
+                "comparisons are smooth near a sample");
             check(local_rank(.5F, std::span<const float>{}) == .5F, "no samples: the middle");
         }
         const auto parsed = parse_settings(
@@ -113,8 +132,8 @@ int main() {
                 "art parameters fill eight vec4s");
             check(values[art_local_contrast] == .45F,
                 "local contrast reaches the shader parameters");
-            check(art_parameters(Settings{})[art_local_contrast] == 0,
-                "local contrast is off by default");
+            check(art_parameters(Settings{})[art_local_contrast] == .5F,
+                "local contrast is on at 0.5 by default");
             check(values[art_auto_exposure] == .6F && values[art_adaptation] == 1,
                 "auto exposure reaches the shader parameters");
             check(values[art_anchor] == 1 && values[art_anchor_history] == 0,
