@@ -147,7 +147,7 @@ def overlay_phase():
                                        env=dict(env, GLYPHSHIFT_VULKAN_VALIDATION='1'),
                                        stdout=stream, stderr=subprocess.STDOUT)
         try:
-            layer = win32.wait_window('GlyphShift overlay', overlay, overlay_log)
+            layer = win32.wait_window_of('GlyphShiftOverlay', overlay, overlay_log)
             x, y = win32.client_origin(window)
             # The first frame takes a moment (device, pipeline, capture).
             deadline = time.monotonic() + 30
@@ -213,7 +213,7 @@ def tracking_phase():
                                         str(target), '--preset', 'art-newsprint'],
                                        env=env, stdout=stream, stderr=subprocess.STDOUT)
         try:
-            layer = win32.wait_window('GlyphShift overlay', overlay, overlay_log)
+            layer = win32.wait_window_of('GlyphShiftOverlay', overlay, overlay_log)
 
             def follows():
                 x, y = win32.client_origin(target)
@@ -279,7 +279,7 @@ def overlay_on(window, label, extra=None):
                                             GLYPHSHIFT_OVERLAY_NO_FOCUS='1', **(extra or {})),
                                    stdout=stream, stderr=subprocess.STDOUT)
     try:
-        yield process, win32.wait_window('GlyphShift overlay', process, log), log
+        yield process, win32.wait_window_of('GlyphShiftOverlay', process, log), log
     finally:
         if process.poll() is None:
             process.terminate()

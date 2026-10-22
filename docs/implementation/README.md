@@ -207,6 +207,27 @@ small-box samples per cell when on; the Windows overlay has no GPU timing),
 temporal behavior in motion, the classic renderer (not affected), and the
 Linux GLX run of the oracle (CI does not run the smoke).
 
+Correction the same evening. The build installed for the user rendered the
+default classic effect whatever style was chosen, and editor toggles had no
+effect; the user reported it. The source was not at fault: built afresh, the
+same commit passes. During this step the Windows clock had been moved back
+and the modification times of files written meanwhile were set to the
+current time, sources and build outputs alike, so Ninja kept object files
+compiled before `ArtSettings` gained its new field, and the overlay mixed two
+layouts of the settings structure. A bisection (only the old shader rebuilt:
+pass; the current source rebuilt: pass) and the differing hash of the
+installed program confirmed a stale build. Both presets were rebuilt with
+`--clean-first`; 12/12 CTest tests, the format check and the smoke's overlay,
+tracking, editor and oracle phases then passed on Release. The oracle phase
+alone had not caught it, since the preview, built in one piece, was correct;
+the overlay and editor phases had not been run for this step.
+
+The smoke also found the overlay window by its title, so with the user's own
+GlyphShift attached to a game it picked the user's overlay, and the editor
+phase posted F10 to it (turning the user's effect off). `win32.wait_window_of`
+now finds the window of the class that the test's own process created;
+`windows_run.py` and `editor_apps_win32.py` use it.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

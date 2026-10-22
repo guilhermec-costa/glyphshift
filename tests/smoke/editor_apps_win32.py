@@ -121,7 +121,7 @@ try:
                                    env=dict(env, GLYPHSHIFT_PROFILE='editor-' + app,
                                             GLYPHSHIFT_VULKAN_VALIDATION='1'),
                                    stdout=stream, stderr=subprocess.STDOUT)
-    layer = win32.wait_window('GlyphShift overlay', overlay, overlay_log)
+    layer = win32.wait_window_of('GlyphShiftOverlay', overlay, overlay_log)
     control = RealInput(window)
     control.allow(layer)
     time.sleep(2)

@@ -470,3 +470,17 @@ def window_title(window):
     buffer = c.create_unicode_buffer(length + 1)
     user32.GetWindowTextW(window, buffer, length + 1)
     return buffer.value
+
+
+def wait_window_of(name, process, log, seconds=20):
+    """The top-level window of class `name` that `process` created: never the
+    window of another running copy (a user's own GlyphShift, for example)."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        found = window_of(name, process.pid)
+        if found:
+            return found
+        if process.poll() is not None:
+            raise RuntimeError(f'{name}: process ended: ' + log.read_text(errors='replace'))
+        time.sleep(.05)
+    raise RuntimeError(f'{name}: no window: ' + log.read_text(errors='replace'))
