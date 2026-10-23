@@ -5301,8 +5301,9 @@ names ignore case, so only the `active` comparison failed; it is now
 case-insensitive.
 
 Verification: both presets built, 12/12 CTest tests each (`platform-windows`
-with the hung child), format check; the smoke's overlay, tracking and editor
-phases passed on Release; the probe above passed on the new build (4% of a
+with the hung child), format check; the smoke's overlay, tracking, editor,
+daemon and tray phases passed on Release (daemon and tray after the user
+closed their own daemon); the probe above passed on the new build (4% of a
 core, stopped in 0.17 s). Not verified: the original hang (not reproduced),
 and the Linux platform test (CI).
 
