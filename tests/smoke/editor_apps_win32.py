@@ -133,7 +133,7 @@ try:
     profile_dir = out / 'config/glyphshift/profiles' / ('editor-' + app)
     if args.presets:
         names = ['art-comic', 'art-sepia', 'art-newsprint', 'art-chalk', 'art-ink-edges',
-                 'art-midnight', 'art-crt', 'art-digital-rain']
+                 'art-true-color', 'art-midnight', 'art-crt', 'art-digital-rain']
 
         def choose(position, expected):
             click(140, 95)

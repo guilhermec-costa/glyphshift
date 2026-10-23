@@ -29,7 +29,7 @@ text. GlyphShift takes neither route.
 | Attaching | Installed before the game starts. | A hotkey over a game that is already running; another press detaches it. |
 | Characters | A short built-in brightness ramp. | Real glyphs rasterized from any installed TTF/OTF font: ASCII, blocks, Braille or up to 256 Unicode characters of your choice, each kept at its typographic place. |
 | Which character goes where | By brightness. | By shape: each cell's 4×4 light/dark layout is matched against the font's glyphs, and real outlines become `/ \ \| _ -` strokes, so silhouettes survive. |
-| Color | Usually monochrome or the scene's color. | Art direction: scene-colored ink on dark or light paper, a watercolor wash, glow and ink bleed, eight ready styles. |
+| Color | Usually monochrome or the scene's color. | Art direction: scene-colored ink on dark or light paper, a watercolor wash, glow and ink bleed, nine ready styles including one in the game's own colors. |
 | Motion | Glyphs flicker as noise and light change. | Temporal stability keeps a cell's glyph while it still fits; an optional grid anchored to the world travels with a scrolling camera. |
 | Editing | Configuration files or the injected menu. | An editor over the game (Insert), saved per game; F10 compares with the original. |
 
@@ -297,7 +297,7 @@ SuperTux through Proton, attached with the hotkey.
 ## Choose a starting style
 
 Try the [ready-to-use style collection](presets/README.md): Comic, Sepia,
-Newsprint, Chalk, Ink & Edges, Midnight, CRT and Digital rain. Each
+Newsprint, Chalk, Ink & Edges, True color, Midnight, CRT and Digital rain. Each
 one redraws the whole scene in glyphs; the gallery compares them and explains
 how to switch them live without restarting.
 They are available directly under **Insert → Preset → Included styles**. Choose

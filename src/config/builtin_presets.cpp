@@ -8,11 +8,12 @@
 #include "midnight.hpp"
 #include "newsprint.hpp"
 #include "sepia.hpp"
+#include "true_color.hpp"
 
 namespace glyphshift {
 std::span<const BuiltinPreset> builtin_presets() noexcept {
     // Light-paper styles first, then dark-paper styles.
-    static constexpr std::array<BuiltinPreset, 8> styles{{
+    static constexpr std::array<BuiltinPreset, 9> styles{{
         {"art-comic",
             "Comic",
             "Bold scene-colored inks over a vivid watercolor wash.",
@@ -30,6 +31,10 @@ std::span<const BuiltinPreset> builtin_presets() noexcept {
             "Ink & Edges",
             "Crisp white letters and line art on black; made for dark games.",
             included::ink_edges},
+        {"art-true-color",
+            "True color",
+            "The game's own colors, drawn in ASCII on a dark wash of the scene.",
+            included::true_color},
         {"art-midnight",
             "Midnight",
             "Terminal ASCII in saturated scene colors on a near-black sky.",

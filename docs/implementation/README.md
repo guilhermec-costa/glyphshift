@@ -409,6 +409,22 @@ overlay, editor and oracle phases passed on Release. Not verified: the
 focused editor driver with `--presets` (real input; its style list changed),
 and the styles live.
 
+**Step 6, True color (2026-10-23).** At the user's request, an included style
+that keeps the game's own colors: `art-true-color.conf`, listed after Ink &
+Edges. It is Midnight's recipe (source color, `"  .:-+*#%@"`, automatic
+exposure, the step 5 contours) with saturation 1.1 instead of 1.9, white ink
+as the brightness cap and black paper washed with the scene's color
+(`scene_paper` 0.3). Three washes were compared on both games: 0 (black
+paper) turned the glyphs nearly white and lost the colors; 0.5 let color
+dominate and the characters fade; 0.3 kept ELDEN RING's red embers and gold
+cape and SuperTux's sky, tree and blocks recognizable while the ASCII still
+reads. The presets test expects nine styles again; both focused editor
+scripts list it. Its gallery image fills the overview tile Blueprint left,
+with the label drawn by System.Drawing (Segoe UI, the labels' color).
+Verification: both presets built, 12/12 CTest tests each, format check, and
+the smoke's overlay and editor phases passed on Release. Not verified: live
+in the games.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

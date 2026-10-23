@@ -117,9 +117,9 @@ int main(int argc, char** argv) {
         PresetStore first(path, "game-a"), other(path, "game-b");
         std::string error;
         Settings actual;
-        check(builtin_presets().size() == 8 && !builtin_preset("not-included") &&
+        check(builtin_presets().size() == 9 && !builtin_preset("not-included") &&
                   !builtin_preset("art-blueprint"),
-            "eight included styles with explicit lookup");
+            "nine included styles with explicit lookup");
         for (const auto& preset : builtin_presets()) {
             check(first.load(preset.name, actual, error) && error.empty(),
                 "included styles load without installed files");
