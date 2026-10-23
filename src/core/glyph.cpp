@@ -28,32 +28,50 @@ float local_contrast_gain(float deviation, float strength) noexcept {
     return 1 + (full - 1) * std::clamp(strength, 0.0F, 1.0F);
 }
 
-float local_equalization(float deviation, float strength) noexcept {
-    const float compressed = std::clamp(
-        (local_contrast_target - deviation) / (local_contrast_target - local_contrast_full),
-        0.0F,
-        1.0F);
-    const float t = std::clamp((deviation - local_contrast_flat_low) /
-                                   (local_contrast_flat_high - local_contrast_flat_low),
-        0.0F,
-        1.0F);
-    const float textured = t * t * (3 - 2 * t);  // GLSL smoothstep
-    return std::clamp(strength, 0.0F, 1.0F) * compressed * textured;
+LocalBase local_base(float value, std::span<const float> samples) noexcept {
+    float weight = 0, sum = 0, squares = 0;
+    for (const float sample : samples) {
+        const float d = (value - sample) / local_contrast_range;
+        const float s = std::exp(-.5F * d * d);
+        weight += s;
+        sum += s * sample;
+        squares += s * sample * sample;
+    }
+    if (weight <= 0)
+        return {value, 0};
+    const float base = sum / weight;
+    return {base, std::sqrt(std::max(squares / weight - base * base, 0.0F))};
 }
 
-float local_rank(float value, std::span<const float> samples) noexcept {
-    if (samples.empty())
-        return .5F;
-    float below = 0;
-    for (const float sample : samples) {
-        // GLSL smoothstep(-softness, softness, value - sample).
-        const float t =
-            std::clamp((value - sample + local_contrast_softness) / (2 * local_contrast_softness),
-                0.0F,
-                1.0F);
-        below += t * t * (3 - 2 * t);
-    }
-    return below / static_cast<float>(samples.size());
+float local_rolloff(float base) noexcept {
+    const float hi = local_contrast_knee, lo = 1 - local_contrast_knee;
+    if (base > hi)
+        return hi + (1 - hi) * (1 - std::exp(-(base - hi) / (1 - hi)));
+    if (base < lo)
+        return lo - lo * (1 - std::exp(-(lo - base) / lo));
+    return base;
+}
+
+float local_detail_gain(float spread) noexcept {
+    const float full =
+        std::clamp(local_detail_target / std::max(spread, 1e-4F), 1.0F, local_contrast_max_gain);
+    const float t = std::clamp(
+        (spread - local_contrast_flat_low) / (local_contrast_flat_high - local_contrast_flat_low),
+        0.0F,
+        1.0F);
+    return 1 + (full - 1) * t * t * (3 - 2 * t);  // GLSL smoothstep
+}
+
+float local_recovery(float base, float spread) noexcept {
+    const float rolled = local_rolloff(base);
+    const float fit = 1 - local_contrast_headroom * spread * local_detail_gain(spread);
+    const float t = std::clamp((base - 1) / (local_contrast_clipped - 1), 0.0F, 1.0F);
+    return rolled + (std::min(rolled, fit) - rolled) * t * t * (3 - 2 * t);
+}
+
+float local_contrast(float value, std::span<const float> samples) noexcept {
+    const auto [base, spread] = local_base(value, samples);
+    return local_recovery(base, spread) + (value - base) * local_detail_gain(spread);
 }
 
 int contour_glyph(std::span<const float, 9> v, float strength, float threshold) noexcept {

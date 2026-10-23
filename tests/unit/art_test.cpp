@@ -70,32 +70,42 @@ int main() {
         check(local_contrast_gain(0, 1) == local_contrast_max_gain, "the gain is limited");
         check(std::abs(local_contrast_gain(.04F, .5F) - 2) < .0001F, "strength scales the gain");
         check(local_contrast_gain(.04F, 0) == 1, "strength zero is neutral");
-        // Equalization only where a region is compressed: full up to 0.04,
-        // half way at 0.08, none from 0.12 (texture) and none on flat areas.
-        check(local_equalization(.04F, 1) == 1 && local_equalization(.02F, .5F) == .5F,
-            "a compressed region is equalized by the strength");
-        check(std::abs(local_equalization(.08F, 1) - .5F) < .0001F, "the weight fades out");
-        check(local_equalization(.12F, 1) == 0 && local_equalization(.3F, 1) == 0,
-            "a contrasty region keeps its tone");
-        check(local_equalization(.002F, 1) == 0 &&
-                  std::abs(local_equalization(.008F, 1) - .5F) < .0001F,
-            "flat areas are left alone");
+        // Base/detail local contrast.
+        check(local_rolloff(.5F) == .5F && local_rolloff(.7F) == .7F && local_rolloff(.3F) == .3F,
+            "mid tones keep their value");
+        check(local_rolloff(1.3F) < 1 && local_rolloff(1.3F) > local_rolloff(1.0F) &&
+                  local_rolloff(1.0F) > .7F && local_rolloff(-.5F) > 0 &&
+                  local_rolloff(-.5F) < local_rolloff(0),
+            "clipped regions come back inside 0..1 in their order");
+        check(std::abs(local_rolloff(1.0F) - (.7F + .3F * (1 - std::exp(-1.0F)))) < .0001F,
+            "the roll-off above the knee is exponential");
+        // local_detail_target is 0.25: 0.1 gains 2.5, from 0.25 nothing.
+        check(std::abs(local_detail_gain(.1F) - 2.5F) < .0001F && local_detail_gain(.3F) == 1 &&
+                  local_detail_gain(0) == 1 && local_detail_gain(.04F) == 4 &&
+                  std::abs(local_detail_gain(.008F) - 2.5F) < .0001F,
+            "detail is amplified where compressed, not on flat or contrasty areas");
         {
-            // Samples 0.2 apart: each comparison is a smooth step over
-            // +/-local_contrast_softness (0.04), so ranks away from a sample
-            // count it fully and a tie counts half.
-            const std::array<float, 4> samples{.2F, .4F, .6F, .8F};
-            check(local_rank(.1F, samples) == 0 && local_rank(.9F, samples) == 1,
-                "the darkest and lightest cells take the ends");
-            check(local_rank(.5F, samples) == .5F && local_rank(.4F, samples) == .375F,
-                "a band spans the range; ties count half");
-            // Within the soft step the rank moves gradually: pixel noise
-            // nudges it instead of flipping a whole comparison.
-            const std::array<float, 1> one{.4F};
-            check(std::abs(local_rank(.41F, one) - .68359375F) < .0001F &&
-                      local_rank(.39F, one) < local_rank(.4F, one),
-                "comparisons are smooth near a sample");
-            check(local_rank(.5F, std::span<const float>{}) == .5F, "no samples: the middle");
+            // A fog cell (1.3, clipped by the exposure) among fog samples 1.26
+            // and 1.34, and a dark sword (-0.4) in the same neighborhood. The
+            // sword hardly counts in the base, so the fog cell gets the same
+            // base as fog far from the sword: no halo.
+            std::array<float, 48> fog{}, beside{};
+            for (std::size_t i = 0; i < fog.size(); ++i) {
+                fog[i] = i % 2 ? 1.26F : 1.34F;
+                beside[i] = i < 24 ? fog[i] : -.4F;
+            }
+            const auto alone = local_base(1.3F, fog), mixed = local_base(1.3F, beside);
+            check(std::abs(alone.base - 1.3F) < .0001F && std::abs(mixed.base - 1.3F) < .001F &&
+                      std::abs(mixed.spread - alone.spread) < .001F,
+                "a dark object does not change the base of the fog beside it");
+            // The fog comes back below the top, and its detail is spread.
+            const float up = local_contrast(1.34F, fog), down = local_contrast(1.26F, fog);
+            // Base 1.3 rolls off to about 0.96; the fog's +/-0.04 detail is
+            // about tripled, so its darker half comes back well inside the ramp.
+            check(down < .9F && up - down > .2F,
+                "clipped fog returns inside the ramp with amplified detail");
+            check(std::abs(local_contrast(.5F, std::array<float, 3>{.2F, .5F, .8F}) - .5F) < .0001F,
+                "a mid cell keeps its tone");
         }
         const auto parsed = parse_settings(
             "render_style=illustrated\nfill_enabled=false\ncontour_overlay="

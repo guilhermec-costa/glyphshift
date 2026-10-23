@@ -281,6 +281,70 @@ the smoke's overlay, editor and oracle phases passed on Release. Not verified:
 the default live in a game by the user, GPU cost, and Linux (GL renderer, GLX
 smoke; CI builds only).
 
+**Step 3, base/detail without halos (2026-10-22).** The user saw, on ELDEN
+RING with step 1's build, a "aura" of glyphs around the greatsword: a
+classic halo of local equalization. Measured on the user's own frame (the
+blade against the stairs, cells 6–72 px beside it), step 2 had one too: cells
+next to the blade kept their tone (~104 of green) while the background 60–72
+px away, equalized, dropped to 77–87; with the setting off both read ~97–108.
+Step 1 brightened the cells beside a dark object (it ranked above the blade's
+samples); step 2 switched equalization off beside it (the blade raised the
+neighborhood's spread). Two tries kept the rank: a selective (bilateral)
+neighborhood removed the halo but pulled every object to the middle of the
+ramp (contrasty bands 36 → 17, 30% of near cells changed); spreading the rank
+around the group's mean kept objects but lost the far gain (fog bands 2.7 →
+2.7). A per-cell simulation in Python (pure, numpy unusable here) of the tone
+reaching the ramp then compared base/detail variants on the reference frames,
+before the shader was changed.
+
+Now `local_contrast` is a base/detail split in the unclipped tone ((luminance ×
+exposure − 0.5) × contrast + 0.5, before clamp and gamma), over the same 7×7
+samples (`glyphshift::local_contrast`, mirrored by the analysis shader):
+
+- the base is the samples' bilateral mean (`local_base`: a sample counts by
+  exp(−d²/2), d its distance from the cell's value over 0.25), so a dark
+  object beside fog does not move the fog's base;
+- the base is rolled off above 0.7 and below 0.3 into 0..1 (`local_rolloff`),
+  and a base clipped beyond the top (fully from 1.15) is lowered further so
+  its detail fits: at most 1 − 2 × spread × gain (`local_recovery`), which
+  leaves bases within the ramp, a bright sky, alone;
+- the cell's detail around its base is amplified by 0.25 / spread, between 1
+  and 4, eased to 1 on flat areas (`local_detail_gain`); 0.25 lets a region's
+  detail span about two glyph classes of a short ramp (the user's style has
+  five, its top two, `0` and `1`, of nearly the same density, where the
+  temple sat: base about 0.88 with a spread of 0.12, not clipped);
+- the result after gamma is blended with the global tone by the setting.
+
+The contour and shape gain keeps its own target, 0.12 of luminance deviation;
+raising the shared target had doubled contours everywhere. Unit tests cover
+the roll-off, recovery, detail gain, the bilateral base beside a dark object,
+clipped fog returning inside the ramp, and mid tones unchanged.
+
+The oracle changed with it: the frame is 720 px tall, so the neighborhood
+(1/12 of the height) spans five bands as in a game (at 144 px it saw one band
+and could not tell); the fog is clipped by `tone_exposure=1.25`, the case that
+loses detail; and a black bar eight cells wide in the fog checks the halo
+(cells beside it vs far ones, within 2.5 levels of the setting off). Results:
+clipped fog bands 0.0 → 6.1 apart, contrasty bands 46.4 → 46.4, beside the bar
++0.9; with the bilateral weights disabled (range 100) the halo measure rose to
+3.4 and the oracle failed, as intended.
+
+Measurements at the default 0.5, against off: ELDEN RING far temple
+correlation 0.32 → 0.48 (step 2: 0.50), near 0.83 → 0.85 (22% of near cells
+change: their detail is amplified too); beside the blade the profile follows
+the off one, the remaining slope coming from the stairs further out, and the
+captures show no band along the blade; SuperTux Comic changes in 0.4% of
+pixels (sky 0.6%, ice 0.3%), so the dotted sky of step 1 is gone; temporal
+oracle churn 0.378 → 0.000 with stability, stale cells 1.3%; exposure oracle
+0.3%. Gallery re-rendered as in step 2 (with `local_contrast=0` it first
+reproduced the committed images exactly again): 0.6–3.2% of pixels change
+clearly per font-based style, 4.2% for Ink & Edges, Blueprint unchanged and
+its file kept; the overview's tiles replaced in place.
+
+Verification: both presets built, 12/12 CTest tests each, the format check,
+and the smoke's overlay, editor and oracle phases passed on Release. Not
+verified: live in the game (the user's), GPU cost, Linux.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

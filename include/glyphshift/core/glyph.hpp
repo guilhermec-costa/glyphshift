@@ -47,32 +47,50 @@ float exposure_adaptation(float seconds) noexcept;
 float adapt_luminance(float previous, float measured, float rate) noexcept;
 // Local contrast, mirrored by the analysis shader, over 7x7 luminance samples
 // of a cell's neighborhood (local_contrast_span of the image height around
-// it). The cell's tone is blended toward its rank among the samples by
-// local_equalization (local equalization: fog or a strong exposure no longer
-// flatten a region onto one glyph); the rank and that weight use the samples'
-// tones (tone_luminance: after exposure, contrast and gamma), what reaches the
-// ramp, so a region pushed against the top counts as compressed and a dark
-// scene that exposure brightens equalizes like the bright one. The contour and
-// shape thresholds are
-// divided by a gain of local_contrast_target / the samples' deviation, at
-// least 1 and at most local_contrast_max_gain, scaled toward 1 by strength.
+// it), in the unclipped tone ((luminance * exposure - 0.5) * contrast + 0.5,
+// before the clamp and gamma). A base/detail split: the samples'
+// edge-preserving mean (local_base) is the cell's base; the base is rolled off
+// into 0..1 (local_rolloff), and the cell's detail around it is amplified
+// where the neighborhood is compressed (local_detail_gain). The result, after
+// gamma, is blended with the global tone by strength (0..1). The contour and
+// shape thresholds are divided by local_contrast_gain of the luminance
+// deviation, at least 1 and at most local_contrast_max_gain, scaled toward 1
+// by strength.
 inline constexpr float local_contrast_target = .12F, local_contrast_max_gain = 4.0F;
 inline constexpr float local_contrast_span = 1.0F / 12;
-// Equalization applies where a region is compressed: fully up to a deviation
-// of local_contrast_full, fading out at local_contrast_target, where the
-// region already has contrast (texture, clouds); and not at all on flat areas
-// (deviation below local_contrast_flat_low..high), where a rank only
-// amplifies noise and gradients.
-inline constexpr float local_contrast_full = .04F;
-inline constexpr float local_contrast_flat_low = .004F, local_contrast_flat_high = .012F;
 float local_contrast_gain(float deviation, float strength) noexcept;
-// The blend toward the rank: strength (0..1) times the weight above.
-float local_equalization(float deviation, float strength) noexcept;
-// Share of the samples below `value`, each comparison a smooth step over
-// +/-local_contrast_softness, so pixel noise moves the rank only slightly and
-// temporal stability can hold a cell's glyph: 0..1.
-inline constexpr float local_contrast_softness = .04F;
-float local_rank(float value, std::span<const float> samples) noexcept;
+// Bilateral mean and spread: a sample counts by exp(-d^2 / 2), d its distance
+// from the cell's value over local_contrast_range, so a dark object beside a
+// bright region neither darkens nor brightens the region around it (no halo).
+inline constexpr float local_contrast_range = .25F;
+
+struct LocalBase {
+    float base, spread;
+};
+
+LocalBase local_base(float value, std::span<const float> samples) noexcept;
+// Identity between 1 - local_contrast_knee and local_contrast_knee; beyond, an
+// exponential roll-off that approaches 0 and 1 without reaching them, so
+// clipped regions come back inside the ramp in their original order.
+inline constexpr float local_contrast_knee = .7F;
+float local_rolloff(float base) noexcept;
+// local_detail_target / spread, between 1 and local_contrast_max_gain, and
+// eased to 1 on flat areas (spread below local_contrast_flat_low..high). The
+// target is wide enough that a region's detail spans about two glyph classes
+// of a short ramp.
+inline constexpr float local_detail_target = .25F;
+inline constexpr float local_contrast_flat_low = .004F, local_contrast_flat_high = .012F;
+float local_detail_gain(float spread) noexcept;
+// Highlight recovery: a base clipped beyond the top (fully from
+// local_contrast_clipped, easing in from 1) is lowered, after the roll-off, to
+// at most 1 - local_contrast_headroom * spread * detail gain, so a region the
+// exposure blew out shows its detail inside the ramp. Bases within the ramp
+// (a bright sky) are left alone.
+inline constexpr float local_contrast_headroom = 2.0F, local_contrast_clipped = 1.15F;
+float local_recovery(float base, float spread) noexcept;
+// The cell's unclipped value with base and detail adjusted:
+// local_recovery(base, spread) + (value - base) * local_detail_gain(spread).
+float local_contrast(float value, std::span<const float> samples) noexcept;
 // Row-major 3x3 luminance neighborhood. -1 means fill, 0..3 are | - / \\.
 int contour_glyph(std::span<const float, 9> levels, float strength, float threshold) noexcept;
 // Row-major 5x5 luminance lattice at quarter-cell steps, spanning the cell and
