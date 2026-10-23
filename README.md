@@ -8,12 +8,13 @@ to draw, in ink and paper colors you direct from an editor on top of the game.
 Press one key over a game that is already running; nothing is installed into
 it, and each game keeps its own style.
 
-![SuperTux's title screen, then GlyphShift attached on top of it, switching between the Comic, Newsprint and Blueprint styles](docs/demo.webp)
+![ELDEN RING as it is, then GlyphShift attached on top of it while the camera turns, switching between the True color, Digital rain, CRT and Midnight styles](docs/demo.webp)
 
-*Native SuperTux running on its own; the capture overlay is attached to its
-window and switches styles live (Comic, Newsprint, and Blueprint, a style since
-removed). Recorded with
-`tools/record_demo.py`.*
+*ELDEN RING (offline) running on its own on Windows; the capture overlay is
+attached to its window and switches styles live while the camera turns (True
+color, Digital rain, CRT, Midnight). Recorded with
+`tools/record_demo_win32.py`; `tools/record_demo.py` records the same kind of
+animation of SuperTux on Linux.*
 
 ## Why it is not another ASCII filter
 

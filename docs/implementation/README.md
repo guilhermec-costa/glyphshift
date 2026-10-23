@@ -425,6 +425,24 @@ Verification: both presets built, 12/12 CTest tests each, format check, and
 the smoke's overlay and editor phases passed on Release. Not verified: live
 in the games.
 
+**The README animation, re-recorded on ELDEN RING (2026-10-23).** At the
+user's request the README's animation, which showed SuperTux with the removed
+Blueprint style and the earlier look, now shows ELDEN RING (offline): 2.5 s
+of the game as it is, then the overlay attached by window handle switching
+True color, Digital rain, CRT and Midnight every 3 s through a live config,
+while the camera turns slowly. New `tools/record_demo_win32.py` (the
+counterpart of `record_demo.py`, run with the user's permission: it brings
+the game to the front and sends a relative mouse motion of 2 per 1/60 s,
+with `real_input_win32`'s foreground guard, then gives the foreground and
+pointer back) grabs the composited screen over the game's client area at 12
+frames per second and writes an animated WebP with Pillow (installed for the
+user's Python with `pip install --user Pillow`; there is no ffmpeg here). The
+14.5 s take, 174 frames at 640×360, was 7.8 MB; re-encoded at 6 frames per
+second and WebP quality 50 it is 3.4 MB (the previous animation was 3.2 MB),
+keeping the glyphs legible where 560 px blurred them. Sample frames of each
+segment were inspected. The README caption names the game and both recording
+tools.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting
