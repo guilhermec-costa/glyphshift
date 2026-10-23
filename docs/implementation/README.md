@@ -282,7 +282,7 @@ the default live in a game by the user, GPU cost, and Linux (GL renderer, GLX
 smoke; CI builds only).
 
 **Step 3, base/detail without halos (2026-10-22).** The user saw, on ELDEN
-RING with step 1's build, a "aura" of glyphs around the greatsword: a
+RING with step 1's build, an "aura" of glyphs around the greatsword: a
 classic halo of local equalization. Measured on the user's own frame (the
 blade against the stairs, cells 6–72 px beside it), step 2 had one too: cells
 next to the blade kept their tone (~104 of green) while the background 60–72
