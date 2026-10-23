@@ -4241,7 +4241,7 @@ never runs.
 At the user's request, after the week of Windows work (M7 step 7 parts 4–13,
 detail at depth steps 1–6, the README animation), whose records mostly say
 "not verified: Linux", the whole Linux matrix was rerun on the NVIDIA/i3 setup
-at `d95aea8` before making the repository public.
+at `b8acd9a` before making the repository public.
 
 - Both presets rebuilt from scratch (`--clean-first`; a stale build had misled
   the tests once on Windows): no warnings.
@@ -4497,7 +4497,7 @@ passed: a symbolic link at a preset is refused on reading, and saving replaces
 the link without writing to its target. All
 nine generated SPIR-V modules passed `spirv-val --target-env vulkan1.0`.
 `tools/format.py --check` and `git diff --check` passed. After the user
-pushed `7d4c72b`, the CI's Linux `build` job passed (format check, Debug and
+pushed `eeb020f`, the CI's Linux `build` job passed (format check, Debug and
 Release builds and CPU tests; seen by the user on GitHub). Not verified: any
 Vulkan rendering on Windows, which starts with the preview in step 6.
 
@@ -4712,8 +4712,8 @@ Verification: both Windows presets built without warnings and passed 11/11
 CTest tests including `smoke-windows` (about 24 s); the fixture ran 120 frames
 and the two-swapchain mode 60 frames with validation in both presets; a
 capture of the fixture was inspected. Not verified: the Windows fixture on
-other GPUs. After the user pushed the commits up to this part (`c18c414`,
-`ed69c7b`, `b9720d1`, `65ca16d`), the CI's Linux `build` job passed (seen by
+other GPUs. After the user pushed the commits up to this part (`af67407`,
+`5974b4c`, `8529957`, `304e553`), the CI's Linux `build` job passed (seen by
 the user on GitHub), covering `platform-files` on Linux, the GL preview's
 shared PPM helpers, `glyphshift-vulkan-preview` and the fixture helpers in
 `common.cpp`.
@@ -4840,8 +4840,8 @@ Verification: both Windows presets built without warnings; `windows_run.py`
 passed twice in each (fixture, overlay, tracking, oracles). Not verified:
 virtual-desktop switching (cloaking is handled but untested), a topmost
 target, multiple monitors and DPI changes, and the editor, hotkeys, daemon and
-tray, which follow. After the user pushed parts 2 and 3 (`1f24687`,
-`925de38`), the CI's Linux `build` job passed (seen by the user), covering the
+tray, which follow. After the user pushed parts 2 and 3 (`0e408a4`,
+`a548b27`), the CI's Linux `build` job passed (seen by the user), covering the
 shared overlay options, `platform::set_environment` and `glyphshift_vk_owned`
 on Linux.
 
@@ -4914,7 +4914,7 @@ and both matches with Consolas Bold. The code these checks exercise did not
 change in this part. Not verified: the hotkeys and the foreground hand-over
 with real input (they take the keyboard and need the user's permission; the
 focused drivers come with the daemon part), IME and dead keys. After the user
-pushed `bcdacec`, the CI's Linux `build` job passed (seen by the user).
+pushed `2d51b05`, the CI's Linux `build` job passed (seen by the user).
 
 **The illustration test's font-dependent checks (2026-10-20).** At the user's
 choice, the two shape checks no longer compare the discovered font's `|` and
@@ -5012,7 +5012,7 @@ tracking, editor, daemon, oracles; about 60 s). Not verified: attaching and
 detaching with the real Ctrl+Alt+G on a focused game (it takes the keyboard;
 the focused driver needs the user's permission), sign-in start by Windows
 itself, and the Linux build of the shared hotkey name (CI). After the user
-pushed `93f2b6b`, `4b2ebb6` and `6ff449a`, the CI's Linux `build` job passed
+pushed `7e67a85`, `d2d8884` and `1b435c8`, the CI's Linux `build` job passed
 for each (seen by the user).
 
 **Step 7, part 6: the notification-area icon (2026-10-21).** The counterpart
@@ -5080,7 +5080,7 @@ with a real click and closing it by clicking elsewhere (the user's pointer),
 "Detach from" (it needs an attachment by the real hotkey, so it belongs to
 the `overlay_daemon` counterpart), a real Explorer restart, the icon at
 other DPIs, and notifications under Do Not Disturb. After the user pushed
-`6aaddd5`, the CI's Linux `build` job passed (seen by the user).
+`7dba5f8`, the CI's Linux `build` job passed (seen by the user).
 
 **Step 7, part 7: the focused daemon driver with real input (2026-10-21).**
 The first `SendInput` driver of the test plan, the counterpart of
