@@ -349,8 +349,9 @@ the SDL 2D renderer; native SuperTux 0.7.0 renders the effect with both its
 `sdl` and `opengl` video modes. Verified applications include the native GLX/Vulkan fixtures, glxgears,
 vkcube, and offline SuperTux 0.7.0 for Windows through GE-Proton/DXVK, including
 the editor in those tested setups. Hardware validation used NVIDIA on X11;
-Mesa llvmpipe GLX was also tested. AMD/Intel hardware, Mesa Vulkan and arbitrary
-Proton games are not established by those results.
+the automated graphics tests also pass on Mesa's software renderers (llvmpipe
+OpenGL and lavapipe Vulkan). AMD/Intel hardware and arbitrary Proton games are
+not established by those results.
 
 Native Wayland input, EGL, Steam integration, exclusive fullscreen and HDR are
 not currently supported. The Windows capture overlay is in progress (working

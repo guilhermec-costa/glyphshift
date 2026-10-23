@@ -14,12 +14,14 @@ real-application X11 editor input, and illustrated fill/contour rendering.
 This does not mean every control in the original product vision or every Linux
 application is supported.
 
-The latest renderer validation recorded here passed 12 Debug tests and 14
-Release tests, including GLX/Vulkan graphics smoke with Vulkan validation.
-Focused editor tests passed on both fixtures and offline SuperTux through
-GE-Proton/DXVK. Mesa llvmpipe GLX passed; Mesa Vulkan and the Mesa offscreen
-oracle remain unverified for the environment-specific reasons recorded below.
-These are existing results, not new tests performed by this documentation split.
+The latest full Linux validation, before making the repository public, on
+2026-10-23, passed 16 Debug and 18 Release CTest tests (the Release suite with
+the GLX and Vulkan graphics smokes and Khronos validation), every GPU oracle,
+and the focused XTest drivers on the fixtures, the overlay, the daemon, native
+SuperTux and SuperTux through GE-Proton (see
+[Linux validation before going public](#linux-validation-before-going-public-2026-10-23)).
+Mesa llvmpipe GLX and lavapipe Vulkan passed the full smokes under Xvfb on
+2026-10-18. Windows results are in the [M7 record](#m7-record).
 
 M6 (standalone capture overlay) is complete within its recorded scope:
 capture, window tracking, editor with per-game presets, the background daemon
@@ -4233,6 +4235,50 @@ included) do not start the CI (`paths-ignore`); a change touching any other
 file runs it as before. If the `build` check is ever made required by branch
 protection, a documentation-only pull request would wait on a check that
 never runs.
+
+### Linux validation before going public (2026-10-23)
+
+At the user's request, after the week of Windows work (M7 step 7 parts 4–13,
+detail at depth steps 1–6, the README animation), whose records mostly say
+"not verified: Linux", the whole Linux matrix was rerun on the NVIDIA/i3 setup
+at `d95aea8` before making the repository public.
+
+- Both presets rebuilt from scratch (`--clean-first`; a stale build had misled
+  the tests once on Windows): no warnings.
+- `ctest --preset dev` 16/16; `ctest --preset release` 18/18 with the GLX and
+  Vulkan smokes, the persistent validation layer and `VK_LAYER_VALIDATE_SYNC=1`
+  (137 s).
+- The GLX smoke's oracles on the GL renderer: atlas filter (14 area, 2
+  contour-over-fill, 4 crisp, 3 DoG, 28 silhouette cases), temporal (churn
+  0.378 → 0.000, stale 0.013), automatic exposure (0.003 of cells at half
+  brightness, a cut 0.982 → 0.008), local contrast (clipped fog bands 0.0 →
+  16.3, contrasty bands 66.1 → 66.1, beside the dark bar +2.3 against a limit
+  of 2.5), anchored grid (0.974 → 0.000); overlay, tracking and single
+  instance passed; the tray phase was skipped because polybar runs a real tray
+  manager. The local-contrast numbers differ from the Windows record of step 3
+  (6.1, 46.4, +0.9); run here through `glyphshift-vulkan-preview` with
+  validation they were identical to the GL ones, so the difference does not
+  come from the renderer (the font, Hack here and JetBrains Mono there, or
+  later changes of the oracle; not isolated). The halo measure's margin to its
+  limit is small.
+- With the user's permission, the focused XTest drivers on the Release build,
+  all passed: `editor_apps.py` on `overlay-fixture`, `glx-fixture`,
+  `vulkan-fixture` (validation) and `glx-fixture --presets` (the nine
+  included styles, True color among them); `overlay_daemon.py` (its tray-menu
+  step skipped: real tray manager); `overlay_game.py` on native SuperTux and
+  on Windows SuperTux through GE-Proton in `test_env.py run --offline` (attach
+  by hotkey, 42% of the game's image changed by holding Right against 0% idle,
+  editor, resize followed, detach, game exit, daemon exit 0). No GlyphShift,
+  SuperTux or Wine process was left.
+- Before publishing, the history (93 commits) was searched for credentials
+  (token, key and password patterns: only Dear ImGui's password-field flag),
+  personal paths (none) and large files (the largest are `docs/demo.webp`,
+  3.4 MB, and the gallery overview, 1 MB; 35 MB packed). The author's e-mail
+  is in the commits; at the user's choice it was removed from the PKGBUILD
+  only.
+
+Not verified here: the tray menu's detach on Linux with real input (the real
+tray's icon was seen docked on 2026-10-18), Mesa in this round, and other GPUs.
 
 ### Later — Broader Linux support
 
