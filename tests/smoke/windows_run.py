@@ -392,7 +392,8 @@ def editor_phase():
             text = saved.read_text(encoding='utf-8')
             assert 'enabled=false' in text and 'glyph_strength=0.37\n' in text and \
                 'character_set=binary\n' in text, text
-            assert (directory / 'active').read_text(encoding='utf-8') == 'night\n'
+            # Typed through the real keyboard state: Caps Lock may make it NIGHT.
+            assert (directory / 'active').read_text(encoding='utf-8').lower() == 'night\n'
             win32.key(layer, win32.VK_ESCAPE)
             time.sleep(.3)
             win32.close(window)

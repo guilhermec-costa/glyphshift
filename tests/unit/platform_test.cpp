@@ -1,6 +1,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <fstream>
@@ -113,6 +114,18 @@ int main() {
         check(sleeper > 0, "child started");
         stop_child(sleeper);
         check(ended(sleeper), "stopped child reported as ended");
+        // A child that ignores the stop request is ended after the grace
+        // period.
+        const auto hung = spawn_child({"/bin/sh", "-c", "trap '' TERM; exec /usr/bin/sleep 30"});
+        usleep(200000);
+        const auto before = std::chrono::steady_clock::now();
+        stop_child(hung);
+        wait_child(hung);
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - before)
+                                .count();
+        check(hung > 0 && waited >= child_grace_ms - 200 && waited < child_grace_ms + 3000,
+            "a hung child is ended after the grace period");
         const auto unknown = spawn_child({(path / "no-such-program").string()});
         check(unknown > 0 && ended(unknown), "failed exec ends the child");
         check(spawn_child({}) == -1, "empty command refused");

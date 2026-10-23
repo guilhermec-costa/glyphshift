@@ -202,7 +202,10 @@ int run_daemon(const DaemonOptions& options) {
                     break;
                 }
         MSG message;
-        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+        // A bounded batch, so a stop request is always seen.
+        for (int handled = 0; handled < 64 && !platform::stop_requested() &&
+                              PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE);
+            ++handled) {
             if (hotkey.reminder(message)) {
                 // A second launch without a terminal: its user sees this.
                 std::fprintf(stderr,

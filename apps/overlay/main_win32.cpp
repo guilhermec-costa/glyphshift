@@ -104,8 +104,13 @@ public:
     void run() {
         bool poll = true;
         while (!glyphshift::platform::stop_requested()) {
+            // A bounded batch: a flood of messages or window events (a game
+            // moving the cursor every frame) cannot keep the loop from
+            // rendering or from seeing a stop request.
             MSG message;
-            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            for (int handled = 0; handled < 64 && !glyphshift::platform::stop_requested() &&
+                                  PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE);
+                ++handled) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }

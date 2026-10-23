@@ -5271,6 +5271,41 @@ permission). Both presets built, 12/12 CTest tests each, the format check and
 the smoke's editor phase passed. `overlay_daemon_win32.py` was not run (the
 user's own daemon was running; this change does not touch the daemon).
 
+**Step 7, part 13: Quit can no longer hang (2026-10-23).** Seen on the
+installed build on 2026-10-21: after about 1.5 h attached to ELDEN RING,
+"Quit GlyphShift" did nothing. The daemon had left its loop and waited in
+`wait_child` for its overlay, which used about a full core, still answered
+window messages (`SendMessageTimeout` with `WM_NULL`), and ignored its stop
+event (set directly as well); the daemon had to be ended by hand, its job
+object taking the overlay with it. No crash was logged. A probe attaching an
+overlay to ELDEN RING in the background (no input) for 10 s used 4–5% of a
+core and stopped in 0.14 s, so the hang was not reproduced; the suspected
+cause, a flood of window events while the game moves the cursor keeping the
+unbounded message loop from reaching its stop check, is not confirmed.
+Two changes make Quit and detach reliable whatever the cause:
+
+- `platform::wait_child` ends a child still running `child_grace_ms` (3 s)
+  after the call (Windows: `TerminateProcess`; Linux: `SIGKILL`), so a hung
+  overlay cannot keep the daemon from quitting. The platform tests gained the
+  case on both systems: a child that listens for stop requests but hangs
+  (Windows helper `--ignore-stop`; Linux `sh` ignoring `SIGTERM`, then
+  `exec sleep`) is ended between 2.8 and 6 s after `stop_child`.
+- The overlay's and daemon's message loops handle at most 64 messages per
+  pass and check for a stop request inside it, so no flood can starve
+  rendering or the stop check.
+
+Separately, the smoke's editor phase failed twice because the user's Caps
+Lock was on: the overlay translates keys through the real keyboard state, as
+it must for real input, and saved the posted "night" as `NIGHT`. Windows file
+names ignore case, so only the `active` comparison failed; it is now
+case-insensitive.
+
+Verification: both presets built, 12/12 CTest tests each (`platform-windows`
+with the hung child), format check; the smoke's overlay, tracking and editor
+phases passed on Release; the probe above passed on the new build (4% of a
+core, stopped in 0.17 s). Not verified: the original hang (not reproduced),
+and the Linux platform test (CI).
+
 ## Definition of MVP done
 
 The target workflow is:

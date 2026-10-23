@@ -169,7 +169,10 @@ void wait_child(ProcessId child) noexcept {
         handle = found->second;
         list.handles.erase(found);
     }
-    WaitForSingleObject(handle, INFINITE);
+    if (WaitForSingleObject(handle, child_grace_ms) == WAIT_TIMEOUT) {
+        TerminateProcess(handle, 1);
+        WaitForSingleObject(handle, INFINITE);
+    }
     CloseHandle(handle);
 }
 

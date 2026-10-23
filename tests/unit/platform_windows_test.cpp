@@ -125,6 +125,12 @@ int helper(std::string_view mode, const char* argument) {
             Sleep(20);
         return stop_requested() ? 0 : 3;
     }
+    if (mode == "--ignore-stop") {
+        // Listens, but hangs instead of stopping.
+        catch_stop_requests();
+        Sleep(30000);
+        return 0;
+    }
     if (mode == "--sleep") {
         Sleep(30000);
         return 0;
@@ -246,6 +252,20 @@ int main(int argc, char** argv) {
         GetExitCodeProcess(listener_handle, &code);
         CloseHandle(listener_handle);
         check(code == 0, "a stop request ends the child cleanly");
+        // A child that listens but hangs is ended after the grace period.
+        const auto hung = spawn_child({program, "--ignore-stop"});
+        check(hung > 0 && eventually([&] {
+            return listening(static_cast<DWORD>(hung));
+        }),
+            "hung child listens for stop requests");
+        const auto before = std::chrono::steady_clock::now();
+        stop_child(hung);
+        wait_child(hung);
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - before)
+                                .count();
+        check(waited >= child_grace_ms - 200 && waited < child_grace_ms + 3000,
+            "a hung child is ended after the grace period");
         const auto sleeper = spawn_child({program, "--sleep"});
         check(sleeper > 0, "child started");
         stop_child(sleeper);

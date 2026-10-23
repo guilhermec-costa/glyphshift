@@ -49,8 +49,16 @@ void stop_child(ProcessId child) noexcept {
 }
 
 void wait_child(ProcessId child) noexcept {
-    if (child > 0)
-        waitpid(static_cast<pid_t>(child), nullptr, 0);
+    if (child <= 0)
+        return;
+    const auto pid = static_cast<pid_t>(child);
+    for (int waited = 0; waited < child_grace_ms; waited += 10) {
+        if (waitpid(pid, nullptr, WNOHANG) != 0)
+            return;
+        usleep(10000);
+    }
+    kill(pid, SIGKILL);
+    waitpid(pid, nullptr, 0);
 }
 
 std::vector<ProcessId> ended_children() {

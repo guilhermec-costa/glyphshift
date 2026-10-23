@@ -19,7 +19,11 @@ ProcessId spawn_child(const std::vector<std::string>& argv);
 // Asks a child to stop (Linux: SIGTERM); it is not waited for.
 void stop_child(ProcessId child) noexcept;
 
-// Waits until a child has ended.
+// Waits until a child has ended. A child still running child_grace_ms after
+// the call is ended forcibly (Linux: SIGKILL; Windows: TerminateProcess), so a
+// child that hangs instead of honoring stop_child cannot keep its parent from
+// quitting.
+inline constexpr int child_grace_ms = 3000;
 void wait_child(ProcessId child) noexcept;
 
 // Children that have ended since the last call, without waiting.
