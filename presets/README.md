@@ -10,15 +10,15 @@ dark-paper styles.
 
 | Config | Style | Cell size | Preview |
 | --- | --- | --- | --- |
-| [art-comic.conf](art-comic.conf) | Bold scene-colored inks over a vivid watercolor wash. | 8×12 | [Image](../docs/presets/art-comic.png) |
-| [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 7×11 | [Image](../docs/presets/art-sepia.png) |
-| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 8×12 | [Image](../docs/presets/art-newsprint.png) |
-| [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 8×12 | [Image](../docs/presets/art-chalk.png) |
-| [art-ink-edges.conf](art-ink-edges.conf) | Crisp white letters and line art on black; automatic exposure for dark and bright games. | 8×12 | [Image](../docs/presets/art-ink-edges.png) |
+| [art-comic.conf](art-comic.conf) | Bold scene-colored inks over a vivid watercolor wash. | 6×8 | [Image](../docs/presets/art-comic.png) |
+| [art-sepia.conf](art-sepia.conf) | Sepia pen etching on cream paper with a soft ink bleed. | 6×8 | [Image](../docs/presets/art-sepia.png) |
+| [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 6×8 | [Image](../docs/presets/art-newsprint.png) |
+| [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 6×8 | [Image](../docs/presets/art-chalk.png) |
+| [art-ink-edges.conf](art-ink-edges.conf) | Crisp white letters and line art on black. | 6×8 | [Image](../docs/presets/art-ink-edges.png) |
 | [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | [Image](../docs/presets/art-blueprint.png) |
-| [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 7×11 | [Image](../docs/presets/art-midnight.png) |
-| [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 7×12 | [Image](../docs/presets/art-crt.png) |
-| [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 8×12 | [Image](../docs/presets/art-digital-rain.png) |
+| [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 6×8 | [Image](../docs/presets/art-midnight.png) |
+| [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 6×8 | [Image](../docs/presets/art-crt.png) |
+| [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 6×8 | [Image](../docs/presets/art-digital-rain.png) |
 
 ![Nine styles rendered from the SuperTux frame](../docs/presets/overview.png)
 
@@ -26,10 +26,16 @@ These are GPU previews of the same [captured frame](../docs/illustration-origina
 not live gameplay tests, rendered with **Local contrast** at its default of 0.5
 (set `local_contrast=0` for the earlier look). Ink & Edges is shown on a [darkened version](../docs/presets/dark-scene.png)
 of that frame (brightness, saturation and gamma reduced, plus a vignette), a
-synthetic stand-in for a dark game. Its **Auto exposure** lifts such scenes and
-tones bright ones down, so the same style works on both. Dark-paper styles (Chalk, Blueprint, Midnight, CRT,
-Digital rain) use low exposure or sparse ramps so a bright scene does not fill
-the screen with characters; raise **Exposure** for darker games.
+synthetic stand-in for a dark game.
+
+Every style uses **Auto exposure**, which lifts dark scenes and tones bright
+ones down, small 6×8 cells for detail, and sensitive contours, so the same
+style works on a bright 2D game and a dark 3D one (they were tuned on SuperTux
+and on ELDEN RING). The dark-paper styles (Chalk, Ink & Edges, Blueprint,
+Midnight, CRT, Digital rain) suit dark 3D games best. The light-paper styles
+(Comic, Sepia, Newsprint) are at their best in bright games; in a dark scene
+most cells take ink and the drawing turns dense. For larger, easier-to-read
+characters, raise the cell size in the editor.
 
 ## Choose directly in the overlay
 

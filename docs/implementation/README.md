@@ -345,6 +345,42 @@ Verification: both presets built, 12/12 CTest tests each, the format check,
 and the smoke's overlay, editor and oracle phases passed on Release. Not
 verified: live in the game (the user's), GPU cost, Linux.
 
+**Step 4, the included styles retuned for 2D and 3D (2026-10-22).** The user
+found that only their own tuned copy of Digital rain looked really good on
+ELDEN RING, and asked for included styles that look good in 3D and 2D, show
+detail, and read as ASCII. A contact sheet of the nine styles on two ELDEN
+RING frames and the SuperTux frame showed why: the styles had been tuned on
+one bright SuperTux frame with fixed exposure, so in a dark 3D game the
+dark-paper ones (Chalk, Blueprint, Midnight, CRT, Digital rain) came out
+nearly black and the light-paper ones washed out. The user's copy works by a
+strong exposure (4) with low contrast (0.54), 6×6 cells and more sensitive
+contours (DoG sigma 1.1, threshold 0.05, votes 0.45, edge strength 1,
+threshold 0.35); its fixed exposure would blow out a bright game, and with
+automatic exposure 1 and a base exposure of 1.5 the same copy looked nearly
+the same on ELDEN RING and kept SuperTux readable.
+
+That recipe now applies to all nine: automatic exposure 1, 6×8 cells (close to
+the user's 6×6 detail while letting characters read; Blueprint, outlines
+only, keeps 6×10), the user's contour settings, gamma 0.9 for the dark-paper
+styles with base exposure 1.5 and contrast 0.6 (Ink & Edges 1.2 and 0.8;
+Chalk 1.6 and 0.8 with a ramp of fewer blanks, `"  .,:;-~=+*#"`, and glow
+0.5), and for the light-paper styles base exposure 1.1, contrast 1.4, gamma
+1 (Comic with less scene color in its paper, 0.15, and heavier glyphs; Sepia
+with darker ink, 0.2/0.11/0.05). Blueprint keeps more sensitive contours
+(threshold 0.015, votes 0.15, edge threshold 0.45), since contours are all it
+draws. Each style keeps its palette, characters and polarity. Judged on
+full-size crops of both games over three rounds: Digital rain, Ink & Edges,
+CRT and Midnight read as ASCII in both; Blueprint draws outlines in both;
+Newsprint is strong but bright in the dark game; the light-paper styles
+remain best in bright games (in a dark scene most cells take ink), which the
+gallery now says, pointing dark 3D games to the dark-paper styles.
+
+Gallery and overview re-rendered with the same frames and font (Hack 3.003
+Bold); the table lists the new cell sizes. Verification: both presets built,
+12/12 CTest tests each, the format check, and the smoke's overlay, editor and
+oracle phases passed on Release. Not verified: the styles live in either game
+by the user, and other games.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting
