@@ -15,12 +15,11 @@ dark-paper styles.
 | [art-newsprint.conf](art-newsprint.conf) | Black ink, warm white paper, letter shading and ASCII outline silhouettes. | 6×8 | [Image](../docs/presets/art-newsprint.png) |
 | [art-chalk.conf](art-chalk.conf) | Chalk drawing on a dark green board. | 6×8 | [Image](../docs/presets/art-chalk.png) |
 | [art-ink-edges.conf](art-ink-edges.conf) | Crisp white letters and line art on black. | 6×8 | [Image](../docs/presets/art-ink-edges.png) |
-| [art-blueprint.conf](art-blueprint.conf) | Cyan directional outlines on navy paper, with surface fill disabled. | 6×10 | [Image](../docs/presets/art-blueprint.png) |
 | [art-midnight.conf](art-midnight.conf) | Classic terminal ASCII in saturated scene colors on a near-black sky. | 6×8 | [Image](../docs/presets/art-midnight.png) |
 | [art-crt.conf](art-crt.conf) | Amber CRT phosphor letters with a warm glow. | 6×8 | [Image](../docs/presets/art-crt.png) |
 | [art-digital-rain.conf](art-digital-rain.conf) | Glowing green binary digits on black. | 6×8 | [Image](../docs/presets/art-digital-rain.png) |
 
-![Nine styles rendered from the SuperTux frame](../docs/presets/overview.png)
+![Eight styles rendered from the SuperTux frame](../docs/presets/overview.png)
 
 These are GPU previews of the same [captured frame](../docs/illustration-original.png),
 not live gameplay tests, rendered with **Local contrast** at its default of 0.5
@@ -31,7 +30,7 @@ synthetic stand-in for a dark game.
 Every style uses **Auto exposure**, which lifts dark scenes and tones bright
 ones down, small 6×8 cells for detail, and sensitive contours, so the same
 style works on a bright 2D game and a dark 3D one (they were tuned on SuperTux
-and on ELDEN RING). The dark-paper styles (Chalk, Ink & Edges, Blueprint,
+and on ELDEN RING). The dark-paper styles (Chalk, Ink & Edges,
 Midnight, CRT, Digital rain) suit dark 3D games best. The light-paper styles
 (Comic, Sepia, Newsprint) are at their best in bright games; in a dark scene
 most cells take ink and the drawing turns dense. For larger, easier-to-read
@@ -40,7 +39,7 @@ characters, raise the cell size in the editor.
 ## Choose directly in the overlay
 
 Restart the application through the rebuilt launcher to load the updated shared
-libraries. Press **Insert**, open **Preset**, and choose any of the nine names
+libraries. Press **Insert**, open **Preset**, and choose any of the eight names
 under **Included styles**. The running scene updates immediately; hover a name
 for a short description. Your own saved presets appear under **Saved presets**.
 No file copying or additional installation is required. Press **F10** for the

@@ -381,6 +381,34 @@ Bold); the table lists the new cell sizes. Verification: both presets built,
 oracle phases passed on Release. Not verified: the styles live in either game
 by the user, and other games.
 
+**Step 5, contours back, Blueprint removed (2026-10-22).** Trying the styles
+live, the user saw no contours at all, and found Blueprint very poor; at the
+user's request Blueprint is removed (config, embedding, gallery image and
+tile, the focused editor scripts' style lists, `record_demo.py`, now ending on
+Digital rain; the README's demo caption notes the recording still shows it).
+Measured on the user's frame with fill and shape matching off, Digital rain
+drew contours in 1 of 43,200 cells. Two causes:
+
+- Contours were detected in raw luminance, while a dark game reaches the ramp
+  only through a strong (automatic) exposure, so its outlines stayed below
+  the DoG and lattice thresholds. The contour scale is now the local gain
+  times exposure (automatic included) times contrast, never below 1: outlines
+  are detected in the displayed tone. 1 → 64 cells.
+- The vote share and DoG threshold taken from the user's copy (0.45 and 0.05)
+  were strict for 6×8 cells. A grid on both games (votes 0.45/0.25/0.15 ×
+  threshold 0.05/0.025/0.012, cells with contour ink on ELDEN RING of 43,200
+  and SuperTux of 10,000) and full-size crops chose votes 0.25 and threshold
+  0.025: 3,350 and 424 cells, clean outlines on SuperTux's tree, blocks and
+  ground and added outlines on ELDEN RING, where 0.2/0.015 turned noisy. All
+  eight styles use them.
+
+The presets test now expects eight included styles and no `art-blueprint`.
+Gallery and overview re-rendered (Blueprint's tile left empty). Verification:
+both presets built, 12/12 CTest tests each, format check, and the smoke's
+overlay, editor and oracle phases passed on Release. Not verified: the
+focused editor driver with `--presets` (real input; its style list changed),
+and the styles live.
+
 ### Windows distribution (requested 2026-10-22)
 
 Today only people who build from source can use GlyphShift. The plan, waiting

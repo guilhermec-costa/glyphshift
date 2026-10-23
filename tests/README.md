@@ -177,7 +177,6 @@ cp presets/art-sepia.conf /tmp/glyphshift-style.conf
 cp presets/art-newsprint.conf /tmp/glyphshift-style.conf
 cp presets/art-chalk.conf /tmp/glyphshift-style.conf
 cp presets/art-ink-edges.conf /tmp/glyphshift-style.conf
-cp presets/art-blueprint.conf /tmp/glyphshift-style.conf
 cp presets/art-midnight.conf /tmp/glyphshift-style.conf
 cp presets/art-crt.conf /tmp/glyphshift-style.conf
 cp presets/art-digital-rain.conf /tmp/glyphshift-style.conf

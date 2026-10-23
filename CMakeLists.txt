@@ -74,7 +74,7 @@ endif()
 # Changes to a config trigger reconfiguration; the .conf files remain the source.
 set(BUILTIN_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated/presets")
 file(MAKE_DIRECTORY "${BUILTIN_GENERATED}")
-foreach(style comic sepia newsprint chalk ink-edges blueprint midnight crt digital-rain)
+foreach(style comic sepia newsprint chalk ink-edges midnight crt digital-rain)
     set(preset_source "${CMAKE_CURRENT_SOURCE_DIR}/presets/art-${style}.conf")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${preset_source}")
     file(READ "${preset_source}" PRESET_CONTENT)

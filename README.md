@@ -11,7 +11,8 @@ it, and each game keeps its own style.
 ![SuperTux's title screen, then GlyphShift attached on top of it, switching between the Comic, Newsprint and Blueprint styles](docs/demo.webp)
 
 *Native SuperTux running on its own; the capture overlay is attached to its
-window and switches styles live (Comic, Newsprint, Blueprint). Recorded with
+window and switches styles live (Comic, Newsprint, and Blueprint, a style since
+removed). Recorded with
 `tools/record_demo.py`.*
 
 ## Why it is not another ASCII filter
@@ -28,7 +29,7 @@ text. GlyphShift takes neither route.
 | Attaching | Installed before the game starts. | A hotkey over a game that is already running; another press detaches it. |
 | Characters | A short built-in brightness ramp. | Real glyphs rasterized from any installed TTF/OTF font: ASCII, blocks, Braille or up to 256 Unicode characters of your choice, each kept at its typographic place. |
 | Which character goes where | By brightness. | By shape: each cell's 4×4 light/dark layout is matched against the font's glyphs, and real outlines become `/ \ \| _ -` strokes, so silhouettes survive. |
-| Color | Usually monochrome or the scene's color. | Art direction: scene-colored ink on dark or light paper, a watercolor wash, glow and ink bleed, nine ready styles. |
+| Color | Usually monochrome or the scene's color. | Art direction: scene-colored ink on dark or light paper, a watercolor wash, glow and ink bleed, eight ready styles. |
 | Motion | Glyphs flicker as noise and light change. | Temporal stability keeps a cell's glyph while it still fits; an optional grid anchored to the world travels with a scrolling camera. |
 | Editing | Configuration files or the injected menu. | An editor over the game (Insert), saved per game; F10 compares with the original. |
 
@@ -296,7 +297,7 @@ SuperTux through Proton, attached with the hotkey.
 ## Choose a starting style
 
 Try the [ready-to-use style collection](presets/README.md): Comic, Sepia,
-Newsprint, Chalk, Ink & Edges, Blueprint, Midnight, CRT and Digital rain. Each
+Newsprint, Chalk, Ink & Edges, Midnight, CRT and Digital rain. Each
 one redraws the whole scene in glyphs; the gallery compares them and explains
 how to switch them live without restarting.
 They are available directly under **Insert → Preset → Included styles**. Choose

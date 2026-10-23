@@ -402,6 +402,11 @@ void main() {
         rolled = mix(rolled, min(rolled, fit), smoothstep(1.0, local_contrast_clipped, base));
         detailed = pow(clamp(rolled + (unclipped - base) * detail, 0.0, 1.0), 1.0/ART[0].z);
     }
+    // Contours are detected in the displayed tone: luminance differences
+    // scaled by exposure (automatic included) and contrast, never below
+    // their raw size, so a dark game that exposure brightens draws its
+    // outlines as a bright one does.
+    float contour_scale = gain * max(exposure * ART[0].y, 1.0);
     // Contours vote on a 5x5 lattice spanning the cell and the first pixels of
     // its right/lower neighbors. Each interior point classifies its own 3x3
     // neighborhood; incoherent texture splits its votes and is rejected.
@@ -411,7 +416,7 @@ void main() {
     int needed = 3, keep = 2;
     if ((int(ART[4].z + .5) & 4) != 0) {
         int samples;
-        if (ART[1].y > 0.0) dog_votes(origin, gain, votes, samples);
+        if (ART[1].y > 0.0) dog_votes(origin, contour_scale, votes, samples);
         else samples = 1;
         needed = max(2, int(ceil(ART[5].z * float(samples))));
         keep = max(1, (2*needed + 2) / 3);
@@ -423,7 +428,7 @@ void main() {
             float v[9];
             // Doubling quarter-cell differences keeps edge_threshold in the
             // half-cell units of the original 3x3 cell-scale contour test.
-            for (int k=0;k<9;++k) v[k] = 2.0 * gain * lattice[(y+k/3-1)*5 + x+k%3-1];
+            for (int k=0;k<9;++k) v[k] = 2.0 * contour_scale * lattice[(y+k/3-1)*5 + x+k%3-1];
             int axis = contour(v);
             if (axis >= 0) votes[axis] += 1;
         }

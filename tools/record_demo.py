@@ -31,7 +31,7 @@ parser.add_argument('--fps', type=int, default=12)
 args = parser.parse_args()
 presets = pathlib.Path(__file__).resolve().parents[1] / 'presets'
 # (seconds from the start, style config or None for the original)
-timeline = [(0, None), (3, 'art-comic'), (6.5, 'art-newsprint'), (10, 'art-blueprint')]
+timeline = [(0, None), (3, 'art-comic'), (6.5, 'art-newsprint'), (10, 'art-digital-rain')]
 length = 13.5
 
 x = X11()
